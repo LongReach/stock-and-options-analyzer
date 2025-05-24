@@ -14,4 +14,4 @@ async def wait_for_condition(condition, timeout: float, check_interval: float=0.
         if condition():
             return True
         await asyncio.sleep(check_interval)
-    raise TimeoutError(f"Timeout of {timeout} seconds reached while waiting for condition.")
+    return False

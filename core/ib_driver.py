@@ -1,11 +1,14 @@
 import asyncio
+import math
+
 from ibapi.contract import Contract
 from ibapi.order import *
 from ibapi.common import BarData
 from logging import getLogger, basicConfig
 import threading
 import time
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
+from enum import Enum, auto
 
 from core.ib_wrapper import IBWrapper
 from core.utils import wait_for_condition
@@ -13,6 +16,15 @@ from core.utils import wait_for_condition
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
+
+class BarSize(Enum):
+    ONE_MINUTE = auto()
+    FIVE_MINUTES = auto()
+    ONE_HOUR = auto()
+    FOUR_HOURS = auto()
+    ONE_DAY = auto()
+    ONE_WEEK = auto()
+
 
 class IBDriver:
     """
@@ -30,6 +42,16 @@ class IBDriver:
         self._historical_data_fetch_complete: bool = True
         self._request_id_to_ticker: Dict[int, str] = {}
         self._request_id_to_bar_data: Dict[int, List[BarData]] = {}
+        self._request_id_to_error_info: Dict[int, Optional[Tuple[int, str]]] = {}
+
+        self._bar_size_map: Dict[BarSize: str] = {
+            BarSize.ONE_MINUTE: "1 min",
+            BarSize.FIVE_MINUTES: "5 mins",
+            BarSize.ONE_HOUR: "1 hour",
+            BarSize.FOUR_HOURS: "4 hours",
+            BarSize.ONE_DAY: "1 day",
+            BarSize.ONE_WEEK: "7 days",
+        }
 
         basicConfig()
         self._logger = getLogger(__file__)
@@ -42,6 +64,8 @@ class IBDriver:
 
         self._logger.info("Creating IBWrapper, attempting connection...")
         self._app = IBWrapper()
+        # Set this one before connecting
+        self._app.set_error_cb(self._error_cb)
 
         port = SIM_PORT if self._sim_account else LIVE_PORT
         self._app.connect("127.0.0.1", port, self._client_id)
@@ -72,30 +96,54 @@ class IBDriver:
         self._app.set_historical_data_cb(self._historical_data_cb)
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
 
-    async def get_historical_data(self, ticker: str, num_bars: int):
+    async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY) -> List[BarData]:
         """Requests historical data from TWS, and waits for it to arrive."""
         async with self._historical_data_lock:
             req_id = self._app.next_id()
             self._request_id_to_ticker[req_id] = ticker
             self._request_id_to_bar_data[req_id] = []
+            self._request_id_to_error_info[req_id] = None
 
             self._historical_data_fetch_complete = False
-            self._request_historical_data(req_id, num_bars)
+            self._request_historical_data(req_id, num_bars, bar_size)
 
             success = await wait_for_condition(lambda: self._historical_data_fetch_complete, timeout=5.0)
             if success:
                 print("All done getting historical data.")
+                ret_list = self._request_id_to_bar_data[req_id]
+                for bar in ret_list:
+                    print(f"Bar for request {req_id} is {bar}")
+                return ret_list
             else:
-                print("Timed out getting historical data.")
+                error_tup = self._request_id_to_error_info.get(req_id)
+                if error_tup:
+                    print(f"Timed out getting historical data. Error code is {error_tup[0]}, error string is {error_tup[1]}")
+                else:
+                    print("Timed out getting historical data.")
+                return []
 
-    def _request_historical_data(self, req_id: int, num_bars: int):
+    def _request_historical_data(self, req_id: int, num_bars: int, bar_size: BarSize):
         """Sends request for historical data to TWS."""
         ticker = self._request_id_to_ticker[req_id]
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
-        duration_str = str(num_bars) + ' D'
-        bar_size_str = "1 day"
+        bar_size_str = self._bar_size_map[bar_size]
+        if bar_size == BarSize.ONE_MINUTE:
+            duration_str = str(num_bars * 60) + ' S'
+        elif bar_size == BarSize.FIVE_MINUTES:
+            duration_str = str(num_bars * 60 * 5) + ' S'
+        elif bar_size == BarSize.ONE_HOUR:
+            days = int(math.ceil(num_bars / 8))
+            duration_str = str(days) + ' D'
+        elif bar_size == BarSize.FOUR_HOURS:
+            duration_str = str(num_bars * 60 * 60 * 4) + ' S'
+        elif bar_size == BarSize.ONE_DAY:
+            duration_str = str(num_bars) + ' D'
+        elif bar_size == BarSize.ONE_WEEK:
+            duration_str = str(num_bars) + ' W'
+        else:
+            duration_str = str(num_bars) + ' D'
 
-        self._logger.info(f"Sending historical data request for: {ticker}, id={req_id}")
+        self._logger.info(f"Sending historical data request for: {ticker}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
         # Request Historical Data
         #     reqId: ID of request
         #     contract: Contract object
@@ -118,7 +166,7 @@ class IBDriver:
         :param req_id: --
         :param in_bar: --
         """
-        print(f"Got bar of historical data for {req_id}: {in_bar}")
+        # print(f"Got bar of historical data for {req_id}: {in_bar}")
         self._request_id_to_bar_data[req_id].append(in_bar)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
@@ -130,6 +178,22 @@ class IBDriver:
         """
         print(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
         self._historical_data_fetch_complete = True
+
+    def _error_cb(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
+        # errors to ignore
+        ignore_errors = {202}
+        # errors to downgrade from warning to info (less noise in output)
+        info_errors = {2103, 2104, 2106, 2158}
+        if error_code in ignore_errors:
+            # canceled order, we can ignore
+            pass
+        elif error_code in info_errors:
+            err_out = "Error (ignorable): code is " + str(error_code) + ", string is " + error_string
+            self._logger.info(err_out)
+        else:
+            err_out = "Error: code is " + str(error_code) + ", string is " + error_string
+            self._logger.warning(err_out)
+            self._request_id_to_error_info[req_id] = (error_code, error_string)
 
     def _make_contract(self, ticker: str, primary_exchange=None):
         the_contract = Contract()

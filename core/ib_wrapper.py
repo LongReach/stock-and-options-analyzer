@@ -5,7 +5,7 @@ from ibapi.contract import ContractDetails
 from ibapi.contract import Contract
 from datetime import datetime
 from logging import getLogger
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Any
 
 # This class handles callbacks that come in from TWS, as a response to requests sent to TWS. It overrides several
 # functions that are part of EWrapper for this purpose
@@ -20,6 +20,7 @@ class IBWrapper(EWrapper, EClient):
         self.order_id: Optional[OrderId] = None
         self.historical_data_cb: Optional[Callable[[int, BarData], None]] = None
         self.historical_data_end_cb: Optional[Callable[[int, str, str], None]] = None
+        self.error_cb: Optional[Callable[[int, int, str, Any], None]] = None
         self._logger = getLogger(__file__)
 
     def is_connected(self):
@@ -33,6 +34,10 @@ class IBWrapper(EWrapper, EClient):
     def set_historical_data_end_response_cb(self, cb: Callable[[int, str, str], None]):
         """Sets callback to receive message about end of incoming historical data"""
         self.historical_data_end_cb = cb
+
+    def set_error_cb(self, cb: Callable[[int, int, str, Any], None]):
+        """Sets callback to receive message about error"""
+        self.error_cb = cb
 
     def next_id(self):
         """Returns next order ID, advancing the counter."""
@@ -89,19 +94,7 @@ class IBWrapper(EWrapper, EClient):
         super().historicalDataEnd(req_id, start, end)
         self.historical_data_end_cb(req_id, start, end)
 
-    def error(self, req_id, error_code: int, error_string: str, advanced_order_reject_json=""):
+    def error(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
         """Called when there's an error with a request."""
-        # errors to ignore
-        ignore_errors = {202}
-        # errors to downgrade from warning to info (less noise in output)
-        info_errors = {2103, 2104, 2106, 2158}
-        if error_code in ignore_errors:
-            # canceled order, we can ignore
-            pass
-        elif error_code in info_errors:
-            err_out = "Error (ignorable): code is " + str(error_code) + ", string is " + error_string
-            self._logger.info(err_out)
-        else:
-            err_out = "Error: code is " + str(error_code) + ", string is " + error_string
-            self._logger.warning(err_out)
-
+        super().error(req_id, error_code, error_string, advanced_order_reject_json)
+        self.error_cb(req_id, error_code, error_string, advanced_order_reject_json)
