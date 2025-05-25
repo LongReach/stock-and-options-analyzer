@@ -15,6 +15,7 @@ async def main():
 
         await ib_driver.get_historical_data("SPY", 10)
         await ib_driver.get_historical_data("AAPL", 32, bar_size=BarSize.ONE_HOUR)
+        await ib_driver.get_historical_data("DIA", 32, bar_size=BarSize.FOUR_HOURS)
     except Exception as ex:
         print(f"Exception: {ex}")
 

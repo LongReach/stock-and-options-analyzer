@@ -4,6 +4,8 @@ import datetime
 import time
 import threading
 
+"""A sample program provided by Interactive Brokers, modified slightly be me."""
+
 # 4001: for Gateway live trading
 # 4002: for Gateway paper trading
 port = 4002

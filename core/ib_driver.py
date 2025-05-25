@@ -9,15 +9,18 @@ import threading
 import time
 from typing import Optional, Dict, List, Tuple
 from enum import Enum, auto
+from datetime import datetime
 
 from core.ib_wrapper import IBWrapper
-from core.utils import wait_for_condition
+from core.utils import wait_for_condition, get_datetime
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
 
 class BarSize(Enum):
+    """Corresponds to width of a candle on a stock chart"""
+
     ONE_MINUTE = auto()
     FIVE_MINUTES = auto()
     ONE_HOUR = auto()
@@ -25,11 +28,69 @@ class BarSize(Enum):
     ONE_DAY = auto()
     ONE_WEEK = auto()
 
+class BarDataRequest:
+
+    """For tracking an in-progress bar data request and capturing data returned so far"""
+
+    def __init__(self, ticker: str):
+        self.ticker: str = ticker
+        # Bar data, oldest to newest
+        self.bar_data: List[BarData] = []
+        # One timestamp for each entry in bar_data
+        self.timestamps: List[datetime] = []
+        # Error triggered by request, if any
+        self.last_error_code: int = -1
+        self.last_error_string: str = ""
+        # False while data fetch still in progress
+        self.data_fetch_complete = True
+
+    def has_error(self):
+        """Returns True if request triggered an error"""
+        return self.last_error_code != -1
+
+    def add_or_update_bar(self, bar_data: BarData, allow_update: bool = False):
+        """
+        Adds a new bar of data to that received so far. We don't necessarily expect bars to arrive
+        in sequential order, so we must take timestamps into account to keep them in order. Also,
+        a bar's data might replace an existing bar, i.e. if the bar is actively trading right now
+        and we're receiving updates on it.
+
+        :param bar_data: --
+        :param allow_update: TBD
+        """
+        bar_dt = get_datetime(bar_data.date)
+
+        def _replace_bar_data(existing: BarData, new: BarData):
+            existing.low = new.low
+            existing.high = new.high
+            existing.open = new.open
+            existing.volume = new.volume
+
+        # Go backwards through the list, insert received bar after first encountered existing bar
+        # that it's newer than.
+        insert_idx = 0
+        for idx in range(len(self.bar_data) - 1, -1, -1):
+            compare_bar = self.bar_data[idx]
+            compare_dt = self.timestamps[idx]
+            if compare_dt < bar_dt:
+                # Want to insert AFTER this index
+                insert_idx = idx + 1
+                break
+            if compare_dt == bar_dt:
+                # Simply replace data
+                _replace_bar_data(compare_bar, bar_data)
+                return
+
+        self.bar_data.insert(insert_idx, bar_data)
+        self.timestamps.insert(insert_idx, bar_dt)
 
 class IBDriver:
     """
     This class communicates with IBWrapper, which interfaces directly with TWS. IBDriver relays commands to
     IBWrapper, and receives responses via callbacks.
+
+    This is an async interface, meant to abstract away the threaded-ness of IBWrapper. Note how the function
+    get_historical_data() waits for all data to arrive before returning a result.
     """
 
     def __init__(self, sim_account: bool, client_id: int = 0):
@@ -38,11 +99,11 @@ class IBDriver:
         self._sim_account = sim_account
         self._client_id = client_id
 
-        self._historical_data_lock = asyncio.Lock()
-        self._historical_data_fetch_complete: bool = True
-        self._request_id_to_ticker: Dict[int, str] = {}
-        self._request_id_to_bar_data: Dict[int, List[BarData]] = {}
-        self._request_id_to_error_info: Dict[int, Optional[Tuple[int, str]]] = {}
+        # Maps request ID to BarDataRequest, which receives arriving data
+        self._request_objects: Dict[int, BarDataRequest] = {}
+
+        # For synchronizing changes to self._request_objects
+        self._lock = asyncio.Lock()
 
         self._bar_size_map: Dict[BarSize: str] = {
             BarSize.ONE_MINUTE: "1 min",
@@ -53,7 +114,6 @@ class IBDriver:
             BarSize.ONE_WEEK: "7 days",
         }
 
-        basicConfig()
         self._logger = getLogger(__file__)
 
     def connect(self):
@@ -98,33 +158,35 @@ class IBDriver:
 
     async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY) -> List[BarData]:
         """Requests historical data from TWS, and waits for it to arrive."""
-        async with self._historical_data_lock:
+        async with self._lock:
             req_id = self._app.next_id()
-            self._request_id_to_ticker[req_id] = ticker
-            self._request_id_to_bar_data[req_id] = []
-            self._request_id_to_error_info[req_id] = None
+            req_obj = self._request_objects[req_id] = BarDataRequest(ticker)
 
-            self._historical_data_fetch_complete = False
-            self._request_historical_data(req_id, num_bars, bar_size)
+        req_obj.data_fetch_complete = False
+        self._request_historical_data(req_id, num_bars, bar_size)
 
-            success = await wait_for_condition(lambda: self._historical_data_fetch_complete, timeout=5.0)
-            if success:
-                print("All done getting historical data.")
-                ret_list = self._request_id_to_bar_data[req_id]
-                for bar in ret_list:
-                    print(f"Bar for request {req_id} is {bar}")
-                return ret_list
+        success = await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
+        if success:
+            print("All done getting historical data.")
+            ret_list = req_obj.bar_data
+            for bar in ret_list:
+                #print(f"Bar for request {req_id} is {bar}")
+                print("{" + f'"date": "{bar.date}", "open": "{bar.open}", "close": "{bar.close}", "low": "{bar.low}", "high": "{bar.high}", "volume": "{bar.volume}"' + "}")
+        else:
+            if req_obj.has_error():
+                print(f"Timed out getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}")
             else:
-                error_tup = self._request_id_to_error_info.get(req_id)
-                if error_tup:
-                    print(f"Timed out getting historical data. Error code is {error_tup[0]}, error string is {error_tup[1]}")
-                else:
-                    print("Timed out getting historical data.")
-                return []
+                print("Timed out getting historical data.")
+            ret_list = []
+
+        async with self._lock:
+            self._request_objects.pop(req_id, None)
+
+        return ret_list
 
     def _request_historical_data(self, req_id: int, num_bars: int, bar_size: BarSize):
         """Sends request for historical data to TWS."""
-        ticker = self._request_id_to_ticker[req_id]
+        ticker = self._request_objects[req_id].ticker
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
         bar_size_str = self._bar_size_map[bar_size]
         if bar_size == BarSize.ONE_MINUTE:
@@ -135,7 +197,8 @@ class IBDriver:
             days = int(math.ceil(num_bars / 8))
             duration_str = str(days) + ' D'
         elif bar_size == BarSize.FOUR_HOURS:
-            duration_str = str(num_bars * 60 * 60 * 4) + ' S'
+            days = int(math.ceil(num_bars / 2))
+            duration_str = str(days) + ' D'
         elif bar_size == BarSize.ONE_DAY:
             duration_str = str(num_bars) + ' D'
         elif bar_size == BarSize.ONE_WEEK:
@@ -155,31 +218,45 @@ class IBDriver:
         #     formatDate: 1 for human-readable string, 2 for system format
         #     keepUpToDate: True for continuous updates, False otherwise
         #     chartOptions: Internal use only, just send []
-        self._app.reqHistoricalData(req_id, new_contract, '', duration_str, bar_size_str, 'TRADES', 1, 2, False, [])
+        self._app.reqHistoricalData(req_id, new_contract, '', duration_str, bar_size_str, 'TRADES', 1, 1, False, [])
         self._logger.info(f"Completed request {req_id}.")
 
-    def _historical_data_cb(self, req_id: int, in_bar: BarData):
+    def _historical_data_cb(self, req_id: int, in_bar: BarData, real_time: bool):
         """
         Receives a single bar of historical data. This function is called multiple times, when multiple bars of data
         are requested.
 
-        :param req_id: --
+        :param req_id: applicable request
         :param in_bar: --
+        :param real_time: True if this is a real-time update, for current bar
         """
         # print(f"Got bar of historical data for {req_id}: {in_bar}")
-        self._request_id_to_bar_data[req_id].append(in_bar)
+        req_obj = self._request_objects.get(req_id)
+        if req_obj:
+            req_obj.add_or_update_bar(in_bar, allow_update = real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
         """
         Called when all historical data has been sent, in response to a particular request.
-        :param req_id: --
+        :param req_id: applicable request
         :param start: --
         :param end: --
         """
         print(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
-        self._historical_data_fetch_complete = True
+        req_obj = self._request_objects.get(req_id)
+        if req_obj:
+            req_obj.data_fetch_complete = True
 
     def _error_cb(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
+        """
+        Called when there's an error.
+
+        :param req_id: applicable request
+        :param error_code: integer code
+        :param error_string: error description
+        :param advanced_order_reject_json: ??
+        :return:
+        """
         # errors to ignore
         ignore_errors = {202}
         # errors to downgrade from warning to info (less noise in output)
@@ -193,9 +270,13 @@ class IBDriver:
         else:
             err_out = "Error: code is " + str(error_code) + ", string is " + error_string
             self._logger.warning(err_out)
-            self._request_id_to_error_info[req_id] = (error_code, error_string)
+            req_obj = self._request_objects.get(req_id)
+            if req_obj:
+                req_obj.last_error_code = error_code
+                req_obj.last_error_string = error_string
 
     def _make_contract(self, ticker: str, primary_exchange=None):
+        """Makes and returns an IB Contract"""
         the_contract = Contract()
         the_contract.symbol = ticker
         the_contract.secType = 'STK'
