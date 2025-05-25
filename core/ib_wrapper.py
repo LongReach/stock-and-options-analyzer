@@ -7,6 +7,7 @@ from datetime import datetime
 from logging import getLogger
 from typing import Optional, List, Callable, Any
 
+
 class IBWrapper(EWrapper, EClient):
     """
     This class, along with IBDriver, is used to communicate with TWS. It handles responses to commands and
