@@ -7,16 +7,17 @@ from ibapi.common import BarData
 from logging import getLogger, basicConfig
 import threading
 import time
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Union
 from enum import Enum, auto
 from datetime import datetime
 
 from core.ib_wrapper import IBWrapper
-from core.utils import wait_for_condition, get_datetime
+from core.utils import wait_for_condition, get_datetime, get_datetime_as_str
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
+
 
 class BarSize(Enum):
     """Corresponds to width of a candle on a stock chart"""
@@ -28,8 +29,8 @@ class BarSize(Enum):
     ONE_DAY = auto()
     ONE_WEEK = auto()
 
-class BarDataRequest:
 
+class BarDataRequest:
     """For tracking an in-progress bar data request and capturing data returned so far"""
 
     def __init__(self, ticker: str):
@@ -83,6 +84,7 @@ class BarDataRequest:
 
         self.bar_data.insert(insert_idx, bar_data)
         self.timestamps.insert(insert_idx, bar_dt)
+
 
 class IBDriver:
     """
@@ -156,35 +158,52 @@ class IBDriver:
         self._app.set_historical_data_cb(self._historical_data_cb)
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
 
-    async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY) -> List[BarData]:
-        """Requests historical data from TWS, and waits for it to arrive."""
+    async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY,
+                                  end_date: Optional[Union[datetime, str]] = None) -> List[Tuple[BarData, datetime]]:
+        """
+        Requests historical data from TWS, and waits for it to arrive.
+
+        :param ticker: stock ticker, e.g. AAPL
+        :param num_bars: how many bars of data to collect
+        :param bar_size: daily, hourly, weekly, etc.
+        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
+        :return: list of (IB Broker BarData, datetime (start of bar))
+        """
         async with self._lock:
             req_id = self._app.next_id()
             req_obj = self._request_objects[req_id] = BarDataRequest(ticker)
 
+        self._logger.info(f"get_historical_data(), ticker={ticker}, num_bars={num_bars}, bar_size={bar_size.name}")
         req_obj.data_fetch_complete = False
-        self._request_historical_data(req_id, num_bars, bar_size)
+        if end_date is not None:
+            end_date = get_datetime_as_str(end_date) if isinstance(end_date, datetime) else end_date
+        else:
+            end_date = ''
+        self._request_historical_data(req_id, num_bars, bar_size, end_date)
 
         success = await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
         if success:
-            print("All done getting historical data.")
-            ret_list = req_obj.bar_data
-            for bar in ret_list:
-                #print(f"Bar for request {req_id} is {bar}")
-                print("{" + f'"date": "{bar.date}", "open": "{bar.open}", "close": "{bar.close}", "low": "{bar.low}", "high": "{bar.high}", "volume": "{bar.volume}"' + "}")
+            self._logger.info("get_historical_data() finished")
+            ret_bars = req_obj.bar_data
+            ret_dts = req_obj.timestamps
+            # for bar in ret_bars:
+            # print(f"Bar for request {req_id} is {bar}")
+            # print("{" + f'"date": "{bar.date}", "open": "{bar.open}", "close": "{bar.close}", "low": "{bar.low}", "high": "{bar.high}", "volume": "{bar.volume}"' + "}")
         else:
             if req_obj.has_error():
-                print(f"Timed out getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}")
+                self._logger.error(
+                    f"Timed out getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}")
             else:
-                print("Timed out getting historical data.")
-            ret_list = []
+                self._logger.error("Timed out getting historical data.")
+            ret_bars = []
+            ret_dts = []
 
         async with self._lock:
             self._request_objects.pop(req_id, None)
 
-        return ret_list
+        return list(zip(ret_bars, ret_dts))
 
-    def _request_historical_data(self, req_id: int, num_bars: int, bar_size: BarSize):
+    def _request_historical_data(self, req_id: int, num_bars: int, bar_size: BarSize, end_date_time: str):
         """Sends request for historical data to TWS."""
         ticker = self._request_objects[req_id].ticker
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
@@ -206,7 +225,8 @@ class IBDriver:
         else:
             duration_str = str(num_bars) + ' D'
 
-        self._logger.info(f"Sending historical data request for: {ticker}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
+        self._logger.info(
+            f"Sending historical data request for: {ticker}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
         # Request Historical Data
         #     reqId: ID of request
         #     contract: Contract object
@@ -218,7 +238,8 @@ class IBDriver:
         #     formatDate: 1 for human-readable string, 2 for system format
         #     keepUpToDate: True for continuous updates, False otherwise
         #     chartOptions: Internal use only, just send []
-        self._app.reqHistoricalData(req_id, new_contract, '', duration_str, bar_size_str, 'TRADES', 1, 1, False, [])
+        self._app.reqHistoricalData(req_id, new_contract, end_date_time, duration_str, bar_size_str, 'TRADES', 1, 1,
+                                    False, [])
         self._logger.info(f"Completed request {req_id}.")
 
     def _historical_data_cb(self, req_id: int, in_bar: BarData, real_time: bool):
@@ -230,10 +251,9 @@ class IBDriver:
         :param in_bar: --
         :param real_time: True if this is a real-time update, for current bar
         """
-        # print(f"Got bar of historical data for {req_id}: {in_bar}")
         req_obj = self._request_objects.get(req_id)
         if req_obj:
-            req_obj.add_or_update_bar(in_bar, allow_update = real_time)
+            req_obj.add_or_update_bar(in_bar, allow_update=real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
         """
@@ -242,7 +262,7 @@ class IBDriver:
         :param start: --
         :param end: --
         """
-        print(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
+        self._logger.info(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
         req_obj = self._request_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
