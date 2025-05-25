@@ -1,5 +1,17 @@
 import asyncio
 from datetime import datetime, timezone
+from enum import Enum, auto
+
+class BarSize(Enum):
+    """Corresponds to width of a candle on a stock chart"""
+
+    ONE_MINUTE = auto()
+    FIVE_MINUTES = auto()
+    ONE_HOUR = auto()
+    FOUR_HOURS = auto()
+    ONE_DAY = auto()
+    ONE_WEEK = auto()
+
 
 async def wait_for_condition(condition, timeout: float, check_interval: float=0.1):
     """
