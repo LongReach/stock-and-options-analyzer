@@ -7,18 +7,16 @@ from datetime import datetime
 from logging import getLogger
 from typing import Optional, List, Callable, Any
 
-# This class handles callbacks that come in from TWS, as a response to requests sent to TWS. It overrides several
-# functions that are part of EWrapper for this purpose
 class IBWrapper(EWrapper, EClient):
     """
     This class, along with IBDriver, is used to communicate with TWS. It handles responses to commands and
-    requests send to TWS.
+    requests send to TWS. It overrides several methods that are part of EWrapper for this purpose.
     """
 
     def __init__(self):
         EClient.__init__(self, self)
         self.order_id: Optional[OrderId] = None
-        self.historical_data_cb: Optional[Callable[[int, BarData], None]] = None
+        self.historical_data_cb: Optional[Callable[[int, BarData, bool], None]] = None
         self.historical_data_end_cb: Optional[Callable[[int, str, str], None]] = None
         self.error_cb: Optional[Callable[[int, int, str, Any], None]] = None
         self._logger = getLogger(__file__)
@@ -27,7 +25,7 @@ class IBWrapper(EWrapper, EClient):
         """Returns True if a connection with TWS has been achieved"""
         return self.order_id is not None
 
-    def set_historical_data_cb(self, cb: Callable[[int, BarData], None]):
+    def set_historical_data_cb(self, cb: Callable[[int, BarData, bool], None]):
         """Sets callback to receive incoming historical data"""
         self.historical_data_cb = cb
 
@@ -67,7 +65,7 @@ class IBWrapper(EWrapper, EClient):
         :param bar: info about bar of data
         """
         super().historicalData(req_id, bar)
-        self.historical_data_cb(req_id, bar)
+        self.historical_data_cb(req_id, bar, False)
 
     def historicalDataUpdate(self, req_id: int, bar: BarData):
         """
@@ -81,7 +79,7 @@ class IBWrapper(EWrapper, EClient):
         :param bar: info about bar of data
         """
         super().historicalDataUpdate(req_id, bar)
-        self.historical_data_cb(req_id, bar)
+        self.historical_data_cb(req_id, bar, True)
 
     def historicalDataEnd(self, req_id: int, start: str, end: str):
         """
@@ -95,6 +93,6 @@ class IBWrapper(EWrapper, EClient):
         self.historical_data_end_cb(req_id, start, end)
 
     def error(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
-        """Called when there's an error with a request."""
+        """Called by TWS when there's an error with a request."""
         super().error(req_id, error_code, error_string, advanced_order_reject_json)
         self.error_cb(req_id, error_code, error_string, advanced_order_reject_json)
