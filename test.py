@@ -1,18 +1,16 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from ibapi.common import BarData
 from datetime import datetime
 
 from core.ib_driver import IBDriver, BarSize
 
 
-def print_historical_data(bars: List[Tuple[BarData, datetime]]):
+def print_historical_data(bars: List[Tuple[Dict, datetime]]):
     for bar in bars:
-        bar_dict = {"date": bar[0].date, "open": bar[0].open, "close": bar[0].close, "low": bar[0].low,
-                    "high": bar[0].high, "volume": float(bar[0].volume)}
-        print(f"{bar_dict}")
+        print(f"{bar[0]}")
     print()
 
 async def main():

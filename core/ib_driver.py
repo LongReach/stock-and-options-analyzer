@@ -159,15 +159,16 @@ class IBDriver:
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
 
     async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY,
-                                  end_date: Optional[Union[datetime, str]] = None) -> List[Tuple[BarData, datetime]]:
+                                  end_date: Optional[Union[datetime, str]] = None) -> List[Tuple[Dict, datetime]]:
         """
-        Requests historical data from TWS, and waits for it to arrive.
+        Requests historical data from TWS, and waits for it to arrive before returning results. Each dict of returned bar
+        data includes fields: "date", "open", "close", "low", "high", "volume".
 
         :param ticker: stock ticker, e.g. AAPL
         :param num_bars: how many bars of data to collect
         :param bar_size: daily, hourly, weekly, etc.
         :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
-        :return: list of (IB Broker BarData, datetime (start of bar))
+        :return: list of (IB Broker BarData as dict, datetime (start of bar))
         """
         async with self._lock:
             req_id = self._app.next_id()
@@ -184,11 +185,9 @@ class IBDriver:
         success = await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
         if success:
             self._logger.info("get_historical_data() finished")
-            ret_bars = req_obj.bar_data
+            ret_bars = [{"date": bar.date, "open": bar.open, "close": bar.close, "low": bar.low, "high": bar.high,
+                         "volume": float(bar.volume)} for bar in req_obj.bar_data]
             ret_dts = req_obj.timestamps
-            # for bar in ret_bars:
-            # print(f"Bar for request {req_id} is {bar}")
-            # print("{" + f'"date": "{bar.date}", "open": "{bar.open}", "close": "{bar.close}", "low": "{bar.low}", "high": "{bar.high}", "volume": "{bar.volume}"' + "}")
         else:
             if req_obj.has_error():
                 self._logger.error(
