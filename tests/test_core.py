@@ -3,33 +3,11 @@ from datetime import datetime
 import pytest
 from typing import List, Dict
 
-from core.utils import get_datetime, get_datetime_as_str
+from core.utils import get_datetime, get_datetime_as_str, BarSize
 from core.ib_driver import BarDataRequest
+from core.stock_data import StockData
 
-
-def test_datetime_conversion():
-    """Tests that timestamps can be converted back and forth between IB format and datetime"""
-
-    ib_timestamp_1 = "20250520 13:00:00 US/Eastern"
-    ib_timestamp_2 = "20250523"
-
-    dt_1 = get_datetime(ib_timestamp_1)
-    assert ib_timestamp_1 == get_datetime_as_str(dt_1)
-
-    dt_2 = get_datetime(ib_timestamp_2)
-    assert "20250523 09:30:00 US/Eastern" == get_datetime_as_str(dt_2)
-
-    bad_ib_timestamp = "2025523"
-    with pytest.raises(TypeError):
-        get_datetime(bad_ib_timestamp)
-
-    bad_ib_timestamp = "20250537"
-    with pytest.raises(TypeError) as ex:
-        get_datetime(bad_ib_timestamp)
-    assert "TypeError('Bad day value of 37 in IB date 20250537')" in str(ex)
-
-def test_bar_request_class():
-
+def make_bar_request():
     # Bar data not entirely in proper order, with two duplicate entries (20250513)
     bar_info_list: List[Dict] = [
         {"date": "20250512", "open": "581.49", "close": "582.99", "low": "577.04", "high": "583.0", "volume": "47256818"},
@@ -56,6 +34,34 @@ def test_bar_request_class():
         bar_data.low = bar_info["low"]
         bar_data.volume = bar_info["volume"]
         bar_data_request.add_or_update_bar(bar_data)
+    return bar_data_request
+
+
+def test_datetime_conversion():
+    """Tests that timestamps can be converted back and forth between IB format and datetime"""
+
+    ib_timestamp_1 = "20250520 13:00:00 US/Eastern"
+    ib_timestamp_2 = "20250523"
+
+    dt_1 = get_datetime(ib_timestamp_1)
+    assert ib_timestamp_1 == get_datetime_as_str(dt_1)
+
+    dt_2 = get_datetime(ib_timestamp_2)
+    assert "20250523 09:30:00 US/Eastern" == get_datetime_as_str(dt_2)
+
+    bad_ib_timestamp = "2025523"
+    with pytest.raises(TypeError):
+        get_datetime(bad_ib_timestamp)
+
+    bad_ib_timestamp = "20250537"
+    with pytest.raises(TypeError) as ex:
+        get_datetime(bad_ib_timestamp)
+    assert "TypeError('Bad day value of 37 in IB date 20250537')" in str(ex)
+
+def test_bar_request_class():
+    """Tests that data can be added in arbitrary order to BarDataRequest, which will keep it ordered by datetime"""
+
+    bar_data_request = make_bar_request()
 
     # There should be 10 entries, not 12
     assert len(bar_data_request.bar_data) == 10
@@ -68,3 +74,17 @@ def test_bar_request_class():
 
     # Make sure second entry has expected high
     assert bar_data_request.bar_data[1].high == "589.08"
+
+def test_stock_data():
+    """Tests that stock data can be loaded into a pandas dateframe"""
+    bar_data_request = make_bar_request()
+
+    stock_data = StockData("SPY", BarSize.ONE_DAY)
+    bar_data_dicts = bar_data_request.get_bar_data_as_dicts()
+    for bar_data in bar_data_dicts:
+        stock_data.add_data(bar_data, get_datetime(bar_data["date"]))
+
+    df = stock_data.get_data_frame()
+
+    assert df.loc["05/16/2025"]["low"] == 589.28
+    assert df.loc["05/13/2025"]["high"] == 589.08

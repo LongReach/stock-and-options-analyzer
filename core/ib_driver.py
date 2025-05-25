@@ -12,22 +12,11 @@ from enum import Enum, auto
 from datetime import datetime
 
 from core.ib_wrapper import IBWrapper
-from core.utils import wait_for_condition, get_datetime, get_datetime_as_str
+from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
-
-
-class BarSize(Enum):
-    """Corresponds to width of a candle on a stock chart"""
-
-    ONE_MINUTE = auto()
-    FIVE_MINUTES = auto()
-    ONE_HOUR = auto()
-    FOUR_HOURS = auto()
-    ONE_DAY = auto()
-    ONE_WEEK = auto()
 
 
 class BarDataRequest:
@@ -84,6 +73,11 @@ class BarDataRequest:
 
         self.bar_data.insert(insert_idx, bar_data)
         self.timestamps.insert(insert_idx, bar_dt)
+
+    def get_bar_data_as_dicts(self):
+        ret_bars = [{"date": bar.date, "open": bar.open, "close": bar.close, "low": bar.low, "high": bar.high,
+                     "volume": float(bar.volume)} for bar in self.bar_data]
+        return ret_bars
 
 
 class IBDriver:
@@ -185,8 +179,7 @@ class IBDriver:
         success = await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
         if success:
             self._logger.info("get_historical_data() finished")
-            ret_bars = [{"date": bar.date, "open": bar.open, "close": bar.close, "low": bar.low, "high": bar.high,
-                         "volume": float(bar.volume)} for bar in req_obj.bar_data]
+            ret_bars = req_obj.get_bar_data_as_dicts()
             ret_dts = req_obj.timestamps
         else:
             if req_obj.has_error():
