@@ -1,4 +1,5 @@
 import asyncio
+from typing import Union
 from datetime import datetime, timezone
 from enum import Enum, auto
 
@@ -107,8 +108,10 @@ def get_datetime(ib_date: str) -> datetime:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt
 
-def get_datetime_as_str(dt: datetime) -> str:
+def get_datetime_as_str(dt: Union[datetime, str]) -> str:
     """
     Given a datetimte, return it as an IB-style datetime string, e.g. "20250523 09:30:00 US/Eastern"
     """
+    if isinstance(dt, str):
+        dt = get_datetime(dt)
     return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"

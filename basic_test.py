@@ -16,7 +16,6 @@ def print_historical_data(bars: List[Tuple[Dict, datetime]]):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename='test.log', level=INFO)
-    logger.info("Logging should work")
     ib_driver = IBDriver(sim_account=True, client_id=12)
     try:
         ib_driver.connect()
