@@ -9,7 +9,7 @@ import threading
 import time
 from typing import Optional, Dict, List, Tuple, Union
 from enum import Enum, auto
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.ib_wrapper import IBWrapper
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
@@ -17,6 +17,9 @@ from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, Ba
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
+
+class IBDriverException(Exception):
+    pass
 
 
 class BarDataRequest:
@@ -32,7 +35,9 @@ class BarDataRequest:
         self.last_error_code: int = -1
         self.last_error_string: str = ""
         # False while data fetch still in progress
-        self.data_fetch_complete = True
+        self.data_fetch_complete: bool = True
+        # Discard any bar data older than this, if set
+        self.earliest_permitted_dt: Optional[datetime] = None
 
     def has_error(self):
         """Returns True if request triggered an error"""
@@ -112,11 +117,11 @@ class IBDriver:
 
         self._logger = getLogger(__file__)
 
-    def connect(self):
-        """Attempts to connect to TWS."""
+    def connect(self) -> bool:
+        """Attempts to connect to TWS. Returns True if successful."""
         if self._app:
             self._logger.error("IBWrapper already created")
-            return
+            return False
 
         self._logger.info("Creating IBWrapper, attempting connection...")
         self._app = IBWrapper()
@@ -138,8 +143,12 @@ class IBDriver:
             self._logger.info("Waiting for connection...")
             time.sleep(1.0)
             connect_try -= 1
+        if connect_try == 0:
+            self._logger.error("Couldn't connect to IB server.")
+            return False
 
         self.setup_callbacks()
+        return True
 
     def disconnect(self):
         """Triggers disconnect from TWS"""
@@ -152,17 +161,22 @@ class IBDriver:
         self._app.set_historical_data_cb(self._historical_data_cb)
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
 
-    async def get_historical_data(self, ticker: str, num_bars: int, bar_size: BarSize = BarSize.ONE_DAY,
-                                  end_date: Optional[Union[datetime, str]] = None) -> List[Tuple[Dict, datetime]]:
+    async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
+                                  end_date: Optional[Union[datetime, str]] = None,
+                                  start_date: Optional[Union[datetime, str]] = None) -> Tuple[List[Tuple[Dict, datetime]], Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results. Each dict of returned bar
         data includes fields: "date", "open", "close", "low", "high", "volume".
 
+        Note: incomplete historical data might be returned; check results for error string
+
         :param ticker: stock ticker, e.g. AAPL
-        :param num_bars: how many bars of data to collect
+        :param num_bars: how many bars of data to collect. If not given (0), then start_state will be used
         :param bar_size: daily, hourly, weekly, etc.
-        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
-        :return: list of (IB Broker BarData as dict, datetime (start of bar))
+        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
+        :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
+        :return: (list of (IB Broker BarData as dict, datetime), error str -- if any encountered)
+        :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
             req_id = self._app.next_id()
@@ -170,52 +184,83 @@ class IBDriver:
 
         self._logger.info(f"get_historical_data(), ticker={ticker}, num_bars={num_bars}, bar_size={bar_size.name}")
         req_obj.data_fetch_complete = False
+        if start_date is not None:
+            req_obj.earliest_permitted_dt = start_date if isinstance(start_date, datetime) else get_datetime(start_date)
+            start_date = get_datetime_as_str(start_date) if isinstance(start_date, datetime) else start_date
+        else:
+            start_date = ''
         if end_date is not None:
             end_date = get_datetime_as_str(end_date) if isinstance(end_date, datetime) else end_date
         else:
             end_date = ''
-        self._request_historical_data(req_id, num_bars, bar_size, end_date)
+        try:
+            self._request_historical_data(req_id, bar_size, num_bars, end_date, start_date)
+        except Exception as e:
+            raise IBDriverException(f"Failure with historical data request, exception was {e}")
 
-        success = await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
-        if success:
-            self._logger.info("get_historical_data() finished")
-            ret_bars = req_obj.get_bar_data_as_dicts()
-            ret_dts = req_obj.timestamps
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
+        ret_error_str = None
+        if req_obj.has_error():
+            ret_error_str = f"Error getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out getting historical data."
+            self._logger.error(ret_error_str)
         else:
-            if req_obj.has_error():
-                self._logger.error(
-                    f"Timed out getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}")
-            else:
-                self._logger.error("Timed out getting historical data.")
-            ret_bars = []
-            ret_dts = []
+            self._logger.info("get_historical_data() finished")
+        ret_bars = req_obj.get_bar_data_as_dicts()
+        ret_dts = req_obj.timestamps
 
         async with self._lock:
             self._request_objects.pop(req_id, None)
 
-        return list(zip(ret_bars, ret_dts))
+        return list(zip(ret_bars, ret_dts)), ret_error_str
 
-    def _request_historical_data(self, req_id: int, num_bars: int, bar_size: BarSize, end_date_time: str):
-        """Sends request for historical data to TWS."""
+    def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
+        """
+        Sends request for historical data to TWS.
+
+        For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
+        """
         ticker = self._request_objects[req_id].ticker
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
         bar_size_str = self._bar_size_map[bar_size]
-        if bar_size == BarSize.ONE_MINUTE:
-            duration_str = str(num_bars * 60) + ' S'
-        elif bar_size == BarSize.FIVE_MINUTES:
-            duration_str = str(num_bars * 60 * 5) + ' S'
-        elif bar_size == BarSize.ONE_HOUR:
-            days = int(math.ceil(num_bars / 8))
-            duration_str = str(days) + ' D'
-        elif bar_size == BarSize.FOUR_HOURS:
-            days = int(math.ceil(num_bars / 2))
-            duration_str = str(days) + ' D'
-        elif bar_size == BarSize.ONE_DAY:
-            duration_str = str(num_bars) + ' D'
-        elif bar_size == BarSize.ONE_WEEK:
-            duration_str = str(num_bars) + ' W'
+
+        if num_bars == 0 and start_date_time == '':
+            # Need one of these defined
+            num_bars = 1
+
+        duration_str = "1 D"
+        if num_bars > 0:
+            if bar_size == BarSize.ONE_MINUTE:
+                duration_str = str(num_bars * 60) + ' S'
+            elif bar_size == BarSize.FIVE_MINUTES:
+                duration_str = str(num_bars * 60 * 5) + ' S'
+            elif bar_size == BarSize.ONE_HOUR:
+                days = int(math.ceil(num_bars / 8))
+                duration_str = str(days) + ' D'
+            elif bar_size == BarSize.FOUR_HOURS:
+                days = int(math.ceil(num_bars / 2))
+                duration_str = str(days) + ' D'
+            elif bar_size == BarSize.ONE_DAY:
+                duration_str = str(num_bars) + ' D'
+            elif bar_size == BarSize.ONE_WEEK:
+                duration_str = str(num_bars) + ' W'
+            else:
+                duration_str = str(num_bars) + ' D'
         else:
-            duration_str = str(num_bars) + ' D'
+            # Figure out duration from start and end date
+            end_dt = datetime.now() if end_date_time == '' else get_datetime(end_date_time)
+            start_dt = get_datetime(start_date_time)
+            diff = end_dt - start_dt
+            if diff.days > 0:
+                self._logger.info(f"**** diff in days is {diff.days}")
+                if diff.days > 30:
+                    duration_str = f"{int(diff.days / 7)} W"
+                else:
+                    duration_str = f"{diff.days} D"
+            else:
+                duration_str = f"{diff.seconds} S"
 
         self._logger.info(
             f"Sending historical data request for: {ticker}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
@@ -245,7 +290,9 @@ class IBDriver:
         """
         req_obj = self._request_objects.get(req_id)
         if req_obj:
-            req_obj.add_or_update_bar(in_bar, allow_update=real_time)
+            dt = get_datetime(in_bar.date)
+            if req_obj.earliest_permitted_dt is None or dt >= req_obj.earliest_permitted_dt:
+                req_obj.add_or_update_bar(in_bar, allow_update=real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
         """

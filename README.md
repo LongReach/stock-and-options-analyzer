@@ -4,6 +4,10 @@
 
 This is a suite of command line tools for analyzing stock and options market data pulled from [Interactive Brokers](https://www.interactivebrokers.com/). The specifics of dealing with Interactive Brokers are abstracted away, allowing easy access to "clean" data representations. It wouldn't be difficult to use a data provider other than Interactive Brokers.
 
+## For Potential Employers
+
+This project is entirely my own creation, at least on the level of design, architecture, general coding choices, and documentation. Of course, I made some use of Google, ChatGPT, and Stackoverflow to refresh my memory on certain Python packages or language features. 
+
 ## Design Thoughts
 
 At an earlier time, I'd created some software that pulled stock market data from Yahoo Finance, then charted it in different ways. Unfortunately, in 2025, the `yfinance` Python library became increasingly unreliable, due to Yahoo's servers throttling requests.
