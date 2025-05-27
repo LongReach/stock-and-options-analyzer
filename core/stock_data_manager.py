@@ -4,7 +4,7 @@ import pandas as pd
 from pandas import DataFrame, read_pickle, DatetimeIndex
 from datetime import datetime, timedelta
 
-from core.utils import BarSize, bar_size_to_str, str_to_bar_size
+from core.utils import BarSize, bar_size_to_str, str_to_bar_size, get_datetime, get_datetime_as_str
 from core.stock_data import StockData
 from core.ib_driver import IBDriver
 
@@ -20,23 +20,47 @@ class StockDataManager:
         self._ib_driver = ib_driver
         self._ib_driver.connect()
 
-    def load_data(self, symbol: str, bar_size: BarSize):
+    def load_data(self, symbol: str, bar_size: BarSize, filename: Optional[str] = None):
         """
         Creates a StockData object, attempts to load data from disk
         :param symbol:
         :param bar_size:
+        :param filename:
         :return:
         """
         stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
-        stock_data.load()
+        stock_data.load(filename)
 
-    async def scrape_data(self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""):
+    def save_data(self, symbol: str, bar_size: BarSize, filename: Optional[str] = None):
+        """
+        Creates a StockData object, attempts to load data from disk
+        :param symbol:
+        :param bar_size:
+        :param filename:
+        :return:
+        """
+        stock_data = self._get_stock_data(symbol, bar_size)
+        if stock_data:
+            stock_data.save(filename)
+
+    async def scrape_data(self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = "") -> Tuple[bool, str]:
         if not self._ib_driver:
             return
         stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
+        if start_date != "":
+            start_date = get_datetime_as_str(start_date)
+        if end_date != "":
+            end_date = get_datetime_as_str(end_date)
         results, error_str = await self._ib_driver.get_historical_data(stock_data.symbol, bar_size=stock_data.bar_size, start_date=start_date, end_date=end_date)
         for results_tup in results:
             stock_data.add_data(results_tup[0], results_tup[1])
+        return error_str is None, error_str
+
+    def get_pandas_df(self, symbol: str, bar_size: BarSize) -> Optional[pd.DataFrame]:
+        stock_data = self._get_stock_data(symbol, bar_size)
+        if stock_data is None:
+            return None
+        return stock_data.get_data_frame()
 
     def _get_stock_data(self, symbol: str, bar_size: BarSize, add_if_missing: bool = False) -> Optional[StockData]:
         bar_size_dict = self._data_map.get(symbol)

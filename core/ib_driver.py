@@ -254,9 +254,9 @@ class IBDriver:
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt
             if diff.days > 0:
-                self._logger.info(f"**** diff in days is {diff.days}")
                 if diff.days > 30:
-                    duration_str = f"{int(diff.days / 7)} W"
+                    weeks = int(math.ceil(diff.days / 7))
+                    duration_str = f"{weeks} W"
                 else:
                     duration_str = f"{diff.days} D"
             else:
