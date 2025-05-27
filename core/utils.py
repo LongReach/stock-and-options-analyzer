@@ -2,6 +2,11 @@ import asyncio
 from datetime import datetime, timezone
 from enum import Enum, auto
 
+class CoreException(Exception):
+    """Base class for custom exceptions in this module."""
+    pass
+
+
 class BarSize(Enum):
     """Corresponds to width of a candle on a stock chart"""
 
@@ -11,6 +16,36 @@ class BarSize(Enum):
     FOUR_HOURS = auto()
     ONE_DAY = auto()
     ONE_WEEK = auto()
+
+
+def bar_size_to_str(bar_size: BarSize) -> str:
+    conversion_map = {
+        BarSize.ONE_MINUTE : "1m",
+        BarSize.FIVE_MINUTES: "5m",
+        BarSize.ONE_HOUR: "1h",
+        BarSize.FOUR_HOURS: "4h",
+        BarSize.ONE_DAY: "1d",
+        BarSize.ONE_WEEK: "1w",
+    }
+    try:
+        return conversion_map[bar_size]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size.name} to string")
+
+
+def str_to_bar_size(bar_size_str: str) -> BarSize:
+    conversion_map = {
+        "1m": BarSize.ONE_MINUTE,
+        "5m": BarSize.FIVE_MINUTES,
+        "1h": BarSize.ONE_HOUR,
+        "4h": BarSize.FOUR_HOURS,
+        "1d": BarSize.ONE_DAY,
+        "1w": BarSize.ONE_WEEK,
+    }
+    try:
+        return conversion_map[bar_size_str]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size_str} to BarSize")
 
 
 async def wait_for_condition(condition, timeout: float, check_interval: float=0.1):
