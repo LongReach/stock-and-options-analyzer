@@ -6,6 +6,7 @@ from ibapi.common import BarData
 from datetime import datetime
 
 from core.ib_driver import IBDriver, BarSize
+from core.utils import get_datetime_as_str
 
 
 def print_historical_data(bars: List[Tuple[Dict, datetime]]):
@@ -19,6 +20,12 @@ async def main():
     ib_driver = IBDriver(sim_account=True, client_id=12)
     try:
         ib_driver.connect()
+
+        head_timestamp_dt = await ib_driver.get_head_timestamp("SPY")
+        if not head_timestamp_dt:
+            print("Couldn't find head timestamp for SPY")
+        else:
+            print(f"Head timestamp for SPY is {get_datetime_as_str(head_timestamp_dt)}")
 
         results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10)
         print("Daily bars for SPY are\n------------------------")

@@ -9,6 +9,12 @@ import argparse
 from core.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 
+def print_df(df):
+    print("Dataframe is:\n---------------")
+    print("Head:")
+    print(df.head())
+    print("Tail:")
+    print(df.tail())
 
 async def main(mode: int):
     logger = getLogger(__name__)
@@ -25,19 +31,28 @@ async def main(mode: int):
                 print(f"Error: {error_str}")
             stock_manager.save_data("SPY", BarSize.ONE_DAY, "SPY-1d-test.zip")
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
-            print("Dataframe is:\n---------------")
-            print("Head:")
-            print(df.head())
-            print("Tail:")
-            print(df.tail())
+            print_df(df)
         if mode == 2:
             stock_manager.load_data("SPY", BarSize.ONE_DAY, "SPY-1d-test.zip")
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
-            print("Dataframe is:\n---------------")
-            print("Head:")
-            print(df.head())
-            print("Tail:")
-            print(df.tail())
+            print_df(df)
+        if mode == 3:
+            print("Here we go!")
+            success, error_str = await stock_manager.scrape_data("DIA", BarSize.ONE_DAY, start_date="19980901", end_date="20250528")
+            if not success:
+                print(f"Error: {error_str}")
+            stock_manager.save_data("DIA", BarSize.ONE_DAY, "DIA-1d-test.zip")
+            df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
+            print_df(df)
+        if mode == 4:
+            print("Here we go with smart scrape!")
+            stock_manager.load_data("DIA", BarSize.ONE_DAY, "DIA-1d-test.zip")
+            success, error_str = await stock_manager.scrape_data_smart("DIA", BarSize.ONE_DAY, start_date="19700101")
+            if not success:
+                print(f"Error: {error_str}")
+            stock_manager.save_data("DIA", BarSize.ONE_DAY, "DIA-1d-test.zip")
+            df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
+            print_df(df)
     except Exception as ex:
         print(f"Exception: {ex}")
 

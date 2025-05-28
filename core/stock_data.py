@@ -8,6 +8,9 @@ from core.utils import BarSize, bar_size_to_str, str_to_bar_size
 
 _logger = logging.getLogger(__name__)
 
+class StockDataException(Exception):
+    pass
+
 class StockData:
     """
     A wrapper for a pandas Dataframe, which holds bars of price data.
@@ -23,14 +26,18 @@ class StockData:
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
-        Adds a bar of data
+        Adds a bar of data to StockData object. Once added, this object can be saved to disk.
+
         :param bar: dict of open, close, low, high, volume data
         :param date: datetime at which bar begins
-        :return:
         """
         date_str = self._get_readable_date(date)
         df = self._price_and_vol_df
         df.loc[date_str] = [date, float(bar["open"]), float(bar["close"]), float(bar["low"]), float(bar["high"]), float(bar["volume"])]
+
+    def finalize_data(self):
+        """Call when all data has been added. Puts data into proper order."""
+        self._price_and_vol_df.sort_values(by="date", inplace=True)
 
     def get_data_frame(self):
         """Returns pandas Dataframe"""
@@ -46,26 +53,34 @@ class StockData:
             try:
                 self._symbol, self._bar_size = self._infer_symbol_and_bar_size_from_file_name(filename)
             except:
+                _logger.warning(f"Couldn't infer symbol and bar size from filename {filename}")
                 pass
         else:
             filename = self._get_file_name()
 
         path = f"./data/{filename}"
         try:
+            _logger.info(f"Attempting to load pickle {path}")
             self._price_and_vol_df = read_pickle(path)
         except:
             _logger.warning(f"Couldn't load file {filename}")
             return False
         return True
 
-    def save(self, filename: Optional[str] = None):
+    def save(self, filename: Optional[str] = None) -> bool:
         """
         Saves data to disk.
         :param filename: if not given, one will be chosen from symbol and bar size
         """
         filename = self._get_file_name() if filename is None else filename
         path = f"./data/{filename}"
-        self._price_and_vol_df.to_pickle(path)
+        try:
+            _logger.info(f"Attempting to save pickle {path}")
+            self._price_and_vol_df.to_pickle(path)
+        except:
+            _logger.warning(f"Couldn't save file {filename}")
+            return False
+        return True
 
     @property
     def symbol(self) -> str:
@@ -83,11 +98,16 @@ class StockData:
             return f"{dt.month:02}/{dt.day:02} {dt.hour:02}:{dt.minute:02}"
 
     def _get_file_name(self) -> str:
+        """Assigns a filename based on symbol and bar size, returns in a string"""
         return f"{self._symbol}-{bar_size_to_str(self._bar_size)}.zip"
 
     def _infer_symbol_and_bar_size_from_file_name(self, filename: str) -> Tuple[str, BarSize]:
-        parts = filename.split(".")
-        sym_and_bar_size = parts[0].split("-")
-        symbol_str = sym_and_bar_size[0]
-        bar_size = str_to_bar_size(sym_and_bar_size[1])
-        return symbol_str, bar_size
+        """Attempts to infer symbol and bar size from a filename"""
+        try:
+            parts = filename.split(".")
+            sym_and_bar_size = parts[0].split("-")
+            symbol_str = sym_and_bar_size[0]
+            bar_size = str_to_bar_size(sym_and_bar_size[1])
+            return symbol_str, bar_size
+        except:
+            raise StockDataException(f"Couldn't infer symbol/bar size from {filename}")

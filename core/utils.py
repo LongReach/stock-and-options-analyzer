@@ -1,6 +1,6 @@
 import asyncio
 from typing import Union
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum, auto
 
 class CoreException(Exception):
@@ -48,6 +48,19 @@ def str_to_bar_size(bar_size_str: str) -> BarSize:
     except:
         raise CoreException(f"Couldn't convert {bar_size_str} to BarSize")
 
+def bar_size_to_time(bar_size: BarSize) -> timedelta:
+    conversion_map = {
+        BarSize.ONE_MINUTE: timedelta(minutes=1),
+        BarSize.FIVE_MINUTES: timedelta(minutes=5),
+        BarSize.ONE_HOUR: timedelta(hours=1),
+        BarSize.FOUR_HOURS: timedelta(hours=4),
+        BarSize.ONE_DAY: timedelta(days=1),
+        BarSize.ONE_WEEK: timedelta(weeks=1)
+    }
+    try:
+        return conversion_map[bar_size]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size.name} to timedelta")
 
 async def wait_for_condition(condition, timeout: float, check_interval: float=0.1):
     """

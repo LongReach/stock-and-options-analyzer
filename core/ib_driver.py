@@ -17,6 +17,7 @@ from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, Ba
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
+HISTORICAL_DATA_TIMEOUT = 10.0
 
 class IBDriverException(Exception):
     pass
@@ -103,6 +104,11 @@ class IBDriver:
         # Maps request ID to BarDataRequest, which receives arriving data
         self._request_objects: Dict[int, BarDataRequest] = {}
 
+        # Maps request ID to symbol
+        self._head_timestamp_map: Dict[int, str] = {}
+        # Maps symbol to head timestamp
+        self._symbol_to_head_timestamp: Dict[str, str] = {}
+
         # For synchronizing changes to self._request_objects
         self._lock = asyncio.Lock()
 
@@ -160,6 +166,7 @@ class IBDriver:
         """Hooks up callback methods that will receive responses from TWS."""
         self._app.set_historical_data_cb(self._historical_data_cb)
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
+        self._app.set_head_timestamp_cb(self._head_timestamp_cb)
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
@@ -198,7 +205,7 @@ class IBDriver:
         except Exception as e:
             raise IBDriverException(f"Failure with historical data request, exception was {e}")
 
-        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=5.0)
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
             ret_error_str = f"Error getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
@@ -215,6 +222,30 @@ class IBDriver:
             self._request_objects.pop(req_id, None)
 
         return list(zip(ret_bars, ret_dts)), ret_error_str
+
+    async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
+        async with self._lock:
+            req_id_for_head_timestamp = self._app.next_id()
+            self._head_timestamp_map[req_id_for_head_timestamp] = ticker
+
+        new_contract = self._make_contract(ticker, primary_exchange='NYSE')
+        try:
+            self._request_head_timestamp(req_id_for_head_timestamp, new_contract)
+        except Exception as e:
+            raise IBDriverException(f"Failure with head timestamp request, exception was {e}")
+
+        def _head_timestamp_available():
+            return self._symbol_to_head_timestamp.get(ticker) is not None
+
+        timed_out = not await wait_for_condition(_head_timestamp_available, timeout=HISTORICAL_DATA_TIMEOUT)
+        result = None
+        if not timed_out:
+            result =  get_datetime(self._symbol_to_head_timestamp[ticker])
+
+        async with self._lock:
+            self._head_timestamp_map.pop(req_id_for_head_timestamp, None)
+
+        return result
 
     def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
         """
@@ -306,6 +337,26 @@ class IBDriver:
         if req_obj:
             req_obj.data_fetch_complete = True
 
+    def _request_head_timestamp(self, req_id: int, contract: Contract):
+        # Request Head Timestamp
+        #     reqId: ID of request
+        #     contract: Contract object
+        #     whatToShow: kind of info (e.g. 'BID', 'ASK', 'OPTION_IMPLIED_VOLATILITY', 'TRADES'). Some choices won't return volume data.
+        #     useRTH: 1 for regular trading hours only, 0 otherwise
+        #     formatDate: 1 for human-readable string, 2 for system format
+        self._app.reqHeadTimeStamp(req_id, contract, "TRADES", 1, 1)
+
+    def _head_timestamp_cb(self, req_id: int, start: str):
+        """
+        Called when info about earliest timestamp for particular security has been sent.
+        :param req_id: applicable request
+        :param start: the earliest timestamp
+        """
+        symbol = self._head_timestamp_map.get(req_id)
+        if not symbol:
+            return
+        self._symbol_to_head_timestamp[symbol] = start
+
     def _error_cb(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
         """
         Called when there's an error.
@@ -334,7 +385,7 @@ class IBDriver:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
 
-    def _make_contract(self, ticker: str, primary_exchange=None):
+    def _make_contract(self, ticker: str, primary_exchange=None) -> Contract:
         """Makes and returns an IB Contract"""
         the_contract = Contract()
         the_contract.symbol = ticker

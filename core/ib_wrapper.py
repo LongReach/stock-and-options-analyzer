@@ -19,6 +19,7 @@ class IBWrapper(EWrapper, EClient):
         self.order_id: Optional[OrderId] = None
         self.historical_data_cb: Optional[Callable[[int, BarData, bool], None]] = None
         self.historical_data_end_cb: Optional[Callable[[int, str, str], None]] = None
+        self.head_stamp_cb: Optional[Callable[[int, str], None]] = None
         self.error_cb: Optional[Callable[[int, int, str, Any], None]] = None
         self._logger = getLogger(__file__)
 
@@ -33,6 +34,10 @@ class IBWrapper(EWrapper, EClient):
     def set_historical_data_end_response_cb(self, cb: Callable[[int, str, str], None]):
         """Sets callback to receive message about end of incoming historical data"""
         self.historical_data_end_cb = cb
+
+    def set_head_timestamp_cb(self, cb: Callable[[int, str], None]):
+        """Sets callback to receive info about earliest available data"""
+        self.head_stamp_cb = cb
 
     def set_error_cb(self, cb: Callable[[int, int, str, Any], None]):
         """Sets callback to receive message about error"""
@@ -92,6 +97,10 @@ class IBWrapper(EWrapper, EClient):
         """
         super().historicalDataEnd(req_id, start, end)
         self.historical_data_end_cb(req_id, start, end)
+
+    def headTimestamp(self, req_id: int, head_time_stamp: str):
+        super().headTimestamp(req_id, head_time_stamp)
+        self.head_stamp_cb(req_id, head_time_stamp)
 
     def error(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
         """Called by TWS when there's an error with a request."""
