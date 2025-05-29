@@ -1,7 +1,7 @@
 import asyncio
 import math
 
-from ibapi.contract import Contract
+from ibapi.contract import Contract, ContractDetails
 from ibapi.order import *
 from ibapi.common import BarData
 from logging import getLogger, basicConfig
@@ -86,6 +86,20 @@ class BarDataRequest:
         return ret_bars
 
 
+class ContractDetailsRequest:
+
+    def __init__(self):
+        self.details_list: List[ContractDetails] = []
+        self.data_fetch_complete = True
+        # Error triggered by request, if any
+        self.last_error_code: int = -1
+        self.last_error_string: str = ""
+
+    def has_error(self):
+        """Returns True if request triggered an error"""
+        return self.last_error_code != -1
+
+
 class IBDriver:
     """
     This class communicates with IBWrapper, which interfaces directly with TWS. IBDriver relays commands to
@@ -102,9 +116,11 @@ class IBDriver:
         self._client_id = client_id
 
         # Maps request ID to BarDataRequest, which receives arriving data
-        self._request_objects: Dict[int, BarDataRequest] = {}
+        self._request_bardata_objects: Dict[int, BarDataRequest] = {}
+        # Maps a request ID to a ContractDetailsRequest object
+        self._request_contractdetail_objects: Dict[int, ContractDetailsRequest] = {}
 
-        # Maps request ID to symbol
+        # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
         # Maps symbol to head timestamp
         self._symbol_to_head_timestamp: Dict[str, str] = {}
@@ -167,6 +183,8 @@ class IBDriver:
         self._app.set_historical_data_cb(self._historical_data_cb)
         self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
         self._app.set_head_timestamp_cb(self._head_timestamp_cb)
+        self._app.set_contract_details_cb(self._contract_details_cb)
+        self._app.set_contract_details_end_cb(self._contract_details_end_cb)
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
@@ -187,7 +205,7 @@ class IBDriver:
         """
         async with self._lock:
             req_id = self._app.next_id()
-            req_obj = self._request_objects[req_id] = BarDataRequest(ticker)
+            req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker)
 
         self._logger.info(f"get_historical_data(), ticker={ticker}, num_bars={num_bars}, bar_size={bar_size.name}")
         req_obj.data_fetch_complete = False
@@ -219,7 +237,7 @@ class IBDriver:
         ret_dts = req_obj.timestamps
 
         async with self._lock:
-            self._request_objects.pop(req_id, None)
+            self._request_bardata_objects.pop(req_id, None)
 
         return list(zip(ret_bars, ret_dts)), ret_error_str
 
@@ -247,13 +265,45 @@ class IBDriver:
 
         return result
 
+    async def get_contract_details(self, ticker: str) -> Tuple[Optional[ContractDetails], Optional[str]]:
+        async with self._lock:
+            req_id = self._app.next_id()
+            req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest()
+
+        contract = self._make_contract(ticker)
+        req_obj.data_fetch_complete = False
+        print(f"**** req_id is {req_id}, thing is {self._request_contractdetail_objects.get(req_id)}")
+        self._app.reqContractDetails(req_id, contract)
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
+        ret_error_str = None
+        if req_obj.has_error():
+            ret_error_str = f"Error getting contract details. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out getting contract details."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("get_contract_details() finished")
+        ret_cd = req_obj.details_list[0] if len(req_obj.details_list) > 0 else None
+
+        async with self._lock:
+            self._request_contractdetail_objects.pop(req_id, None)
+
+        return ret_cd, ret_error_str
+
+
+    async def get_options_chain(self, ticker: str):
+        req_id = self._app.next_id()
+        self._app.reqSecDefOptParams(req_id, ticker, "", "STK", 1111)
+
     def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
         """
         Sends request for historical data to TWS.
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
-        ticker = self._request_objects[req_id].ticker
+        ticker = self._request_bardata_objects[req_id].ticker
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
         bar_size_str = self._bar_size_map[bar_size]
 
@@ -319,7 +369,7 @@ class IBDriver:
         :param in_bar: --
         :param real_time: True if this is a real-time update, for current bar
         """
-        req_obj = self._request_objects.get(req_id)
+        req_obj = self._request_bardata_objects.get(req_id)
         if req_obj:
             dt = get_datetime(in_bar.date)
             if req_obj.earliest_permitted_dt is None or dt >= req_obj.earliest_permitted_dt:
@@ -333,7 +383,7 @@ class IBDriver:
         :param end: --
         """
         self._logger.info(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
-        req_obj = self._request_objects.get(req_id)
+        req_obj = self._request_bardata_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
 
@@ -356,6 +406,20 @@ class IBDriver:
         if not symbol:
             return
         self._symbol_to_head_timestamp[symbol] = start
+
+    def _contract_details_cb(self, req_id: int, contract_details: ContractDetails):
+        print(f"contractDetails(): req_id={req_id}, contract_details={contract_details}")
+        req_obj = self._request_contractdetail_objects.get(req_id)
+        if req_obj:
+            print("**** got it")
+            req_obj.details_list.append(contract_details)
+
+    def _contract_details_end_cb(self, req_id: int):
+        print(f"contractDetailsEnd() {req_id}")
+        req_obj = self._request_contractdetail_objects.get(req_id)
+        if req_obj:
+            print("**** got it")
+            req_obj.data_fetch_complete = True
 
     def _error_cb(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
         """
@@ -380,7 +444,9 @@ class IBDriver:
         else:
             err_out = "Error: code is " + str(error_code) + ", string is " + error_string
             self._logger.warning(err_out)
-            req_obj = self._request_objects.get(req_id)
+            req_obj = self._request_bardata_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_contractdetail_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
