@@ -1,6 +1,6 @@
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper, OrderId
-from ibapi.common import BarData
+from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString
 from ibapi.contract import ContractDetails
 from ibapi.contract import Contract
 from datetime import datetime
@@ -20,6 +20,8 @@ class IBWrapper(EWrapper, EClient):
         self.historical_data_cb: Optional[Callable[[int, BarData, bool], None]] = None
         self.historical_data_end_cb: Optional[Callable[[int, str, str], None]] = None
         self.head_stamp_cb: Optional[Callable[[int, str], None]] = None
+        self.contract_details_cb: Optional[Callable[[int, ContractDetails], None]] = None
+        self.contract_details_end_cb: Optional[Callable[[int], None]] = None
         self.error_cb: Optional[Callable[[int, int, str, Any], None]] = None
         self._logger = getLogger(__file__)
 
@@ -42,6 +44,12 @@ class IBWrapper(EWrapper, EClient):
     def set_error_cb(self, cb: Callable[[int, int, str, Any], None]):
         """Sets callback to receive message about error"""
         self.error_cb = cb
+
+    def set_contract_details_cb(self, cb: Callable[[int, ContractDetails], None]):
+        self.contract_details_cb = cb
+
+    def set_contract_details_end_cb(self, cb: Callable[[int], None]):
+        self.contract_details_end_cb = cb
 
     def next_id(self):
         """Returns next order ID, advancing the counter."""
@@ -101,6 +109,24 @@ class IBWrapper(EWrapper, EClient):
     def headTimestamp(self, req_id: int, head_time_stamp: str):
         super().headTimestamp(req_id, head_time_stamp)
         self.head_stamp_cb(req_id, head_time_stamp)
+
+    def securityDefinitionOptionParameter(self, req_id: int, exchange: str, underlying_con_id: int,
+                                          trading_class: str, multiplier: str,
+                                          expirations: SetOfString,
+                                          strikes: SetOfFloat):
+        super().securityDefinitionOptionParameter(req_id, exchange, underlying_con_id, trading_class, multiplier, expirations, strikes)
+        print("SecurityDefinitionOptionParameter.",
+            "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
+            "TradingClass:", trading_class, "Multiplier:", multiplier,
+            "Expirations:", expirations, "Strikes:", str(strikes))
+
+    def contractDetails(self, req_id: int, contract_details: ContractDetails):
+        super().contractDetails(req_id, contract_details)
+        self.contract_details_cb(req_id, contract_details)
+
+    def contractDetailsEnd(self, req_id: int):
+        super().contractDetailsEnd(req_id)
+        self.contract_details_end_cb(req_id)
 
     def error(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
         """Called by TWS when there's an error with a request."""
