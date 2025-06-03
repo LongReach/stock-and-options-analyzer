@@ -3,8 +3,10 @@ import copy
 import math
 
 from ibapi.contract import Contract, ContractDetails
+from ibapi.client import EClient
 from ibapi.order import *
-from ibapi.common import BarData
+from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString
+from ibapi.wrapper import EWrapper, OrderId
 from logging import getLogger, basicConfig
 import threading
 import time
@@ -12,111 +14,16 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.ib_wrapper import IBWrapper
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
+from core.ib_driver_requests import ContractDetailsRequest, OptionChainRequest, BarDataRequest
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
 
-class IBDriverException(Exception):
-    pass
 
-
-class BarDataRequest:
-    """For tracking an in-progress bar data request and capturing data returned so far"""
-
-    def __init__(self, ticker: str):
-        self.ticker: str = ticker
-        # Bar data, oldest to newest
-        self.bar_data: List[BarData] = []
-        # One timestamp for each entry in bar_data
-        self.timestamps: List[datetime] = []
-        # Error triggered by request, if any
-        self.last_error_code: int = -1
-        self.last_error_string: str = ""
-        # False while data fetch still in progress
-        self.data_fetch_complete: bool = True
-        # Discard any bar data older than this, if set
-        self.earliest_permitted_dt: Optional[datetime] = None
-
-    def has_error(self):
-        """Returns True if request triggered an error"""
-        return self.last_error_code != -1
-
-    def add_or_update_bar(self, bar_data: BarData, allow_update: bool = False):
-        """
-        Adds a new bar of data to that received so far. We don't necessarily expect bars to arrive
-        in sequential order, so we must take timestamps into account to keep them in order. Also,
-        a bar's data might replace an existing bar, i.e. if the bar is actively trading right now
-        and we're receiving updates on it.
-
-        :param bar_data: --
-        :param allow_update: TBD
-        """
-        bar_dt = get_datetime(bar_data.date)
-
-        def _replace_bar_data(existing: BarData, new: BarData):
-            existing.low = new.low
-            existing.high = new.high
-            existing.open = new.open
-            existing.volume = new.volume
-
-        # Go backwards through the list, insert received bar after first encountered existing bar
-        # that it's newer than.
-        insert_idx = 0
-        for idx in range(len(self.bar_data) - 1, -1, -1):
-            compare_bar = self.bar_data[idx]
-            compare_dt = self.timestamps[idx]
-            if compare_dt < bar_dt:
-                # Want to insert AFTER this index
-                insert_idx = idx + 1
-                break
-            if compare_dt == bar_dt:
-                # Simply replace data
-                _replace_bar_data(compare_bar, bar_data)
-                return
-
-        self.bar_data.insert(insert_idx, bar_data)
-        self.timestamps.insert(insert_idx, bar_dt)
-
-    def get_bar_data_as_dicts(self):
-        ret_bars = [{"date": bar.date, "open": bar.open, "close": bar.close, "low": bar.low, "high": bar.high,
-                     "volume": float(bar.volume)} for bar in self.bar_data]
-        return ret_bars
-
-
-class ContractDetailsRequest:
-
-    def __init__(self):
-        self.details_list: List[ContractDetails] = []
-        self.data_fetch_complete = True
-        # Error triggered by request, if any
-        self.last_error_code: int = -1
-        self.last_error_string: str = ""
-
-    def has_error(self):
-        """Returns True if request triggered an error"""
-        return self.last_error_code != -1
-
-class OptionChainRequest:
-
-    def __init__(self, ticker: str):
-        self.ticker = ticker
-        self.expirations: Set = set()
-        self.strikes: Set = set()
-        self.data_fetch_complete = True
-        # Error triggered by request, if any
-        self.last_error_code: int = -1
-        self.last_error_string: str = ""
-
-    def has_error(self):
-        """Returns True if request triggered an error"""
-        return self.last_error_code != -1
-
-
-class IBDriver:
+class IBDriver(EWrapper, EClient):
     """
     This class communicates with IBWrapper, which interfaces directly with TWS. IBDriver relays commands to
     IBWrapper, and receives responses via callbacks.
@@ -126,7 +33,8 @@ class IBDriver:
     """
 
     def __init__(self, sim_account: bool, client_id: int = 0):
-        self._app: Optional[IBWrapper] = None
+        EClient.__init__(self, self)
+        self.order_id: Optional[OrderId] = None
         self._app_thread: Optional[threading.Thread] = None
         self._sim_account = sim_account
         self._client_id = client_id
@@ -158,25 +66,22 @@ class IBDriver:
 
     def connect(self) -> bool:
         """Attempts to connect to TWS. Returns True if successful."""
-        if self._app:
-            self._logger.error("IBWrapper already created")
+        if self.is_connected():
+            self._logger.error("IBDriver already connected")
             return False
 
-        self._logger.info("Creating IBWrapper, attempting connection...")
-        self._app = IBWrapper()
-        # Set this one before connecting
-        self._app.set_error_cb(self._error_cb)
+        self._logger.info("Attempting connection...")
 
         port = SIM_PORT if self._sim_account else LIVE_PORT
-        self._app.connect("127.0.0.1", port, self._client_id)
+        super().connect("127.0.0.1", port, self._client_id)
 
-        self._app_thread = threading.Thread(target=self._app.run)
+        self._app_thread = threading.Thread(target=self.run)
         self._app_thread.start()
         time.sleep(1)
 
         connect_try = NUM_CONNECT_TRIES
         while connect_try > 0:
-            if self._app.is_connected():
+            if self.is_connected():
                 self._logger.info("Connected!")
                 break
             self._logger.info("Waiting for connection...")
@@ -186,24 +91,22 @@ class IBDriver:
             self._logger.error("Couldn't connect to IB server.")
             return False
 
-        self.setup_callbacks()
         return True
 
     def disconnect(self):
         """Triggers disconnect from TWS"""
         self._logger.info('Disconnecting...')
-        self._app.disconnect()
+        super().disconnect()
         self._logger.info('Disconnected.')
 
-    def setup_callbacks(self):
-        """Hooks up callback methods that will receive responses from TWS."""
-        self._app.set_historical_data_cb(self._historical_data_cb)
-        self._app.set_historical_data_end_response_cb(self._historical_data_end_cb)
-        self._app.set_head_timestamp_cb(self._head_timestamp_cb)
-        self._app.set_contract_details_cb(self._contract_details_cb)
-        self._app.set_contract_details_end_cb(self._contract_details_end_cb)
-        self._app.set_options_chain_cb(self._option_chain_cb)
-        self._app.set_options_chain_end_cb(self._option_chain_end_cb)
+    def is_connected(self):
+        """Returns True if a connection with TWS has been achieved"""
+        return self.order_id is not None
+
+    def next_id(self):
+        """Returns next order ID, advancing the counter."""
+        self.order_id += 1
+        return self.order_id
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
@@ -223,7 +126,7 @@ class IBDriver:
         :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
-            req_id = self._app.next_id()
+            req_id = self.next_id()
             req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker)
 
         self._logger.info(f"get_historical_data(), ticker={ticker}, num_bars={num_bars}, bar_size={bar_size.name}")
@@ -262,7 +165,7 @@ class IBDriver:
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
         async with self._lock:
-            req_id_for_head_timestamp = self._app.next_id()
+            req_id_for_head_timestamp = self.next_id()
             self._head_timestamp_map[req_id_for_head_timestamp] = ticker
 
         new_contract = self._make_contract(ticker, primary_exchange='NYSE')
@@ -286,12 +189,12 @@ class IBDriver:
 
     async def get_contract_details(self, ticker: str) -> Tuple[Optional[ContractDetails], Optional[str]]:
         async with self._lock:
-            req_id = self._app.next_id()
+            req_id = self.next_id()
             req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest()
 
         contract = self._make_contract(ticker)
         req_obj.data_fetch_complete = False
-        self._app.reqContractDetails(req_id, contract)
+        self.reqContractDetails(req_id, contract)
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
@@ -312,12 +215,12 @@ class IBDriver:
 
     async def get_options_chain(self, ticker: str, underlying_contract_id: int):
         async with self._lock:
-            req_id = self._app.next_id()
+            req_id = self.next_id()
             req_obj = self._request_optionchain_objects[req_id] = OptionChainRequest(ticker)
 
         req_obj.data_fetch_complete = False
         print("**** get_options_chain()")
-        self._app.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
+        self.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
@@ -337,6 +240,92 @@ class IBDriver:
 
         async with self._lock:
             self._request_optionchain_objects.pop(req_id, None)
+
+    # ---------------------------------------------------
+    # Callbacks
+    # ---------------------------------------------------
+
+    def nextValidId(self, order_id: OrderId):
+        """
+        Called by TWS when a valid order ID is established. We are not properly connected until we have one.
+        Overrides method in EWrapper.
+        """
+        super().nextValidId(order_id)
+        self.order_id = order_id
+
+    def historicalData(self, req_id: int, bar: BarData):
+        """
+        Called by TWS when a bar of historical data comes in. Not called for updates to historical data (for
+        current bar), only for the data that's actually in the past.
+
+        Overrides method in EWrapper.
+
+        :param req_id: request ID
+        :param bar: info about bar of data
+        """
+        super().historicalData(req_id, bar)
+        self._historical_data_cb(req_id, bar, False)
+
+    def historicalDataUpdate(self, req_id: int, bar: BarData):
+        """
+        Called by TWS when a bar of updated historical data comes in, i.e. for the current bar. Not called when
+        we're fetching past historical data only, with no updates. The updates happen rapidly, many times over the
+        course of a bar. High, low, and close can change. The date always matches the start of a bar.
+
+        Overrides method in EWrapper.
+
+        :param req_id: request ID
+        :param bar: info about bar of data
+        """
+        super().historicalDataUpdate(req_id, bar)
+        self._historical_data_cb(req_id, bar, True)
+
+    def historicalDataEnd(self, req_id: int, start: str, end: str):
+        """
+        Called by TWS when all the historical data requested has arrived.
+
+        :param req_id: request ID
+        :param start: date of first bar of data
+        :param end: date of last bar of data
+        """
+        super().historicalDataEnd(req_id, start, end)
+        self._historical_data_end_cb(req_id, start, end)
+
+    def headTimestamp(self, req_id: int, head_time_stamp: str):
+        super().headTimestamp(req_id, head_time_stamp)
+        self._head_timestamp_cb(req_id, head_time_stamp)
+
+    def securityDefinitionOptionParameter(self, req_id: int, exchange: str, underlying_con_id: int,
+                                          trading_class: str, multiplier: str,
+                                          expirations: SetOfString,
+                                          strikes: SetOfFloat):
+        super().securityDefinitionOptionParameter(req_id, exchange, underlying_con_id, trading_class, multiplier, expirations, strikes)
+        self._option_chain_cb(req_id, exchange, underlying_con_id, trading_class, multiplier, set(expirations), set(strikes))
+        #print("SecurityDefinitionOptionParameter.",
+        #    "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
+        #    "TradingClass:", trading_class, "Multiplier:", multiplier,
+        #    "Expirations:", expirations, "Strikes:", str(strikes))
+
+    def securityDefinitionOptionParameterEnd(self, req_id: int):
+        super().securityDefinitionOptionParameterEnd(req_id)
+        self._option_chain_end_cb(req_id)
+
+    def contractDetails(self, req_id: int, contract_details: ContractDetails):
+        super().contractDetails(req_id, contract_details)
+        self._contract_details_cb(req_id, contract_details)
+
+    def contractDetailsEnd(self, req_id: int):
+        super().contractDetailsEnd(req_id)
+        self._contract_details_end_cb(req_id)
+
+    def error(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
+        """Called by TWS when there's an error with a request."""
+        super().error(req_id, error_code, error_string, advanced_order_reject_json)
+        self._error_cb(req_id, error_code, error_string, advanced_order_reject_json)
+
+    # ---------------------------------------------------
+    # Private methods
+    # ---------------------------------------------------
 
     def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
         """
@@ -397,7 +386,7 @@ class IBDriver:
         #     formatDate: 1 for human-readable string, 2 for system format
         #     keepUpToDate: True for continuous updates, False otherwise
         #     chartOptions: Internal use only, just send []
-        self._app.reqHistoricalData(req_id, new_contract, end_date_time, duration_str, bar_size_str, 'TRADES', 1, 1,
+        self.reqHistoricalData(req_id, new_contract, end_date_time, duration_str, bar_size_str, 'TRADES', 1, 1,
                                     False, [])
         self._logger.info(f"Completed request {req_id}.")
 
@@ -435,7 +424,7 @@ class IBDriver:
         #     whatToShow: kind of info (e.g. 'BID', 'ASK', 'OPTION_IMPLIED_VOLATILITY', 'TRADES'). Some choices won't return volume data.
         #     useRTH: 1 for regular trading hours only, 0 otherwise
         #     formatDate: 1 for human-readable string, 2 for system format
-        self._app.reqHeadTimeStamp(req_id, contract, "TRADES", 1, 1)
+        self.reqHeadTimeStamp(req_id, contract, "TRADES", 1, 1)
 
     def _head_timestamp_cb(self, req_id: int, start: str):
         """
