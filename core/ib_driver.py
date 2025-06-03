@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import math
 
 from ibapi.contract import Contract, ContractDetails
@@ -7,7 +8,7 @@ from ibapi.common import BarData
 from logging import getLogger, basicConfig
 import threading
 import time
-from typing import Optional, Dict, List, Tuple, Union
+from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
@@ -99,6 +100,21 @@ class ContractDetailsRequest:
         """Returns True if request triggered an error"""
         return self.last_error_code != -1
 
+class OptionChainRequest:
+
+    def __init__(self, ticker: str):
+        self.ticker = ticker
+        self.expirations: Set = set()
+        self.strikes: Set = set()
+        self.data_fetch_complete = True
+        # Error triggered by request, if any
+        self.last_error_code: int = -1
+        self.last_error_string: str = ""
+
+    def has_error(self):
+        """Returns True if request triggered an error"""
+        return self.last_error_code != -1
+
 
 class IBDriver:
     """
@@ -119,6 +135,7 @@ class IBDriver:
         self._request_bardata_objects: Dict[int, BarDataRequest] = {}
         # Maps a request ID to a ContractDetailsRequest object
         self._request_contractdetail_objects: Dict[int, ContractDetailsRequest] = {}
+        self._request_optionchain_objects: Dict[int, OptionChainRequest] = {}
 
         # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
@@ -185,6 +202,8 @@ class IBDriver:
         self._app.set_head_timestamp_cb(self._head_timestamp_cb)
         self._app.set_contract_details_cb(self._contract_details_cb)
         self._app.set_contract_details_end_cb(self._contract_details_end_cb)
+        self._app.set_options_chain_cb(self._option_chain_cb)
+        self._app.set_options_chain_end_cb(self._option_chain_end_cb)
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
@@ -272,7 +291,6 @@ class IBDriver:
 
         contract = self._make_contract(ticker)
         req_obj.data_fetch_complete = False
-        print(f"**** req_id is {req_id}, thing is {self._request_contractdetail_objects.get(req_id)}")
         self._app.reqContractDetails(req_id, contract)
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
@@ -292,10 +310,33 @@ class IBDriver:
 
         return ret_cd, ret_error_str
 
+    async def get_options_chain(self, ticker: str, underlying_contract_id: int):
+        async with self._lock:
+            req_id = self._app.next_id()
+            req_obj = self._request_optionchain_objects[req_id] = OptionChainRequest(ticker)
 
-    async def get_options_chain(self, ticker: str):
-        req_id = self._app.next_id()
-        self._app.reqSecDefOptParams(req_id, ticker, "", "STK", 1111)
+        req_obj.data_fetch_complete = False
+        print("**** get_options_chain()")
+        self._app.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
+        ret_error_str = None
+        if req_obj.has_error():
+            ret_error_str = f"Error getting option chain. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out getting option chain."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("get_options_chain() finished")
+
+        exp_list = sorted(req_obj.expirations)
+        print(f"Expirations are {exp_list}")
+        strike_list = sorted(req_obj.strikes)
+        print(f"Strikes are {strike_list}")
+
+        async with self._lock:
+            self._request_optionchain_objects.pop(req_id, None)
 
     def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
         """
@@ -304,7 +345,7 @@ class IBDriver:
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
         ticker = self._request_bardata_objects[req_id].ticker
-        new_contract = self._make_contract(ticker, primary_exchange='NYSE')
+        new_contract = self._make_contract(ticker)
         bar_size_str = self._bar_size_map[bar_size]
 
         if num_bars == 0 and start_date_time == '':
@@ -408,17 +449,24 @@ class IBDriver:
         self._symbol_to_head_timestamp[symbol] = start
 
     def _contract_details_cb(self, req_id: int, contract_details: ContractDetails):
-        print(f"contractDetails(): req_id={req_id}, contract_details={contract_details}")
         req_obj = self._request_contractdetail_objects.get(req_id)
         if req_obj:
-            print("**** got it")
             req_obj.details_list.append(contract_details)
 
     def _contract_details_end_cb(self, req_id: int):
-        print(f"contractDetailsEnd() {req_id}")
         req_obj = self._request_contractdetail_objects.get(req_id)
         if req_obj:
-            print("**** got it")
+            req_obj.data_fetch_complete = True
+
+    def _option_chain_cb(self, req_id: int, exchange: str, underlying_con_id: int, trading_class: str, multiplier: str, expirations: Set, strikes: Set):
+        req_obj = self._request_optionchain_objects.get(req_id)
+        if req_obj:
+            req_obj.expirations = copy.copy(expirations)
+            req_obj.strikes = copy.copy(strikes)
+
+    def _option_chain_end_cb(self, req_id: int):
+        req_obj = self._request_optionchain_objects.get(req_id)
+        if req_obj:
             req_obj.data_fetch_complete = True
 
     def _error_cb(self, req_id: int, error_code: int, error_string: str, advanced_order_reject_json=""):
@@ -447,12 +495,31 @@ class IBDriver:
             req_obj = self._request_bardata_objects.get(req_id)
             if not req_obj:
                 req_obj = self._request_contractdetail_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_optionchain_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
 
-    def _make_contract(self, ticker: str, primary_exchange=None) -> Contract:
+    def _make_contract(self, ticker: str, primary_exchange: str = None, is_option: bool = False, is_call: bool = False,
+                       strike: Optional[float] = None, expiration: Optional[str] = None) -> Contract:
         """Makes and returns an IB Contract"""
+
+        """
+        Option contract
+
+                contract = Contract()
+                contract.symbol = "GOOG"
+                contract.secType = "OPT"
+                contract.exchange = "SMART"
+                contract.currency = "USD"
+                contract.lastTradeDateOrContractMonth = "20190315"
+                contract.strike = 1180
+                contract.right = "C"
+                contract.multiplier = "100"
+                #! [optcontract_us]
+                return contract
+        """
         the_contract = Contract()
         the_contract.symbol = ticker
         the_contract.secType = 'STK'
