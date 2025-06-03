@@ -34,7 +34,7 @@ async def main():
 
         print(f"Got {contract_details}, error is {error_str}")
         contract_id = contract_details.contract.conId
-        await ib_driver.get_options_chain("SPY", contract_id)
+        await ib_driver.get_options_chain_info("SPY", contract_id)
 
         await asyncio.sleep(5.0)
 

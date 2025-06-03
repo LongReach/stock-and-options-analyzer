@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from core.common import HistoricalData
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
-from core.ib_driver_requests import ContractDetailsRequest, OptionChainRequest, BarDataRequest, IBDriverException
+from core.ib_driver_requests import ContractDetailsRequest, OptionChainInfoRequest, BarDataRequest, IBDriverException
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
@@ -26,8 +26,8 @@ HISTORICAL_DATA_TIMEOUT = 10.0
 
 class IBDriver(EWrapper, EClient):
     """
-    This class communicates with IBWrapper, which interfaces directly with TWS. IBDriver relays commands to
-    IBWrapper, and receives responses via callbacks.
+    This class extends IB's EWrapper and EClient, allowing communication to and from TWS. Commands go out
+    via functions in EClient and responses come back to the callbacks inherited from EWrapper.
 
     This is an async interface, meant to abstract away the threaded-ness of IBWrapper. Note how the function
     get_historical_data() waits for all data to arrive before returning a result.
@@ -35,7 +35,7 @@ class IBDriver(EWrapper, EClient):
 
     def __init__(self, sim_account: bool, client_id: int = 0):
         EClient.__init__(self, self)
-        self.order_id: Optional[OrderId] = None
+        self.request_id: Optional[OrderId] = None
         self._app_thread: Optional[threading.Thread] = None
         self._sim_account = sim_account
         self._client_id = client_id
@@ -44,7 +44,7 @@ class IBDriver(EWrapper, EClient):
         self._request_bardata_objects: Dict[int, BarDataRequest] = {}
         # Maps a request ID to a ContractDetailsRequest object
         self._request_contractdetail_objects: Dict[int, ContractDetailsRequest] = {}
-        self._request_optionchain_objects: Dict[int, OptionChainRequest] = {}
+        self._request_optionchain_objects: Dict[int, OptionChainInfoRequest] = {}
 
         # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
@@ -102,12 +102,12 @@ class IBDriver(EWrapper, EClient):
 
     def is_connected(self):
         """Returns True if a connection with TWS has been achieved"""
-        return self.order_id is not None
+        return self.request_id is not None
 
     def next_id(self):
-        """Returns next order ID, advancing the counter."""
-        self.order_id += 1
-        return self.order_id
+        """Returns next request ID, advancing the counter."""
+        self.request_id += 1
+        return self.request_id
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
@@ -123,7 +123,7 @@ class IBDriver(EWrapper, EClient):
         :param bar_size: daily, hourly, weekly, etc.
         :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
-        :return: (list of (IB Broker BarData as dict, datetime), error str -- if any encountered)
+        :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
@@ -165,6 +165,10 @@ class IBDriver(EWrapper, EClient):
         return HistoricalData(ret_bars, ret_dts), ret_error_str
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
+        """
+        Returns the head timestamp for a particular ticker, i.e. the earliest datetime for which
+        IB has data.
+        """
         async with self._lock:
             req_id_for_head_timestamp = self.next_id()
             self._head_timestamp_map[req_id_for_head_timestamp] = ticker
@@ -189,6 +193,11 @@ class IBDriver(EWrapper, EClient):
         return result
 
     async def get_contract_details(self, ticker: str) -> Tuple[Optional[ContractDetails], Optional[str]]:
+        """
+        Returns an IB ContractDetails object for given ticker
+        :param ticker: --
+        :return: (ContractDetails or None, error string or None)
+        """
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest()
@@ -214,25 +223,25 @@ class IBDriver(EWrapper, EClient):
 
         return ret_cd, ret_error_str
 
-    async def get_options_chain(self, ticker: str, underlying_contract_id: int):
+    async def get_options_chain_info(self, ticker: str, underlying_contract_id: int):
         async with self._lock:
             req_id = self.next_id()
-            req_obj = self._request_optionchain_objects[req_id] = OptionChainRequest(ticker)
+            req_obj = self._request_optionchain_objects[req_id] = OptionChainInfoRequest(ticker)
 
         req_obj.data_fetch_complete = False
-        print("**** get_options_chain()")
+        print("**** get_options_chain_info()")
         self.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
-            ret_error_str = f"Error getting option chain. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            ret_error_str = f"Error getting option chain info. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
             self._logger.error(ret_error_str)
         elif timed_out:
-            ret_error_str = "Timed out getting option chain."
+            ret_error_str = "Timed out getting option chain info."
             self._logger.error(ret_error_str)
         else:
-            self._logger.info("get_options_chain() finished")
+            self._logger.info("get_options_chain_info() finished")
 
         exp_list = sorted(req_obj.expirations)
         print(f"Expirations are {exp_list}")
@@ -246,13 +255,16 @@ class IBDriver(EWrapper, EClient):
     # Callbacks
     # ---------------------------------------------------
 
-    def nextValidId(self, order_id: OrderId):
+    def nextValidId(self, request_id: OrderId):
         """
-        Called by TWS when a valid order ID is established. We are not properly connected until we have one.
+        Called by TWS when a valid request ID is established. We are not properly connected until we have one.
+        This will be the ID used for the first request, with each subsequent request incrementing it by one.
+        "OrderId" seems to a misnaming.
+
         Overrides method in EWrapper.
         """
-        super().nextValidId(order_id)
-        self.order_id = order_id
+        super().nextValidId(request_id)
+        self.request_id = request_id
 
     def historicalData(self, req_id: int, bar: BarData):
         """

@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple
 from datetime import datetime
 
 class HistoricalData:
+    """Holds historical data returned by IBDriver"""
 
     def __init__(self, bars: List[Dict], datetimes: List[datetime]):
         self.bar_data_list = bars

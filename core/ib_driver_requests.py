@@ -11,6 +11,10 @@ class IBDriverException(Exception):
 
 
 class DataRequest:
+    """
+    Base class for all "request" classes below. Implements common functionality.
+    """
+
     def __init__(self):
         # Error triggered by request, if any
         self.last_error_code: int = -1
@@ -79,12 +83,14 @@ class BarDataRequest(DataRequest):
 
 
 class ContractDetailsRequest(DataRequest):
+    """For tracking a contract details request and capturing results returned so far."""
 
     def __init__(self):
         super().__init__()
         self.details_list: List[ContractDetails] = []
 
-class OptionChainRequest(DataRequest):
+class OptionChainInfoRequest(DataRequest):
+    """For tracking an options chain info request and capturing results returned so far."""
 
     def __init__(self, ticker: str):
         super().__init__()
