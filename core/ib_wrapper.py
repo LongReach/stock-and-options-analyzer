@@ -5,7 +5,7 @@ from ibapi.contract import ContractDetails
 from ibapi.contract import Contract
 from datetime import datetime
 from logging import getLogger
-from typing import Optional, List, Callable, Any
+from typing import Optional, List, Callable, Any, Set
 
 
 class IBWrapper(EWrapper, EClient):
@@ -22,6 +22,8 @@ class IBWrapper(EWrapper, EClient):
         self.head_stamp_cb: Optional[Callable[[int, str], None]] = None
         self.contract_details_cb: Optional[Callable[[int, ContractDetails], None]] = None
         self.contract_details_end_cb: Optional[Callable[[int], None]] = None
+        self.options_chain_cb: Optional[Callable[[int, str, int, str, str, Set, Set], None]] = None
+        self.options_chain_end_cb: Optional[Callable[[int], None]] = None
         self.error_cb: Optional[Callable[[int, int, str, Any], None]] = None
         self._logger = getLogger(__file__)
 
@@ -50,6 +52,12 @@ class IBWrapper(EWrapper, EClient):
 
     def set_contract_details_end_cb(self, cb: Callable[[int], None]):
         self.contract_details_end_cb = cb
+
+    def set_options_chain_cb(self, cb: Callable[[int, str, int, str, str, Set, Set], None]):
+        self.options_chain_cb = cb
+
+    def set_options_chain_end_cb(self, cb: Callable[[int], None]):
+        self.options_chain_end_cb = cb
 
     def next_id(self):
         """Returns next order ID, advancing the counter."""
@@ -115,10 +123,15 @@ class IBWrapper(EWrapper, EClient):
                                           expirations: SetOfString,
                                           strikes: SetOfFloat):
         super().securityDefinitionOptionParameter(req_id, exchange, underlying_con_id, trading_class, multiplier, expirations, strikes)
-        print("SecurityDefinitionOptionParameter.",
-            "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
-            "TradingClass:", trading_class, "Multiplier:", multiplier,
-            "Expirations:", expirations, "Strikes:", str(strikes))
+        self.options_chain_cb(req_id, exchange, underlying_con_id, trading_class, multiplier, set(expirations), set(strikes))
+        #print("SecurityDefinitionOptionParameter.",
+        #    "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
+        #    "TradingClass:", trading_class, "Multiplier:", multiplier,
+        #    "Expirations:", expirations, "Strikes:", str(strikes))
+
+    def securityDefinitionOptionParameterEnd(self, req_id: int):
+        super().securityDefinitionOptionParameterEnd(req_id)
+        self.options_chain_end_cb(req_id)
 
     def contractDetails(self, req_id: int, contract_details: ContractDetails):
         super().contractDetails(req_id, contract_details)
