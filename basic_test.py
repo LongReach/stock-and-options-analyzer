@@ -5,13 +5,14 @@ from typing import List, Tuple, Dict
 from ibapi.common import BarData
 from datetime import datetime
 
+from core.common import HistoricalData
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
 
-def print_historical_data(bars: List[Tuple[Dict, datetime]]):
-    for bar in bars:
-        print(f"{bar[0]}")
+def print_historical_data(bars: HistoricalData):
+    for bar in bars.bar_data_list:
+        print(f"{bar}")
     print()
 
 async def main():
