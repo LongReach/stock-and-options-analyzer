@@ -4,7 +4,7 @@ import pytest
 from typing import List, Dict
 
 from core.utils import get_datetime, get_datetime_as_str, BarSize
-from core.ib_driver import BarDataRequest
+from core.ib_driver_requests import BarDataRequest
 from core.stock_data import StockData
 
 def make_bar_request():
