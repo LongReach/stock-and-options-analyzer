@@ -14,8 +14,9 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
+from core.common import HistoricalData
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
-from core.ib_driver_requests import ContractDetailsRequest, OptionChainRequest, BarDataRequest
+from core.ib_driver_requests import ContractDetailsRequest, OptionChainRequest, BarDataRequest, IBDriverException
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
@@ -110,7 +111,7 @@ class IBDriver(EWrapper, EClient):
 
     async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
-                                  start_date: Optional[Union[datetime, str]] = None) -> Tuple[List[Tuple[Dict, datetime]], Optional[str]]:
+                                  start_date: Optional[Union[datetime, str]] = None) -> Tuple[HistoricalData, Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results. Each dict of returned bar
         data includes fields: "date", "open", "close", "low", "high", "volume".
@@ -161,7 +162,7 @@ class IBDriver(EWrapper, EClient):
         async with self._lock:
             self._request_bardata_objects.pop(req_id, None)
 
-        return list(zip(ret_bars, ret_dts)), ret_error_str
+        return HistoricalData(ret_bars, ret_dts), ret_error_str
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
         async with self._lock:

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from pandas.core.resample import maybe_warn_args_and_kwargs
 
+from core.common import HistoricalData
 from core.utils import BarSize, bar_size_to_str, str_to_bar_size, bar_size_to_time, get_datetime, get_datetime_as_str
 from core.stock_data import StockData,  StockDataException
 from core.ib_driver import IBDriver
@@ -92,12 +93,12 @@ class StockDataManager:
         while current_end_dt > start_dt:
             current_start_dt = start_dt if (current_end_dt - interval_delta) < start_dt else current_end_dt - interval_delta
             self._log(f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}")
-            results, error_str = await self._ib_driver.get_historical_data(stock_data.symbol, bar_size=stock_data.bar_size, start_date=current_start_dt, end_date=current_end_dt)
+            historical_data, error_str = await self._ib_driver.get_historical_data(stock_data.symbol, bar_size=stock_data.bar_size, start_date=current_start_dt, end_date=current_end_dt)
             if error_str:
                 ret_error_str = error_str
-            if len(results) == 0:
+            if historical_data.is_empty():
                 break
-            for results_tup in results:
+            for results_tup in historical_data.get_zipped_lists():
                 stock_data.add_data(results_tup[0], results_tup[1])
             current_end_dt -= interval_delta
             await asyncio.sleep(self.TIME_BETWEEN_SCRAPES)
