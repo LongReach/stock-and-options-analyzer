@@ -21,7 +21,7 @@ class BarSize(Enum):
 
 
 class RequestedInfoType(Enum):
-    """Specifies what kind of historical data"""
+    """Specifies what kind of historical data to get"""
 
     TRADES = "TRADES"
     IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
@@ -29,10 +29,16 @@ class RequestedInfoType(Enum):
     ADJUSTED_LAST = "ADJUSTED_LAST"
 
 
-class TickerDescriptor:
-    def __init__(self, ticker_full: str):
-        self.ticker_full: str = ticker_full
-        parts = ticker_full.split("-")
+class SecurityDescriptor:
+    """
+    Describes a security, either a stock or an option. E.g.:
+    "SPY"
+    "SPY-C-20250627-600.0"
+    """
+
+    def __init__(self, symbol_full: str):
+        self.symbol_full: str = symbol_full
+        parts = symbol_full.split("-")
         self.is_opt: bool = False
         self.right: Optional[str] = None
         self.expiration: Optional[str] = None

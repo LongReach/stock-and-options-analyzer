@@ -14,7 +14,7 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import HistoricalData, RequestedInfoType, TickerDescriptor
+from core.common import HistoricalData, RequestedInfoType, SecurityDescriptor
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 from core.ib_driver_requests import (
     ContractDetailsRequest,
@@ -116,7 +116,7 @@ class IBDriver(EWrapper, EClient):
 
     async def get_historical_data(
         self,
-        ticker_full: str,
+        symbol_full: str,
         num_bars: int = 0,
         bar_size: BarSize = BarSize.ONE_DAY,
         end_date: Optional[Union[datetime, str]] = None,
@@ -130,24 +130,25 @@ class IBDriver(EWrapper, EClient):
 
         Note: incomplete historical data might be returned; check results for error string
 
-        :param ticker: stock ticker, e.g. AAPL
+        :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param num_bars: how many bars of data to collect. If not given (0), then start_state will be used
         :param bar_size: daily, hourly, weekly, etc.
         :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
         :param live_data: if True, data will continue to flow in
+        :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
             req_id = self.next_id()
-            ticker_desc = TickerDescriptor(ticker_full)
+            ticker_desc = SecurityDescriptor(symbol_full)
             req_obj = self._request_bardata_objects[req_id] = BarDataRequest(
                 ticker_desc
             )
 
         self._logger.info(
-            f"get_historical_data(), ticker={ticker_full}, num_bars={num_bars}, bar_size={bar_size.name}"
+            f"get_historical_data(), ticker={symbol_full}, num_bars={num_bars}, bar_size={bar_size.name}"
         )
         req_obj.data_fetch_complete = False
         if start_date is not None:
@@ -209,20 +210,27 @@ class IBDriver(EWrapper, EClient):
 
     async def get_most_recent_data(
         self,
-        ticker_full: str,
+        symbol_full: str,
         bar_size: BarSize = BarSize.ONE_DAY,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
-    ) -> Tuple[HistoricalData, Optional[str]]:
+    ) -> Tuple[Optional[Tuple[dict, datetime]], Optional[str]]:
+        """
+        Gets the most recent bar of data
+        :param symbol_full: e.g. AAPL or SPY-C-20250627-600.0
+        :param bar_size: daily, hourly, weekly, etc.
+        :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
+        :return: ((bar dict, datetime) or None, error string or None)
+        """
         historical_data, error_str = await self.get_historical_data(
-            ticker_full,
+            symbol_full,
             bar_size=bar_size,
             request_info_type=request_info_type,
             num_bars=5,
         )
+        ret_tuple = None
         if not historical_data.is_empty():
-            historical_data.bar_data_list = [historical_data.bar_data_list[-1]]
-            historical_data.datetime_list = [historical_data.datetime_list[-1]]
-        return historical_data, error_str
+            ret_tuple = (historical_data.bar_data_list[-1], historical_data.datetime_list[-1])
+        return ret_tuple, error_str
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
         """
@@ -267,7 +275,12 @@ class IBDriver(EWrapper, EClient):
     ) -> Tuple[Optional[ContractDetails], Optional[str]]:
         """
         Returns an IB ContractDetails object for given ticker
-        :param ticker: --
+        :param ticker: ticker for stock, or underlying, if option
+        :param primary_exchange: --
+        :param is_option: True if option
+        :param is_call: True if call, False if put
+        :param strike: strike price of option
+        :param expiration: expiration date, in IB format
         :return: (ContractDetails or None, error string or None)
         """
         async with self._lock:
@@ -301,9 +314,12 @@ class IBDriver(EWrapper, EClient):
 
         return ret_cd, ret_error_str
 
-    def get_full_ticker_from_contract_details(
+    def get_full_symbol_from_contract_details(
         self, contract_details: ContractDetails
     ) -> str:
+        """
+        Given a ContractDetails object, return a full symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)
+        """
         contract = contract_details.contract
         if contract.secType == "OPT":
             return f"{contract.symbol}-{contract.right}-{contract.lastTradeDateOrContractMonth}-{contract.strike}"
@@ -525,7 +541,7 @@ class IBDriver(EWrapper, EClient):
                 duration_str = f"{diff.seconds} S"
 
         self._logger.info(
-            f"Sending historical data request for: {ticker_desc.ticker_full}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}"
+            f"Sending historical data request for: {ticker_desc.symbol_full}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}"
         )
         # Request Historical Data
         #     reqId: ID of request
