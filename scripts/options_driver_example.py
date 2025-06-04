@@ -16,7 +16,7 @@ from core.utils import get_datetime_as_str
 
 """
 Run like:
-python -m scripts.options_driver_test
+python -m scripts.options_driver_example
 """
 
 

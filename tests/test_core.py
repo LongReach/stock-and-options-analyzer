@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 from typing import List, Dict
 
+from core.common import SecurityDescriptor
 from core.utils import get_datetime, get_datetime_as_str, BarSize
 from core.ib_driver_requests import BarDataRequest
 from core.stock_data import StockData
@@ -109,7 +110,8 @@ def make_bar_request():
         },
     ]
 
-    bar_data_request = BarDataRequest("SPY")
+    spy_descriptor = SecurityDescriptor("SPY")
+    bar_data_request = BarDataRequest(spy_descriptor)
     for bar_info in bar_info_list:
         bar_data = BarData()
         bar_data.date = bar_info["date"]
@@ -150,16 +152,16 @@ def test_bar_request_class():
     bar_data_request = make_bar_request()
 
     # There should be 10 entries, not 12
-    assert len(bar_data_request.bar_data) == 10
+    assert len(bar_data_request.historical_data.bar_data) == 10
 
     # Make sure last entry is what we'd expect
-    assert bar_data_request.bar_data[-1].date == "20250523"
+    assert bar_data_request.historical_data.bar_data[-1].date == "20250523"
 
     # Make sure third entry is what we'd expect
-    assert bar_data_request.bar_data[2].date == "20250514"
+    assert bar_data_request.historical_data.bar_data[2].date == "20250514"
 
     # Make sure second entry has expected high
-    assert bar_data_request.bar_data[1].high == "589.08"
+    assert bar_data_request.historical_data.bar_data[1].high == "589.08"
 
 
 def test_stock_data():
@@ -167,7 +169,7 @@ def test_stock_data():
     bar_data_request = make_bar_request()
 
     stock_data = StockData("SPY", BarSize.ONE_DAY)
-    bar_data_dicts = bar_data_request.get_bar_data_as_dicts()
+    bar_data_dicts = bar_data_request.historical_data.get_bar_data_as_dicts()
     for bar_data in bar_data_dicts:
         stock_data.add_data(bar_data, get_datetime(bar_data["date"]))
 
