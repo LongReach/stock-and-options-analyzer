@@ -130,7 +130,12 @@ class StockDataManager:
         return ret_error_str is None, ret_error_str
 
     async def scrape_data_smart(
-        self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        start_date: str = "",
+        end_date: str = "",
+        update_recent: bool = False,
     ) -> Tuple[bool, str]:
         """
         Like scrape_data(), but avoids looking online for data already loaded, if loaded data overlaps with specified
@@ -141,8 +146,10 @@ class StockDataManager:
         :param start_date: earliest date for which to scrape data. If not given, don't attempt to scrape data
             that's earlier than data already loaded. If date is earlier than available data, then start from
             there.
-        :param end_date: latest date for which to scrape data. If not given, don't attempt to scrape data
-            that's later than data already loaded.
+        :param end_date: latest date for which to scrape data. If not given, only attempt to scrape data
+            that's later than data already loaded if update_recent set.
+        :param update_recent: if True, and end_date not set, most recent data not already loaded will be
+            scroped.
         :return:
         """
         stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
@@ -153,9 +160,9 @@ class StockDataManager:
             return await self.scrape_data(symbol, bar_size, start_date, end_date)
 
         # Oldest date for which there's data
-        oldest_dt = df.iloc[0]["date"]
+        oldest_dt = df.iloc[0]["date"].to_pydatetime()
         # Newest date for which there's data
-        newest_dt = df.iloc[-1]["date"]
+        newest_dt = df.iloc[-1]["date"].to_pydatetime()
 
         if start_date == "":
             start_dt = None
@@ -174,7 +181,7 @@ class StockDataManager:
                 return success, error_str
 
         if end_date == "":
-            end_dt = None
+            end_dt = datetime.now() if update_recent else None
         else:
             end_dt = get_datetime(end_date)
 
@@ -183,7 +190,7 @@ class StockDataManager:
             success, error_str = await self.scrape_data(
                 symbol,
                 bar_size,
-                newest_dt + bar_size_to_time(bar_size),
+                get_datetime_as_str(newest_dt + bar_size_to_time(bar_size)),
                 get_datetime_as_str(end_dt),
             )
             if not success:

@@ -22,7 +22,7 @@ def print_df(df):
     print(df.tail())
 
 
-async def main(symbol: str, bar_size_str: str, info_only: bool):
+async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool):
     logger = getLogger(__name__)
     basicConfig(filename="cache_data.log", level=INFO)
     stock_manager = StockDataManager()
@@ -37,8 +37,9 @@ async def main(symbol: str, bar_size_str: str, info_only: bool):
             f"Displaying data for {symbol}, {bar_size_str}\n======================================"
         )
     else:
+        action_str = "Updating" if update else "Scraping"
         print(
-            f"Scraping data for {symbol}, {bar_size_str}\n======================================"
+            f"{action_str} data for {symbol}, {bar_size_str}\n======================================"
         )
 
     df = None
@@ -46,7 +47,7 @@ async def main(symbol: str, bar_size_str: str, info_only: bool):
         stock_manager.load_data(symbol, bar_size)
         if not info_only:
             success, error_str = await stock_manager.scrape_data_smart(
-                symbol, bar_size, start_date="19700101"
+                symbol, bar_size, start_date="19700101", update_recent=update
             )
             if not success:
                 print(f"Error: {error_str}")
@@ -73,6 +74,9 @@ parser.add_argument(
 parser.add_argument(
     "--info-only", help="don't do any scraping, just show info", action="store_true"
 )
+parser.add_argument(
+    "--update", help="add more recent data to file", action="store_true"
+)
 args = parser.parse_args()
 
-asyncio.run(main(args.symbol, args.barsize, args.info_only))
+asyncio.run(main(args.symbol, args.barsize, args.info_only, args.update))

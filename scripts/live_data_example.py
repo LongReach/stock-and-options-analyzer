@@ -26,7 +26,7 @@ async def main():
         results, error_str = await ib_driver.get_historical_data(
             "SPY",
             num_bars=10,
-            live_data=False,
+            live_data=True,
             bar_size=BarSize.FIVE_MINUTES,
             request_info_type=RequestedInfoType.TRADES,
         )
@@ -35,7 +35,7 @@ async def main():
 
         results, error_str = await ib_driver.get_historical_data(
             "SPY",
-            num_bars=50,
+            num_bars=10,
             live_data=False,
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
@@ -45,7 +45,7 @@ async def main():
 
         results, error_str = await ib_driver.get_historical_data(
             "SPY",
-            num_bars=50,
+            num_bars=10,
             live_data=False,
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY,
