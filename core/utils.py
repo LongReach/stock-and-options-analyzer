@@ -3,21 +3,7 @@ from typing import Union
 from datetime import datetime, timezone, timedelta
 from enum import Enum, auto
 
-class CoreException(Exception):
-    """Base class for custom exceptions in this module."""
-    pass
-
-
-class BarSize(Enum):
-    """Corresponds to width of a candle on a stock chart"""
-
-    ONE_MINUTE = auto()
-    FIVE_MINUTES = auto()
-    ONE_HOUR = auto()
-    FOUR_HOURS = auto()
-    ONE_DAY = auto()
-    ONE_WEEK = auto()
-
+from core.common import BarSize, CoreException
 
 def bar_size_to_str(bar_size: BarSize) -> str:
     conversion_map = {

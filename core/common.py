@@ -1,5 +1,49 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from datetime import datetime
+from enum import Enum, auto
+
+class CoreException(Exception):
+    """Base class for custom exceptions in this module."""
+    pass
+
+
+class BarSize(Enum):
+    """Corresponds to width of a candle on a stock chart"""
+
+    ONE_MINUTE = auto()
+    FIVE_MINUTES = auto()
+    ONE_HOUR = auto()
+    FOUR_HOURS = auto()
+    ONE_DAY = auto()
+    ONE_WEEK = auto()
+
+class RequestedInfoType(Enum):
+
+    TRADES = "TRADES"
+    IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
+    HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
+    ADJUSTED_LAST = "ADJUSTED_LAST"
+
+
+class TickerDescriptor:
+    def __init__(self, ticker_full: str):
+        self.ticker_full: str = ticker_full
+        parts = ticker_full.split("-")
+        self.is_opt: bool = False
+        self.right: Optional[str] = None
+        self.expiration: Optional[str] = None
+        self.strike: Optional[float] = None
+        if len(parts) >= 1:
+            self.ticker = parts[0]
+        if len(parts) > 1:
+            self.is_opt = True
+            self.right = parts[1]
+            self.expiration = parts[2]
+            self.strike = float(parts[3])
+
+    def is_call(self):
+        return self.right == "C"
+
 
 class HistoricalData:
     """Holds historical data returned by IBDriver"""
