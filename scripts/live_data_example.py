@@ -11,7 +11,7 @@ from core.utils import get_datetime_as_str
 
 
 def print_historical_data(bars: HistoricalData):
-    for bar in bars.bar_data_list:
+    for bar in bars.bar_data:
         print(f"{bar}")
     print()
 

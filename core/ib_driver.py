@@ -199,14 +199,12 @@ class IBDriver(EWrapper, EClient):
             self._logger.error(ret_error_str)
         else:
             self._logger.info("get_historical_data() finished")
-        ret_bars = req_obj.get_bar_data_as_dicts()
-        ret_dts = req_obj.timestamps
 
         async with self._lock:
             if not live_data:
                 self._request_bardata_objects.pop(req_id, None)
 
-        return HistoricalData(ret_bars, ret_dts), ret_error_str
+        return req_obj.historical_data, ret_error_str
 
     async def get_most_recent_data(
         self,
@@ -229,7 +227,8 @@ class IBDriver(EWrapper, EClient):
         )
         ret_tuple = None
         if not historical_data.is_empty():
-            ret_tuple = (historical_data.bar_data_list[-1], historical_data.datetime_list[-1])
+            bar_data_dicts = historical_data.get_bar_data_as_dicts()
+            ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:

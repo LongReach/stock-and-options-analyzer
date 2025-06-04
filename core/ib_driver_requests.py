@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import SecurityDescriptor
+from core.common import SecurityDescriptor, HistoricalData
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 
@@ -35,10 +35,7 @@ class BarDataRequest(DataRequest):
     def __init__(self, ticker_desc: SecurityDescriptor):
         super().__init__()
         self.ticker_desc: SecurityDescriptor = ticker_desc
-        # Bar data, oldest to newest
-        self.bar_data: List[BarData] = []
-        # One timestamp for each entry in bar_data
-        self.timestamps: List[datetime] = []
+        self.historical_data = HistoricalData()
         # Discard any bar data older than this, if set
         self.earliest_permitted_dt: Optional[datetime] = None
 
@@ -53,44 +50,7 @@ class BarDataRequest(DataRequest):
         :param allow_update: TBD
         """
         bar_dt = get_datetime(bar_data.date)
-
-        def _replace_bar_data(existing: BarData, new: BarData):
-            existing.low = new.low
-            existing.high = new.high
-            existing.open = new.open
-            existing.volume = new.volume
-
-        # Go backwards through the list, insert received bar after first encountered existing bar
-        # that it's newer than.
-        insert_idx = 0
-        for idx in range(len(self.bar_data) - 1, -1, -1):
-            compare_bar = self.bar_data[idx]
-            compare_dt = self.timestamps[idx]
-            if compare_dt < bar_dt:
-                # Want to insert AFTER this index
-                insert_idx = idx + 1
-                break
-            if compare_dt == bar_dt:
-                # Simply replace data
-                _replace_bar_data(compare_bar, bar_data)
-                return
-
-        self.bar_data.insert(insert_idx, bar_data)
-        self.timestamps.insert(insert_idx, bar_dt)
-
-    def get_bar_data_as_dicts(self):
-        ret_bars = [
-            {
-                "date": bar.date,
-                "open": bar.open,
-                "close": bar.close,
-                "low": bar.low,
-                "high": bar.high,
-                "volume": float(bar.volume),
-            }
-            for bar in self.bar_data
-        ]
-        return ret_bars
+        self.historical_data.add_data(bar_data, bar_dt)
 
 
 class ContractDetailsRequest(DataRequest):
