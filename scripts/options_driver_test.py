@@ -15,19 +15,8 @@ from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
 """
-Option contract
-
-        contract = Contract()
-        contract.symbol = "GOOG"
-        contract.secType = "OPT"
-        contract.exchange = "SMART"
-        contract.currency = "USD"
-        contract.lastTradeDateOrContractMonth = "20190315"
-        contract.strike = 1180
-        contract.right = "C"
-        contract.multiplier = "100"
-        #! [optcontract_us]
-        return contract
+Run like:
+python -m scripts.options_driver_test
 """
 
 
@@ -49,17 +38,17 @@ async def main():
             "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250627"
         )
         print(f"Got {contract_details}, error is {error_str}")
-        full_ticker = ib_driver.get_full_ticker_from_contract_details(contract_details)
+        full_ticker = ib_driver.get_full_symbol_from_contract_details(contract_details)
         print(f"Full ticker is {full_ticker}")
 
-        historical_data, error_str = await ib_driver.get_most_recent_data(
+        data_tup, error_str = await ib_driver.get_most_recent_data(
             full_ticker,
             BarSize.ONE_HOUR,
             request_info_type=RequestedInfoType.ADJUSTED_LAST,
         )
         option_price = 0.0
-        if not historical_data.is_empty():
-            option_price = historical_data.bar_data_list[0]["close"]
+        if data_tup:
+            option_price = data_tup[0]["close"]
         print(f"Option price for {full_ticker} is {option_price}")
 
     except Exception as ex:
