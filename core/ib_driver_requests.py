@@ -4,6 +4,7 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
+from core.common import TickerDescriptor
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 class IBDriverException(Exception):
@@ -30,9 +31,9 @@ class DataRequest:
 class BarDataRequest(DataRequest):
     """For tracking an in-progress bar data request and capturing data returned so far"""
 
-    def __init__(self, ticker: str):
+    def __init__(self, ticker_desc: TickerDescriptor):
         super().__init__()
-        self.ticker: str = ticker
+        self.ticker_desc: TickerDescriptor = ticker_desc
         # Bar data, oldest to newest
         self.bar_data: List[BarData] = []
         # One timestamp for each entry in bar_data

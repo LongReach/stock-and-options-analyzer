@@ -14,7 +14,7 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import HistoricalData
+from core.common import HistoricalData, RequestedInfoType, TickerDescriptor
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 from core.ib_driver_requests import ContractDetailsRequest, OptionChainInfoRequest, BarDataRequest, IBDriverException
 
@@ -109,9 +109,11 @@ class IBDriver(EWrapper, EClient):
         self.request_id += 1
         return self.request_id
 
-    async def get_historical_data(self, ticker: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
+    async def get_historical_data(self, ticker_full: str, num_bars: int = 0, bar_size: BarSize = BarSize.ONE_DAY,
                                   end_date: Optional[Union[datetime, str]] = None,
-                                  start_date: Optional[Union[datetime, str]] = None) -> Tuple[HistoricalData, Optional[str]]:
+                                  start_date: Optional[Union[datetime, str]] = None,
+                                  live_data: bool = False,
+                                  request_info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Tuple[HistoricalData, Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results. Each dict of returned bar
         data includes fields: "date", "open", "close", "low", "high", "volume".
@@ -123,14 +125,16 @@ class IBDriver(EWrapper, EClient):
         :param bar_size: daily, hourly, weekly, etc.
         :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
+        :param live_data: if True, data will continue to flow in
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
             req_id = self.next_id()
-            req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker)
+            ticker_desc = TickerDescriptor(ticker_full)
+            req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker_desc)
 
-        self._logger.info(f"get_historical_data(), ticker={ticker}, num_bars={num_bars}, bar_size={bar_size.name}")
+        self._logger.info(f"get_historical_data(), ticker={ticker_full}, num_bars={num_bars}, bar_size={bar_size.name}")
         req_obj.data_fetch_complete = False
         if start_date is not None:
             req_obj.earliest_permitted_dt = start_date if isinstance(start_date, datetime) else get_datetime(start_date)
@@ -142,7 +146,7 @@ class IBDriver(EWrapper, EClient):
         else:
             end_date = ''
         try:
-            self._request_historical_data(req_id, bar_size, num_bars, end_date, start_date)
+            self._request_historical_data(req_id, bar_size, num_bars, end_date, start_date, live_data, request_info_type)
         except Exception as e:
             raise IBDriverException(f"Failure with historical data request, exception was {e}")
 
@@ -160,9 +164,18 @@ class IBDriver(EWrapper, EClient):
         ret_dts = req_obj.timestamps
 
         async with self._lock:
-            self._request_bardata_objects.pop(req_id, None)
+            if not live_data:
+                self._request_bardata_objects.pop(req_id, None)
 
         return HistoricalData(ret_bars, ret_dts), ret_error_str
+
+    async def get_most_recent_data(self, ticker_full: str, bar_size: BarSize = BarSize.ONE_DAY,
+                                  request_info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Tuple[HistoricalData, Optional[str]]:
+        historical_data, error_str =  await self.get_historical_data(ticker_full, bar_size=bar_size, request_info_type=request_info_type, num_bars=5)
+        if not historical_data.is_empty():
+            historical_data.bar_data_list = [historical_data.bar_data_list[-1]]
+            historical_data.datetime_list = [historical_data.datetime_list[-1]]
+        return historical_data, error_str
 
     async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
         """
@@ -192,7 +205,10 @@ class IBDriver(EWrapper, EClient):
 
         return result
 
-    async def get_contract_details(self, ticker: str) -> Tuple[Optional[ContractDetails], Optional[str]]:
+    async def get_contract_details(self, ticker: str, primary_exchange: str = None, is_option: bool = False,
+                                is_call: bool = False,
+                                strike: Optional[float] = None,
+                                expiration: Optional[str] = None) -> Tuple[Optional[ContractDetails], Optional[str]]:
         """
         Returns an IB ContractDetails object for given ticker
         :param ticker: --
@@ -202,7 +218,7 @@ class IBDriver(EWrapper, EClient):
             req_id = self.next_id()
             req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest()
 
-        contract = self._make_contract(ticker)
+        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
         req_obj.data_fetch_complete = False
         self.reqContractDetails(req_id, contract)
 
@@ -222,6 +238,13 @@ class IBDriver(EWrapper, EClient):
             self._request_contractdetail_objects.pop(req_id, None)
 
         return ret_cd, ret_error_str
+
+    def get_full_ticker_from_contract_details(self, contract_details: ContractDetails) -> str:
+        contract = contract_details.contract
+        if contract.secType == "OPT":
+            return f"{contract.symbol}-{contract.right}-{contract.lastTradeDateOrContractMonth}-{contract.strike}"
+
+        return contract.symbol
 
     async def get_options_chain_info(self, ticker: str, underlying_contract_id: int):
         async with self._lock:
@@ -291,6 +314,7 @@ class IBDriver(EWrapper, EClient):
         :param bar: info about bar of data
         """
         super().historicalDataUpdate(req_id, bar)
+        print(f"**** Live data for {req_id} is {bar}")
         self._historical_data_cb(req_id, bar, True)
 
     def historicalDataEnd(self, req_id: int, start: str, end: str):
@@ -340,14 +364,18 @@ class IBDriver(EWrapper, EClient):
     # Private methods
     # ---------------------------------------------------
 
-    def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '', start_date_time: str = ''):
+    def _request_historical_data(self, req_id: int, bar_size: BarSize, num_bars: int = 0, end_date_time: str = '',
+                                 start_date_time: str = '', live_data: bool = False,
+                                 request_info_type: RequestedInfoType = RequestedInfoType.TRADES):
         """
         Sends request for historical data to TWS.
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
-        ticker = self._request_bardata_objects[req_id].ticker
-        new_contract = self._make_contract(ticker)
+        ticker_desc = self._request_bardata_objects[req_id].ticker_desc
+        new_contract = self._make_contract(ticker_desc.ticker, primary_exchange=None, is_option=ticker_desc.is_opt,
+                                           is_call=ticker_desc.is_call(), strike=ticker_desc.strike,
+                                           expiration=ticker_desc.expiration)
         bar_size_str = self._bar_size_map[bar_size]
 
         if num_bars == 0 and start_date_time == '':
@@ -387,7 +415,7 @@ class IBDriver(EWrapper, EClient):
                 duration_str = f"{diff.seconds} S"
 
         self._logger.info(
-            f"Sending historical data request for: {ticker}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
+            f"Sending historical data request for: {ticker_desc.ticker_full}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}")
         # Request Historical Data
         #     reqId: ID of request
         #     contract: Contract object
@@ -399,8 +427,8 @@ class IBDriver(EWrapper, EClient):
         #     formatDate: 1 for human-readable string, 2 for system format
         #     keepUpToDate: True for continuous updates, False otherwise
         #     chartOptions: Internal use only, just send []
-        self.reqHistoricalData(req_id, new_contract, end_date_time, duration_str, bar_size_str, 'TRADES', 1, 1,
-                                    False, [])
+        self.reqHistoricalData(req_id, new_contract, end_date_time, duration_str, bar_size_str, request_info_type.value, 1, 1,
+                                    live_data, [])
         self._logger.info(f"Completed request {req_id}.")
 
     def _historical_data_cb(self, req_id: int, in_bar: BarData, real_time: bool):
@@ -527,6 +555,12 @@ class IBDriver(EWrapper, EClient):
         the_contract.secType = 'STK'
         the_contract.exchange = 'SMART'
         the_contract.currency = 'USD'
+        if is_option:
+            the_contract.secType = "OPT"
+            the_contract.right = "C" if is_call else "P"
+            the_contract.strike = int(strike)
+            the_contract.lastTradeDateOrContractMonth = expiration
+            the_contract.multiplier = "100"
         if primary_exchange:
             the_contract.primaryExchange = primary_exchange
         return the_contract
