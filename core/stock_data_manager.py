@@ -9,11 +9,19 @@ from datetime import datetime, timedelta
 from pandas.core.resample import maybe_warn_args_and_kwargs
 
 from core.common import HistoricalData
-from core.utils import BarSize, bar_size_to_str, str_to_bar_size, bar_size_to_time, get_datetime, get_datetime_as_str
-from core.stock_data import StockData,  StockDataException
+from core.utils import (
+    BarSize,
+    bar_size_to_str,
+    str_to_bar_size,
+    bar_size_to_time,
+    get_datetime,
+    get_datetime_as_str,
+)
+from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
 
 _logger = logging.getLogger(__name__)
+
 
 class StockDataManager:
     """
@@ -61,7 +69,9 @@ class StockDataManager:
         if stock_data:
             stock_data.save(filename)
 
-    async def scrape_data(self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = "") -> Tuple[bool, str]:
+    async def scrape_data(
+        self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""
+    ) -> Tuple[bool, str]:
         """
         Scrapes data from online source, completely replacing any data already in memory.
 
@@ -71,7 +81,9 @@ class StockDataManager:
         :param end_date: data should be no newer than this date. If not given, use current datetime.
         :return: (success, error string)
         """
-        self._log(f"Scraping data for {symbol}, {bar_size.name}. start_date='{start_date}', end_date='{end_date}'")
+        self._log(
+            f"Scraping data for {symbol}, {bar_size.name}. start_date='{start_date}', end_date='{end_date}'"
+        )
         if not self._ib_driver:
             raise StockDataException("No driver set")
 
@@ -91,9 +103,20 @@ class StockDataManager:
         interval_delta = bar_size_to_time(bar_size) * self.BARS_PER_SCRAPE
         ret_error_str = None
         while current_end_dt > start_dt:
-            current_start_dt = start_dt if (current_end_dt - interval_delta) < start_dt else current_end_dt - interval_delta
-            self._log(f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}")
-            historical_data, error_str = await self._ib_driver.get_historical_data(stock_data.symbol, bar_size=stock_data.bar_size, start_date=current_start_dt, end_date=current_end_dt)
+            current_start_dt = (
+                start_dt
+                if (current_end_dt - interval_delta) < start_dt
+                else current_end_dt - interval_delta
+            )
+            self._log(
+                f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}"
+            )
+            historical_data, error_str = await self._ib_driver.get_historical_data(
+                stock_data.symbol,
+                bar_size=stock_data.bar_size,
+                start_date=current_start_dt,
+                end_date=current_end_dt,
+            )
             if error_str:
                 ret_error_str = error_str
             if historical_data.is_empty():
@@ -106,7 +129,9 @@ class StockDataManager:
         stock_data.finalize_data()
         return ret_error_str is None, ret_error_str
 
-    async def scrape_data_smart(self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = "") -> Tuple[bool, str]:
+    async def scrape_data_smart(
+        self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""
+    ) -> Tuple[bool, str]:
         """
         Like scrape_data(), but avoids looking online for data already loaded, if loaded data overlaps with specified
         date range.
@@ -142,7 +167,9 @@ class StockDataManager:
 
         # Scrape data that's older than already-loaded data
         if start_dt is not None and start_dt < oldest_dt:
-            success, error_str = await self.scrape_data(symbol, bar_size, start_date, get_datetime_as_str(oldest_dt))
+            success, error_str = await self.scrape_data(
+                symbol, bar_size, start_date, get_datetime_as_str(oldest_dt)
+            )
             if not success:
                 return success, error_str
 
@@ -153,7 +180,12 @@ class StockDataManager:
 
         # Scrape data that's newer than already-loaded data
         if end_dt is not None and end_dt > newest_dt:
-            success, error_str = await self.scrape_data(symbol, bar_size, newest_dt + bar_size_to_time(bar_size), get_datetime_as_str(end_dt))
+            success, error_str = await self.scrape_data(
+                symbol,
+                bar_size,
+                newest_dt + bar_size_to_time(bar_size),
+                get_datetime_as_str(end_dt),
+            )
             if not success:
                 return success, error_str
 
@@ -172,7 +204,9 @@ class StockDataManager:
 
         _logger.log(level, message)
 
-    def _get_stock_data(self, symbol: str, bar_size: BarSize, add_if_missing: bool = False) -> Optional[StockData]:
+    def _get_stock_data(
+        self, symbol: str, bar_size: BarSize, add_if_missing: bool = False
+    ) -> Optional[StockData]:
         """
         Return StockData object.
         :param symbol: --

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from core.common import TickerDescriptor
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
+
 class IBDriverException(Exception):
     pass
 
@@ -78,8 +79,17 @@ class BarDataRequest(DataRequest):
         self.timestamps.insert(insert_idx, bar_dt)
 
     def get_bar_data_as_dicts(self):
-        ret_bars = [{"date": bar.date, "open": bar.open, "close": bar.close, "low": bar.low, "high": bar.high,
-                     "volume": float(bar.volume)} for bar in self.bar_data]
+        ret_bars = [
+            {
+                "date": bar.date,
+                "open": bar.open,
+                "close": bar.close,
+                "low": bar.low,
+                "high": bar.high,
+                "volume": float(bar.volume),
+            }
+            for bar in self.bar_data
+        ]
         return ret_bars
 
 
@@ -90,6 +100,7 @@ class ContractDetailsRequest(DataRequest):
         super().__init__()
         self.details_list: List[ContractDetails] = []
 
+
 class OptionChainInfoRequest(DataRequest):
     """For tracking an options chain info request and capturing results returned so far."""
 
@@ -98,5 +109,3 @@ class OptionChainInfoRequest(DataRequest):
         self.ticker = ticker
         self.expirations: Set = set()
         self.strikes: Set = set()
-
-

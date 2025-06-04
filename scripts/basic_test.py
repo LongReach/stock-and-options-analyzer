@@ -15,9 +15,10 @@ def print_historical_data(bars: HistoricalData):
         print(f"{bar}")
     print()
 
+
 async def main():
     logger = getLogger(__name__)
-    basicConfig(filename='test.log', level=INFO)
+    basicConfig(filename="test.log", level=INFO)
     ib_driver = IBDriver(sim_account=True, client_id=12)
     try:
         ib_driver.connect()
@@ -31,21 +32,36 @@ async def main():
         results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10)
         print("Daily bars for SPY are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR)
+        results, error_str = await ib_driver.get_historical_data(
+            "AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR
+        )
         print("Hourly bars for AAPL are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS)
+        results, error_str = await ib_driver.get_historical_data(
+            "DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS
+        )
         print("Four-hour bars for DIA are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("GLD", num_bars=4, bar_size=BarSize.ONE_DAY, end_date="20250422 16:00:00 US/Eastern")
+        results, error_str = await ib_driver.get_historical_data(
+            "GLD",
+            num_bars=4,
+            bar_size=BarSize.ONE_DAY,
+            end_date="20250422 16:00:00 US/Eastern",
+        )
         print("Daily bars for GLD are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("TLT", bar_size=BarSize.ONE_DAY, end_date="20250404 16:00:00 US/Eastern", start_date="20250320 09:30:00 US/Eastern")
+        results, error_str = await ib_driver.get_historical_data(
+            "TLT",
+            bar_size=BarSize.ONE_DAY,
+            end_date="20250404 16:00:00 US/Eastern",
+            start_date="20250320 09:30:00 US/Eastern",
+        )
         print("Daily bars for TLT are\n------------------------")
         print_historical_data(results)
     except Exception as ex:
         print(f"Exception: {ex}")
 
     ib_driver.disconnect()
+
 
 asyncio.run(main())

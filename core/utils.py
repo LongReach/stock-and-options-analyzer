@@ -5,9 +5,10 @@ from enum import Enum, auto
 
 from core.common import BarSize, CoreException
 
+
 def bar_size_to_str(bar_size: BarSize) -> str:
     conversion_map = {
-        BarSize.ONE_MINUTE : "1m",
+        BarSize.ONE_MINUTE: "1m",
         BarSize.FIVE_MINUTES: "5m",
         BarSize.ONE_HOUR: "1h",
         BarSize.FOUR_HOURS: "4h",
@@ -34,6 +35,7 @@ def str_to_bar_size(bar_size_str: str) -> BarSize:
     except:
         raise CoreException(f"Couldn't convert {bar_size_str} to BarSize")
 
+
 def bar_size_to_time(bar_size: BarSize) -> timedelta:
     conversion_map = {
         BarSize.ONE_MINUTE: timedelta(minutes=1),
@@ -41,14 +43,15 @@ def bar_size_to_time(bar_size: BarSize) -> timedelta:
         BarSize.ONE_HOUR: timedelta(hours=1),
         BarSize.FOUR_HOURS: timedelta(hours=4),
         BarSize.ONE_DAY: timedelta(days=1),
-        BarSize.ONE_WEEK: timedelta(weeks=1)
+        BarSize.ONE_WEEK: timedelta(weeks=1),
     }
     try:
         return conversion_map[bar_size]
     except:
         raise CoreException(f"Couldn't convert {bar_size.name} to timedelta")
 
-async def wait_for_condition(condition, timeout: float, check_interval: float=0.1):
+
+async def wait_for_condition(condition, timeout: float, check_interval: float = 0.1):
     """
     Waits for a condition to be true with a timeout.
 
@@ -63,6 +66,7 @@ async def wait_for_condition(condition, timeout: float, check_interval: float=0.
             return True
         await asyncio.sleep(check_interval)
     return False
+
 
 def get_datetime(ib_date: str) -> datetime:
     """
@@ -106,6 +110,7 @@ def get_datetime(ib_date: str) -> datetime:
     except:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt
+
 
 def get_datetime_as_str(dt: Union[datetime, str]) -> str:
     """
