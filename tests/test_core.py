@@ -7,21 +7,106 @@ from core.utils import get_datetime, get_datetime_as_str, BarSize
 from core.ib_driver_requests import BarDataRequest
 from core.stock_data import StockData
 
+
 def make_bar_request():
     # Bar data not entirely in proper order, with two duplicate entries (20250513)
     bar_info_list: List[Dict] = [
-        {"date": "20250512", "open": "581.49", "close": "582.99", "low": "577.04", "high": "583.0", "volume": "47256818"},
-        {"date": "20250514", "open": "587.83", "close": "587.59", "low": "585.53", "high": "588.98", "volume": "41691962"},
-        {"date": "20250515", "open": "585.56", "close": "590.46", "low": "585.09", "high": "590.97", "volume": "45789629"},
-        {"date": "20250516", "open": "591.25", "close": "594.2", "low": "589.28", "high": "594.5", "volume": "37450157"},
-        {"date": "20250519", "open": "588.1", "close": "594.85", "low": "588.09", "high": "595.54", "volume": "41787527"},
-        {"date": "20250523", "open": "575.98", "close": "579.11", "low": "575.6", "high": "581.82", "volume": "45476396"},
-        {"date": "20250520", "open": "593.11", "close": "592.85", "low": "589.6", "high": "594.05", "volume": "39355455"},
-        {"date": "20250513", "open": "583.46", "close": "586.84", "low": "582.84", "high": "587.00", "volume": "40068411"},
-        {"date": "20250513", "open": "583.46", "close": "586.84", "low": "582.84", "high": "588.00", "volume": "40068412"},
-        {"date": "20250521", "open": "588.47", "close": "582.86", "low": "581.82", "high": "592.58", "volume": "62934210"},
-        {"date": "20250513", "open": "583.46", "close": "586.84", "low": "582.84", "high": "589.08", "volume": "40068413"},
-        {"date": "20250522", "open": "582.66", "close": "583.09", "low": "581.4", "high": "586.62", "volume": "47837028"},
+        {
+            "date": "20250512",
+            "open": "581.49",
+            "close": "582.99",
+            "low": "577.04",
+            "high": "583.0",
+            "volume": "47256818",
+        },
+        {
+            "date": "20250514",
+            "open": "587.83",
+            "close": "587.59",
+            "low": "585.53",
+            "high": "588.98",
+            "volume": "41691962",
+        },
+        {
+            "date": "20250515",
+            "open": "585.56",
+            "close": "590.46",
+            "low": "585.09",
+            "high": "590.97",
+            "volume": "45789629",
+        },
+        {
+            "date": "20250516",
+            "open": "591.25",
+            "close": "594.2",
+            "low": "589.28",
+            "high": "594.5",
+            "volume": "37450157",
+        },
+        {
+            "date": "20250519",
+            "open": "588.1",
+            "close": "594.85",
+            "low": "588.09",
+            "high": "595.54",
+            "volume": "41787527",
+        },
+        {
+            "date": "20250523",
+            "open": "575.98",
+            "close": "579.11",
+            "low": "575.6",
+            "high": "581.82",
+            "volume": "45476396",
+        },
+        {
+            "date": "20250520",
+            "open": "593.11",
+            "close": "592.85",
+            "low": "589.6",
+            "high": "594.05",
+            "volume": "39355455",
+        },
+        {
+            "date": "20250513",
+            "open": "583.46",
+            "close": "586.84",
+            "low": "582.84",
+            "high": "587.00",
+            "volume": "40068411",
+        },
+        {
+            "date": "20250513",
+            "open": "583.46",
+            "close": "586.84",
+            "low": "582.84",
+            "high": "588.00",
+            "volume": "40068412",
+        },
+        {
+            "date": "20250521",
+            "open": "588.47",
+            "close": "582.86",
+            "low": "581.82",
+            "high": "592.58",
+            "volume": "62934210",
+        },
+        {
+            "date": "20250513",
+            "open": "583.46",
+            "close": "586.84",
+            "low": "582.84",
+            "high": "589.08",
+            "volume": "40068413",
+        },
+        {
+            "date": "20250522",
+            "open": "582.66",
+            "close": "583.09",
+            "low": "581.4",
+            "high": "586.62",
+            "volume": "47837028",
+        },
     ]
 
     bar_data_request = BarDataRequest("SPY")
@@ -58,6 +143,7 @@ def test_datetime_conversion():
         get_datetime(bad_ib_timestamp)
     assert "TypeError('Bad day value of 37 in IB date 20250537')" in str(ex)
 
+
 def test_bar_request_class():
     """Tests that data can be added in arbitrary order to BarDataRequest, which will keep it ordered by datetime"""
 
@@ -74,6 +160,7 @@ def test_bar_request_class():
 
     # Make sure second entry has expected high
     assert bar_data_request.bar_data[1].high == "589.08"
+
 
 def test_stock_data():
     """Tests that stock data can be loaded into a pandas dateframe"""

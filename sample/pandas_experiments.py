@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 _logger = logging.getLogger(__name__)
 
+
 def main():
     fruit_df = pd.DataFrame(columns=["Fruit", "Color", "Rating"])
     fruit_df.loc[1] = ["Apple", "red", 7]
@@ -42,9 +43,11 @@ def main():
     print(f"Index at raw index -1 is {fruit_df.index[-1]}")
     print()
 
-    animal_data = {"aninal": ["cat", "dog", "monkey", "parrot"],
-                   "legs": [4, 4, 2, 2],
-                   "date": ["01012020", "05052020", "02022020", "04042020"]}
+    animal_data = {
+        "aninal": ["cat", "dog", "monkey", "parrot"],
+        "legs": [4, 4, 2, 2],
+        "date": ["01012020", "05052020", "02022020", "04042020"],
+    }
     animal_df = pd.DataFrame(animal_data)
     print("Unsorted DF:")
     print(animal_df)
@@ -57,5 +60,6 @@ def main():
 
     print("Second row is:")
     print(animal_df.iloc[1])
+
 
 main()

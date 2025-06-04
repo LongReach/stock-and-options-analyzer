@@ -15,28 +15,50 @@ def print_historical_data(bars: HistoricalData):
         print(f"{bar}")
     print()
 
+
 async def main():
     logger = getLogger(__name__)
-    basicConfig(filename='live_data_test.log', level=INFO)
+    basicConfig(filename="live_data_test.log", level=INFO)
     ib_driver = IBDriver(sim_account=True, client_id=45)
     try:
         ib_driver.connect()
 
-        results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10, live_data=False, bar_size=BarSize.FIVE_MINUTES, request_info_type=RequestedInfoType.TRADES)
+        results, error_str = await ib_driver.get_historical_data(
+            "SPY",
+            num_bars=10,
+            live_data=False,
+            bar_size=BarSize.FIVE_MINUTES,
+            request_info_type=RequestedInfoType.TRADES,
+        )
         print("Five minute bars for SPY (trades) are\n------------------------")
         print_historical_data(results)
 
-        results, error_str = await ib_driver.get_historical_data("SPY", num_bars=50, live_data=False, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.IMPLIED_VOLATILITY)
+        results, error_str = await ib_driver.get_historical_data(
+            "SPY",
+            num_bars=50,
+            live_data=False,
+            bar_size=BarSize.ONE_DAY,
+            request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
+        )
         print("One day bars for SPY (implied volatility) are\n------------------------")
         print_historical_data(results)
 
-        results, error_str = await ib_driver.get_historical_data("SPY", num_bars=50, live_data=False, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY)
-        print("One day bars for SPY (historical volatility) are\n------------------------")
+        results, error_str = await ib_driver.get_historical_data(
+            "SPY",
+            num_bars=50,
+            live_data=False,
+            bar_size=BarSize.ONE_DAY,
+            request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY,
+        )
+        print(
+            "One day bars for SPY (historical volatility) are\n------------------------"
+        )
         print_historical_data(results)
 
     except Exception as ex:
         print(f"Exception: {ex}")
 
     ib_driver.disconnect()
+
 
 asyncio.run(main())

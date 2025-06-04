@@ -2,8 +2,10 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from enum import Enum, auto
 
+
 class CoreException(Exception):
     """Base class for custom exceptions in this module."""
+
     pass
 
 
@@ -17,7 +19,9 @@ class BarSize(Enum):
     ONE_DAY = auto()
     ONE_WEEK = auto()
 
+
 class RequestedInfoType(Enum):
+    """Specifies what kind of historical data"""
 
     TRADES = "TRADES"
     IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
