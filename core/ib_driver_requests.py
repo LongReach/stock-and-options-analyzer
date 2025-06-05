@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import SecurityDescriptor, HistoricalData
+from core.common import SecurityDescriptor, HistoricalData, OptionChainInfo, OptionInfo
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 
@@ -67,5 +67,20 @@ class OptionChainInfoRequest(DataRequest):
     def __init__(self, ticker: str):
         super().__init__()
         self.ticker = ticker
-        self.expirations: Set = set()
-        self.strikes: Set = set()
+        self.option_chain_info_list: List[OptionChainInfo] = []
+        self._exchange_map: Dict[str, OptionChainInfo] = {}
+
+    def add_option_chain_info(self, info: OptionChainInfo):
+        self.option_chain_info_list.append(info)
+        self._exchange_map[info.exchange] = info
+
+    def get_best_option_chain_info(self):
+        if self._exchange_map.get("SMART"):
+            return self._exchange_map.get("SMART")
+        return self.option_chain_info_list[-1]
+
+class OptionRequest(DataRequest):
+
+    def __init__(self):
+        super().__init__()
+        self.option_info = OptionInfo()

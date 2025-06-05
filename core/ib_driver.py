@@ -2,10 +2,12 @@ import asyncio
 import copy
 import math
 
+from _decimal import Decimal
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
-from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString
+from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
+from ibapi.ticktype import TickType
 from ibapi.wrapper import EWrapper, OrderId
 from logging import getLogger, basicConfig
 import threading
@@ -14,11 +16,12 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import HistoricalData, RequestedInfoType, SecurityDescriptor
-from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
+from core.common import HistoricalData, RequestedInfoType, SecurityDescriptor, OptionChainInfo, OptionInfo
+from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize, is_trading_hours
 from core.ib_driver_requests import (
     ContractDetailsRequest,
     OptionChainInfoRequest,
+    OptionRequest,
     BarDataRequest,
     IBDriverException,
 )
@@ -50,6 +53,7 @@ class IBDriver(EWrapper, EClient):
         # Maps a request ID to a ContractDetailsRequest object
         self._request_contractdetail_objects: Dict[int, ContractDetailsRequest] = {}
         self._request_optionchain_objects: Dict[int, OptionChainInfoRequest] = {}
+        self._request_option_objects: Dict[int, OptionRequest] = {}
 
         # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
@@ -113,6 +117,9 @@ class IBDriver(EWrapper, EClient):
         """Returns next request ID, advancing the counter."""
         self.request_id += 1
         return self.request_id
+
+    async def set_market_data_type(self, live: bool = True):
+        self.reqMarketDataType(1 if live else 2)
 
     async def get_historical_data(
         self,
@@ -313,8 +320,9 @@ class IBDriver(EWrapper, EClient):
 
         return ret_cd, ret_error_str
 
+    @staticmethod
     def get_full_symbol_from_contract_details(
-        self, contract_details: ContractDetails
+            contract_details: ContractDetails
     ) -> str:
         """
         Given a ContractDetails object, return a full symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)
@@ -325,7 +333,7 @@ class IBDriver(EWrapper, EClient):
 
         return contract.symbol
 
-    async def get_options_chain_info(self, ticker: str, underlying_contract_id: int):
+    async def get_options_chain_info(self, ticker: str, underlying_contract_id: int) -> Optional[OptionChainInfo]:
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_optionchain_objects[req_id] = (
@@ -349,13 +357,87 @@ class IBDriver(EWrapper, EClient):
         else:
             self._logger.info("get_options_chain_info() finished")
 
-        exp_list = sorted(req_obj.expirations)
-        print(f"Expirations are {exp_list}")
-        strike_list = sorted(req_obj.strikes)
-        print(f"Strikes are {strike_list}")
+        option_info = req_obj.get_best_option_chain_info()
 
         async with self._lock:
             self._request_optionchain_objects.pop(req_id, None)
+
+        return option_info
+
+    async def get_greeks(self, contract_details: ContractDetails) -> Tuple[OptionInfo, str]:
+        """
+        For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
+
+        :param contract_details: CD of option for which Greeks are wanted
+        """
+        async with self._lock:
+            req_id = self.next_id()
+            req_obj = self._request_option_objects[req_id] = OptionRequest()
+
+        print(f"Getting greeks for {contract_details}")
+        full_ticker = self.get_full_symbol_from_contract_details(contract_details)
+        print(f"Full ticker is {full_ticker}")
+        req_obj.option_info.full_name = full_ticker
+        req_obj.option_info.is_call = contract_details.contract.right == "C"
+        req_obj.option_info.strike = contract_details.contract.strike
+        req_obj.option_info.expiration = contract_details.contract.lastTradeDateOrContractMonth
+        req_obj.option_info.set_live(is_trading_hours())
+
+        underlying_symbol = contract_details.contract.symbol
+        print(f"Underlying symbol is {underlying_symbol}")
+
+        """
+        data_tup, error_str = await self.get_most_recent_data(
+            underlying_symbol,
+            BarSize.ONE_MINUTE,
+            request_info_type=RequestedInfoType.ADJUSTED_LAST,
+        )
+        underlying_price = 0.0
+        if data_tup:
+            underlying_price = data_tup[0]["close"]
+        print(f"Underlying price for {full_ticker} is {underlying_price}")
+
+        data_tup, error_str = await self.get_most_recent_data(
+            full_ticker,
+            BarSize.ONE_MINUTE,
+            request_info_type=RequestedInfoType.ADJUSTED_LAST,
+        )
+        option_price = 0.0
+        if data_tup:
+            option_price = data_tup[0]["close"]
+        print(f"Option price for {full_ticker} is {option_price}")
+        """
+
+        req_obj.data_fetch_complete = False
+
+        #option_contract = self._make_contract(underlying_symbol, is_option=True, is_call=True, strike=600.0, expiration="20250627")
+        option_contract = contract_details.contract
+
+        #self.calculateImpliedVolatility(req_id, option_contract, option_price, underlying_price, [])
+        await self.set_market_data_type(is_trading_hours())
+        self.reqMktData(req_id, option_contract, "100,101", False, False, [])
+
+        timed_out = not await wait_for_condition(
+            lambda: req_obj.option_info.is_defined(), timeout=HISTORICAL_DATA_TIMEOUT
+        )
+        ret_error_str = None
+        if req_obj.has_error():
+            ret_error_str = f"Error getting option. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out getting option."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("get_greeks() finished")
+        req_obj.data_fetch_complete = True
+        # Cancel the request, so ticks don't keep coming in
+        self.cancelMktData(req_id)
+
+        async with self._lock:
+            self._request_option_objects.pop(req_id, None)
+
+        return req_obj.option_info, ret_error_str
+
 
     # ---------------------------------------------------
     # Callbacks
@@ -372,11 +454,15 @@ class IBDriver(EWrapper, EClient):
         super().nextValidId(request_id)
         self.request_id = request_id
 
+    def marketDataType(self, req_id: TickerId, market_data_type: int):
+        print(f"Market data type for {req_id} is {market_data_type}")
+
     def historicalData(self, req_id: int, bar: BarData):
         """
         Called by TWS when a bar of historical data comes in. Not called for updates to historical data (for
         current bar), only for the data that's actually in the past.
 
+        Response for reqHistoricalData()
         Overrides method in EWrapper.
 
         :param req_id: request ID
@@ -391,6 +477,7 @@ class IBDriver(EWrapper, EClient):
         we're fetching past historical data only, with no updates. The updates happen rapidly, many times over the
         course of a bar. High, low, and close can change. The date always matches the start of a bar.
 
+        Response for reqHistoricalData()
         Overrides method in EWrapper.
 
         :param req_id: request ID
@@ -404,6 +491,8 @@ class IBDriver(EWrapper, EClient):
         """
         Called by TWS when all the historical data requested has arrived.
 
+        Response for reqHistoricalData()
+
         :param req_id: request ID
         :param start: date of first bar of data
         :param end: date of last bar of data
@@ -412,6 +501,15 @@ class IBDriver(EWrapper, EClient):
         self._historical_data_end_cb(req_id, start, end)
 
     def headTimestamp(self, req_id: int, head_time_stamp: str):
+        """
+        Called by TWS when head timestamp for a particular security's data has arrived.
+
+        Response for reqHeadTimeStamp()
+
+        :param req_id: request ID
+        :param head_time_stamp: datetime in IB format
+        :return:
+        """
         super().headTimestamp(req_id, head_time_stamp)
         self._head_timestamp_cb(req_id, head_time_stamp)
 
@@ -425,6 +523,21 @@ class IBDriver(EWrapper, EClient):
         expirations: SetOfString,
         strikes: SetOfFloat,
     ):
+        """
+        Called by TWS when info about options for a particular security arrived.
+        This allows user to find out about expirations/strikes available for
+        a particular option.
+
+        Response for reqSecDefOptParams()
+
+        :param req_id: request ID
+        :param exchange: the exchange supplying the info, e.g. "SMART" or "BOX"
+        :param underlying_con_id: contract ID for underlying security
+        :param trading_class: name of underlying symbol, e.g. SPY
+        :param multiplier: usually 100, as is standard for options
+        :param expirations: set of expirations
+        :param strikes: set of strikes
+        """
         super().securityDefinitionOptionParameter(
             req_id,
             exchange,
@@ -443,22 +556,67 @@ class IBDriver(EWrapper, EClient):
             set(expirations),
             set(strikes),
         )
-        # print("SecurityDefinitionOptionParameter.",
-        #    "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
-        #    "TradingClass:", trading_class, "Multiplier:", multiplier,
-        #    "Expirations:", expirations, "Strikes:", str(strikes))
+        #print("SecurityDefinitionOptionParameter.",
+        #   "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
+        #   "TradingClass:", trading_class, "Multiplier:", multiplier,
+        #   "Expirations:", expirations, "Strikes:", str(strikes))
 
     def securityDefinitionOptionParameterEnd(self, req_id: int):
+        """
+        Called by TWS when *ALL* info about options for a particular security has arrived.
+
+        Response for reqSecDefOptParams()
+
+        :param req_id: request ID
+        """
         super().securityDefinitionOptionParameterEnd(req_id)
         self._option_chain_end_cb(req_id)
 
     def contractDetails(self, req_id: int, contract_details: ContractDetails):
+        """
+        Called by TWS when contractDetails have arrived (each exchange sends their own)
+
+        Response for reqContractDetails()
+
+        :param req_id: request ID
+        :param contract_details: ContractDetails object
+        """
         super().contractDetails(req_id, contract_details)
         self._contract_details_cb(req_id, contract_details)
 
     def contractDetailsEnd(self, req_id: int):
+        """
+        Called by TWS when ALL contractDetails have arrived
+
+        Response for reqContractDetails()
+
+        :param req_id: request ID
+        """
         super().contractDetailsEnd(req_id)
         self._contract_details_end_cb(req_id)
+
+    def tickOptionComputation(
+        self,
+        req_id: TickerId,
+        tick_type: TickType,
+        tick_attrib: int,
+        implied_vol: float,
+        delta: float,
+        opt_price: float,
+        pv_dividend: float,
+        gamma: float,
+        vega: float,
+        theta: float,
+        underlying_price: float,
+    ):
+        super().tickOptionComputation(req_id, tick_type, tick_attrib, implied_vol, delta, opt_price, pv_dividend, gamma, vega, theta, underlying_price)
+        print(f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}")
+        self._tick_option_computation_cb(req_id, tick_type, tick_attrib, implied_vol, delta, opt_price, pv_dividend, gamma, vega, theta, underlying_price)
+
+    def tickSize(self, req_id: TickerId, tick_type: TickType, size: Decimal):
+        super().tickSize(req_id, tick_type, size)
+        print(f"tickSize: req_id={req_id}, tick_type={tick_type}, size={size}")
+        self._tick_size_cb(req_id, tick_type, size)
 
     def error(
         self,
@@ -639,15 +797,67 @@ class IBDriver(EWrapper, EClient):
         expirations: Set,
         strikes: Set,
     ):
+        """
+        Called when info about options for a particular security arrived.
+        :param req_id: request ID
+        :param exchange: the exchange supplying the info, e.g. "SMART" or "BOX"
+        :param underlying_con_id: contract ID for underlying security
+        :param trading_class: name of underlying symbol, e.g. SPY
+        :param multiplier: usually 100, as is standard for options
+        :param expirations: set of expirations
+        :param strikes: set of strikes
+        """
         req_obj = self._request_optionchain_objects.get(req_id)
         if req_obj:
-            req_obj.expirations = copy.copy(expirations)
-            req_obj.strikes = copy.copy(strikes)
+            option_chain_info = OptionChainInfo()
+            option_chain_info.exchange = exchange
+            option_chain_info.underlying = trading_class
+            option_chain_info.multiplier = int(multiplier)
+            option_chain_info.expirations = copy.copy(expirations)
+            option_chain_info.strikes = copy.copy(strikes)
+            req_obj.add_option_chain_info(option_chain_info)
 
     def _option_chain_end_cb(self, req_id: int):
         req_obj = self._request_optionchain_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
+
+    def _tick_option_computation_cb(self, req_id: TickerId,
+        tick_type: TickType,
+        tick_attrib: int,
+        implied_vol: float,
+        delta: float,
+        opt_price: float,
+        pv_dividend: float,
+        gamma: float,
+        vega: float,
+        theta: float,
+        underlying_price: float,
+):
+        req_obj = self._request_option_objects.get(req_id)
+        if req_obj and tick_type == 13:
+            req_obj.option_info.implied_volatility = implied_vol
+            req_obj.option_info.delta = delta
+            req_obj.option_info.price = opt_price
+            req_obj.option_info.gamma = gamma
+            req_obj.option_info.vega = vega
+            req_obj.option_info.theta = theta
+            req_obj.option_info.underlying_price = underlying_price
+            req_obj.option_info.set_greeks_defined()
+
+    def _tick_size_cb(self, req_id: TickerId, tick_type: TickType, size: Decimal):
+        req_obj = self._request_option_objects.get(req_id)
+        if req_obj:
+            if int(tick_type) == 27:
+                req_obj.option_info.set_open_interest(int(size), for_call=True)
+            if int(tick_type) == 28:
+                req_obj.option_info.set_open_interest(int(size), for_call=False)
+            if int(tick_type) == 29:
+                req_obj.option_info.set_volume(int(size), for_call=True)
+            if int(tick_type) == 30:
+                req_obj.option_info.set_volume(int(size), for_call=False)
+            if int(tick_type) == 8:
+                req_obj.option_info.set_volume(int(size), for_call=req_obj.option_info.is_call)
 
     def _error_cb(
         self,

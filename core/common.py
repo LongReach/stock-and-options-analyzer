@@ -1,7 +1,10 @@
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set, Any
 from datetime import datetime
 from enum import Enum, auto
 from ibapi.common import BarData
+
+LOCAL_TIMEZONE = "America/New_York"
+MARKETS_TIMEZONE = "America/New_York"
 
 
 class CoreException(Exception):
@@ -121,3 +124,73 @@ class HistoricalData:
             for bar in self.bar_data
         ]
         return ret_bars
+
+class OptionChainInfo:
+    """Receives very basic information about an option chain."""
+
+    def __init__(self):
+        self.exchange: str = ""
+        self.underlying: str = ""
+        self.multiplier: int = 100
+        self.expirations: Set[str] = set()
+        self.strikes: Set[float] = set()
+
+
+class OptionInfo:
+    """Info about a particular option contract."""
+
+    def __init__(self):
+        self.full_name: str = ""
+        self.is_call: bool = True
+        self.strike: float = 0.0
+        self.expiration: str = ""
+        self.price: float = 0.0
+        self.underlying_price: float = 0.0
+        self.delta: float = 0.0
+        self.theta: float = 0.0
+        self.gamma: float = 0.0
+        self.vega: float = 0.0
+        self.open_interest: int = 0
+        self.volume: int = 0
+        self.implied_volatility: float = 0.0
+
+        self._live: bool = False
+        self._greeks_defined: bool = False
+        self._interest_defined: bool = False
+        self._volume_defined: bool = False
+
+    def set_open_interest(self, amount: int, for_call: bool = False):
+        if self.is_call == for_call:
+            self.open_interest = amount
+            self._interest_defined = True
+
+    def set_volume(self, amount: int, for_call: bool = False):
+        if self.is_call == for_call:
+            self.volume = amount
+            self._volume_defined = True
+
+    def set_live(self, live: bool = True):
+        self._live = live
+
+    def set_greeks_defined(self):
+        self._greeks_defined = True
+
+    def is_defined(self) -> bool:
+        return self._greeks_defined and self._interest_defined and (self._volume_defined or not self._live)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "full_name": self.full_name,
+            "is_call": self.is_call,
+            "strike": self.strike,
+            "expiration": self.expiration,
+            "price": self.price,
+            "underlying_price": self.underlying_price,
+            "delta": self.delta,
+            "theta": self.theta,
+            "gamma": self.gamma,
+            "vega": self.vega,
+            "open_interest": self.open_interest,
+            "volume": self.volume,
+            "implied_volatility": self.implied_volatility,
+        }

@@ -1,9 +1,10 @@
 import asyncio
 from typing import Union
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from enum import Enum, auto
 
-from core.common import BarSize, CoreException
+from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
 
 def bar_size_to_str(bar_size: BarSize) -> str:
@@ -119,3 +120,11 @@ def get_datetime_as_str(dt: Union[datetime, str]) -> str:
     if isinstance(dt, str):
         dt = get_datetime(dt)
     return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
+
+def is_trading_hours() -> bool:
+    current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
+    if 10 <= current_dt.hour < 16:
+        return True
+    if current_dt.hour >= 9 and current_dt.minute >= 30:
+        return True
+    return False
