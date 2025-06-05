@@ -37,6 +37,7 @@ from core.ib_driver_requests import (
     BarDataRequest,
     IBDriverException,
 )
+from core.ib_wrapper import IBWrapper
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
@@ -44,18 +45,19 @@ NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
 
 
-class IBDriver(EWrapper, EClient):
+class IBDriver(IBWrapper):
     """
-    This class extends IB's EWrapper and EClient, allowing communication to and from TWS. Commands go out
-    via functions in EClient and responses come back to the callbacks inherited from EWrapper.
+    This class permits communication with Interactive Brokers. Commands go out via functions in EClient (a parent
+    of this class) and responses come back to the callbacks in IBWrapper, which passes the information on
+    to functions in this class.
 
-    This is an async interface, meant to abstract away the threaded-ness of IBWrapper. Note how the function
-    get_historical_data() waits for all data to arrive before returning a result.
+    This is an async interface, meant to abstract away the threaded-ness of EClient and the need for callers to think
+    about IB's callback-based communication framework. Note how the function get_historical_data() waits for all data
+    to arrive before returning a result.
     """
 
     def __init__(self, sim_account: bool, client_id: int = 0):
-        EClient.__init__(self, self)
-        self.request_id: Optional[OrderId] = None
+        super().__init__()
         self._app_thread: Optional[threading.Thread] = None
         self._sim_account = sim_account
         self._client_id = client_id
@@ -129,9 +131,6 @@ class IBDriver(EWrapper, EClient):
         """Returns next request ID, advancing the counter."""
         self.request_id += 1
         return self.request_id
-
-    async def set_market_data_type(self, live: bool = True):
-        self.reqMarketDataType(1 if live else 2)
 
     async def get_historical_data(
         self,
@@ -419,7 +418,7 @@ class IBDriver(EWrapper, EClient):
 
         option_contract = contract_details.contract
 
-        await self.set_market_data_type(is_trading_hours())
+        await self._set_market_data_type(is_trading_hours())
         # 100 and 101 are for volume and open interest, respectively
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
@@ -443,230 +442,6 @@ class IBDriver(EWrapper, EClient):
             self._request_option_objects.pop(req_id, None)
 
         return req_obj.option_info, ret_error_str
-
-    # ---------------------------------------------------
-    # Callbacks
-    # ---------------------------------------------------
-
-    def nextValidId(self, request_id: OrderId):
-        """
-        Called by TWS when a valid request ID is established. We are not properly connected until we have one.
-        This will be the ID used for the first request, with each subsequent request incrementing it by one.
-        "OrderId" seems to a misnaming.
-
-        Overrides method in EWrapper.
-        """
-        super().nextValidId(request_id)
-        self.request_id = request_id
-
-    def marketDataType(self, req_id: TickerId, market_data_type: int):
-        """
-        Called by TWS to report on market data type being used (1 = live, 2 = frozen)
-        """
-        self._logger.info(f"Market data type for {req_id} is {market_data_type}")
-
-    def historicalData(self, req_id: int, bar: BarData):
-        """
-        Called by TWS when a bar of historical data comes in. Not called for updates to historical data (for
-        current bar), only for the data that's actually in the past.
-
-        Response for reqHistoricalData()
-        Overrides method in EWrapper.
-
-        :param req_id: request ID
-        :param bar: info about bar of data
-        """
-        super().historicalData(req_id, bar)
-        self._historical_data_cb(req_id, bar, False)
-
-    def historicalDataUpdate(self, req_id: int, bar: BarData):
-        """
-        Called by TWS when a bar of updated historical data comes in, i.e. for the current bar. Not called when
-        we're fetching past historical data only, with no updates. The updates happen rapidly, many times over the
-        course of a bar. High, low, and close can change. The date always matches the start of a bar.
-
-        Response for reqHistoricalData()
-        Overrides method in EWrapper.
-
-        :param req_id: request ID
-        :param bar: info about bar of data
-        """
-        super().historicalDataUpdate(req_id, bar)
-        self._historical_data_cb(req_id, bar, True)
-
-    def historicalDataEnd(self, req_id: int, start: str, end: str):
-        """
-        Called by TWS when all the historical data requested has arrived.
-
-        Response for reqHistoricalData()
-
-        :param req_id: request ID
-        :param start: date of first bar of data
-        :param end: date of last bar of data
-        """
-        super().historicalDataEnd(req_id, start, end)
-        self._historical_data_end_cb(req_id, start, end)
-
-    def headTimestamp(self, req_id: int, head_time_stamp: str):
-        """
-        Called by TWS when head timestamp for a particular security's data has arrived.
-
-        Response for reqHeadTimeStamp()
-
-        :param req_id: request ID
-        :param head_time_stamp: datetime in IB format
-        :return:
-        """
-        super().headTimestamp(req_id, head_time_stamp)
-        self._head_timestamp_cb(req_id, head_time_stamp)
-
-    def securityDefinitionOptionParameter(
-        self,
-        req_id: int,
-        exchange: str,
-        underlying_con_id: int,
-        trading_class: str,
-        multiplier: str,
-        expirations: SetOfString,
-        strikes: SetOfFloat,
-    ):
-        """
-        Called by TWS when info about options for a particular security arrived.
-        This allows user to find out about expirations/strikes available for
-        a particular option.
-
-        Response for reqSecDefOptParams()
-
-        :param req_id: request ID
-        :param exchange: the exchange supplying the info, e.g. "SMART" or "BOX"
-        :param underlying_con_id: contract ID for underlying security
-        :param trading_class: name of underlying symbol, e.g. SPY
-        :param multiplier: usually 100, as is standard for options
-        :param expirations: set of expirations
-        :param strikes: set of strikes
-        """
-        super().securityDefinitionOptionParameter(
-            req_id,
-            exchange,
-            underlying_con_id,
-            trading_class,
-            multiplier,
-            expirations,
-            strikes,
-        )
-        self._option_chain_cb(
-            req_id,
-            exchange,
-            underlying_con_id,
-            trading_class,
-            multiplier,
-            set(expirations),
-            set(strikes),
-        )
-        # print("SecurityDefinitionOptionParameter.",
-        #   "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
-        #   "TradingClass:", trading_class, "Multiplier:", multiplier,
-        #   "Expirations:", expirations, "Strikes:", str(strikes))
-
-    def securityDefinitionOptionParameterEnd(self, req_id: int):
-        """
-        Called by TWS when *ALL* info about options for a particular security has arrived.
-
-        Response for reqSecDefOptParams()
-
-        :param req_id: request ID
-        """
-        super().securityDefinitionOptionParameterEnd(req_id)
-        self._option_chain_end_cb(req_id)
-
-    def contractDetails(self, req_id: int, contract_details: ContractDetails):
-        """
-        Called by TWS when contractDetails have arrived (each exchange sends their own)
-
-        Response for reqContractDetails()
-
-        :param req_id: request ID
-        :param contract_details: ContractDetails object
-        """
-        super().contractDetails(req_id, contract_details)
-        self._contract_details_cb(req_id, contract_details)
-
-    def contractDetailsEnd(self, req_id: int):
-        """
-        Called by TWS when ALL contractDetails have arrived
-
-        Response for reqContractDetails()
-
-        :param req_id: request ID
-        """
-        super().contractDetailsEnd(req_id)
-        self._contract_details_end_cb(req_id)
-
-    def tickOptionComputation(
-        self,
-        req_id: TickerId,
-        tick_type: TickType,
-        tick_attrib: int,
-        implied_vol: float,
-        delta: float,
-        opt_price: float,
-        pv_dividend: float,
-        gamma: float,
-        vega: float,
-        theta: float,
-        underlying_price: float,
-    ):
-        """
-        Called by TWS when info about an option comes in. Response to reqMktData().
-        """
-        super().tickOptionComputation(
-            req_id,
-            tick_type,
-            tick_attrib,
-            implied_vol,
-            delta,
-            opt_price,
-            pv_dividend,
-            gamma,
-            vega,
-            theta,
-            underlying_price,
-        )
-        # print(
-        #    f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}"
-        # )
-        self._tick_option_computation_cb(
-            req_id,
-            tick_type,
-            tick_attrib,
-            implied_vol,
-            delta,
-            opt_price,
-            pv_dividend,
-            gamma,
-            vega,
-            theta,
-            underlying_price,
-        )
-
-    def tickSize(self, req_id: TickerId, tick_type: TickType, size: Decimal):
-        """
-        Called by TWS when volume or open interest info about an option comes in. Response to reqMktData().
-        """
-        super().tickSize(req_id, tick_type, size)
-        # print(f"tickSize: req_id={req_id}, tick_type={tick_type}, size={size}")
-        self._tick_size_cb(req_id, tick_type, size)
-
-    def error(
-        self,
-        req_id: int,
-        error_code: int,
-        error_string: str,
-        advanced_order_reject_json="",
-    ):
-        """Called by TWS when there's an error with a request."""
-        super().error(req_id, error_code, error_string, advanced_order_reject_json)
-        self._error_cb(req_id, error_code, error_string, advanced_order_reject_json)
 
     # ---------------------------------------------------
     # Private methods
@@ -1000,3 +775,7 @@ class IBDriver(EWrapper, EClient):
         if primary_exchange:
             the_contract.primaryExchange = primary_exchange
         return the_contract
+
+    async def _set_market_data_type(self, live: bool = True):
+        """Call before calling reqMktData() to set whether live or frozen data"""
+        self.reqMarketDataType(1 if live else 2)

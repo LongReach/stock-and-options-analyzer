@@ -28,7 +28,7 @@ async def main():
         ib_driver.connect()
         contract_details, error_str = await ib_driver.get_contract_details("SPY")
 
-        print(f"Got {contract_details}, error is {error_str}")
+        print(f"Got {contract_details.contract}, error is {error_str}")
         contract_id = contract_details.contract.conId
         option_info, error_str = await ib_driver.get_options_chain_info(
             "SPY", contract_id
@@ -45,7 +45,7 @@ async def main():
             "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250620"
         )
         option_info, error_str = await ib_driver.get_greeks(contract_details)
-        print(f"Option info is: {option_info.to_dict()}")
+        print(f"Option info is: {option_info.to_dict()}, error is {error_str}")
 
     except Exception as ex:
         print(f"Exception: {ex}")
