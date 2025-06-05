@@ -161,22 +161,35 @@ class OptionInfo:
         self._volume_defined: bool = False
 
     def set_open_interest(self, amount: int, for_call: bool = False):
+        """
+        Sets open interest.
+        :param amount: amount to use
+        :param for_call: True if amount is meant for a call option (amount will be ignored if wrong option type)
+        """
         if self.is_call == for_call:
             self.open_interest = amount
             self._interest_defined = True
 
     def set_volume(self, amount: int, for_call: bool = False):
+        """
+        Sets volume
+        :param amount: amount to use
+        :param for_call: True if amount is meant for a call option (amount will be ignored if wrong option type)
+        """
         if self.is_call == for_call:
             self.volume = amount
             self._volume_defined = True
 
     def set_live(self, live: bool = True):
+        """Sets whether the info in this object will reflect live market data"""
         self._live = live
 
     def set_greeks_defined(self):
+        """IBDriver calls this func. when information for Greeks has been set."""
         self._greeks_defined = True
 
     def is_defined(self) -> bool:
+        """Returns True when this object has been filled out with all desired info."""
         return (
             self._greeks_defined
             and self._interest_defined
@@ -184,6 +197,7 @@ class OptionInfo:
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        """Returns data as a dict"""
         return {
             "full_name": self.full_name,
             "is_call": self.is_call,

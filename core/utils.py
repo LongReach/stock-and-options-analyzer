@@ -8,6 +8,7 @@ from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
 
 def bar_size_to_str(bar_size: BarSize) -> str:
+    """Convert BarSize to a string description"""
     conversion_map = {
         BarSize.ONE_MINUTE: "1m",
         BarSize.FIVE_MINUTES: "5m",
@@ -23,6 +24,7 @@ def bar_size_to_str(bar_size: BarSize) -> str:
 
 
 def str_to_bar_size(bar_size_str: str) -> BarSize:
+    """Given a string description, return a BarSize"""
     conversion_map = {
         "1m": BarSize.ONE_MINUTE,
         "5m": BarSize.FIVE_MINUTES,
@@ -38,6 +40,7 @@ def str_to_bar_size(bar_size_str: str) -> BarSize:
 
 
 def bar_size_to_time(bar_size: BarSize) -> timedelta:
+    """Given a BarSize, return a timedelta object"""
     conversion_map = {
         BarSize.ONE_MINUTE: timedelta(minutes=1),
         BarSize.FIVE_MINUTES: timedelta(minutes=5),
@@ -123,6 +126,7 @@ def get_datetime_as_str(dt: Union[datetime, str]) -> str:
 
 
 def is_trading_hours() -> bool:
+    """Returns True if it's trading hours right now"""
     current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
     if 10 <= current_dt.hour < 16:
         return True
