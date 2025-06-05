@@ -16,8 +16,20 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import HistoricalData, RequestedInfoType, SecurityDescriptor, OptionChainInfo, OptionInfo
-from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize, is_trading_hours
+from core.common import (
+    HistoricalData,
+    RequestedInfoType,
+    SecurityDescriptor,
+    OptionChainInfo,
+    OptionInfo,
+)
+from core.utils import (
+    wait_for_condition,
+    get_datetime,
+    get_datetime_as_str,
+    BarSize,
+    is_trading_hours,
+)
 from core.ib_driver_requests import (
     ContractDetailsRequest,
     OptionChainInfoRequest,
@@ -321,9 +333,7 @@ class IBDriver(EWrapper, EClient):
         return ret_cd, ret_error_str
 
     @staticmethod
-    def get_full_symbol_from_contract_details(
-            contract_details: ContractDetails
-    ) -> str:
+    def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
         """
         Given a ContractDetails object, return a full symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)
         """
@@ -333,7 +343,9 @@ class IBDriver(EWrapper, EClient):
 
         return contract.symbol
 
-    async def get_options_chain_info(self, ticker: str, underlying_contract_id: int) -> Optional[OptionChainInfo]:
+    async def get_options_chain_info(
+        self, ticker: str, underlying_contract_id: int
+    ) -> Optional[OptionChainInfo]:
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_optionchain_objects[req_id] = (
@@ -364,7 +376,9 @@ class IBDriver(EWrapper, EClient):
 
         return option_info
 
-    async def get_greeks(self, contract_details: ContractDetails) -> Tuple[OptionInfo, str]:
+    async def get_greeks(
+        self, contract_details: ContractDetails
+    ) -> Tuple[OptionInfo, str]:
         """
         For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
 
@@ -380,7 +394,9 @@ class IBDriver(EWrapper, EClient):
         req_obj.option_info.full_name = full_ticker
         req_obj.option_info.is_call = contract_details.contract.right == "C"
         req_obj.option_info.strike = contract_details.contract.strike
-        req_obj.option_info.expiration = contract_details.contract.lastTradeDateOrContractMonth
+        req_obj.option_info.expiration = (
+            contract_details.contract.lastTradeDateOrContractMonth
+        )
         req_obj.option_info.set_live(is_trading_hours())
 
         underlying_symbol = contract_details.contract.symbol
@@ -410,10 +426,10 @@ class IBDriver(EWrapper, EClient):
 
         req_obj.data_fetch_complete = False
 
-        #option_contract = self._make_contract(underlying_symbol, is_option=True, is_call=True, strike=600.0, expiration="20250627")
+        # option_contract = self._make_contract(underlying_symbol, is_option=True, is_call=True, strike=600.0, expiration="20250627")
         option_contract = contract_details.contract
 
-        #self.calculateImpliedVolatility(req_id, option_contract, option_price, underlying_price, [])
+        # self.calculateImpliedVolatility(req_id, option_contract, option_price, underlying_price, [])
         await self.set_market_data_type(is_trading_hours())
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
@@ -437,7 +453,6 @@ class IBDriver(EWrapper, EClient):
             self._request_option_objects.pop(req_id, None)
 
         return req_obj.option_info, ret_error_str
-
 
     # ---------------------------------------------------
     # Callbacks
@@ -556,7 +571,7 @@ class IBDriver(EWrapper, EClient):
             set(expirations),
             set(strikes),
         )
-        #print("SecurityDefinitionOptionParameter.",
+        # print("SecurityDefinitionOptionParameter.",
         #   "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
         #   "TradingClass:", trading_class, "Multiplier:", multiplier,
         #   "Expirations:", expirations, "Strikes:", str(strikes))
@@ -609,9 +624,35 @@ class IBDriver(EWrapper, EClient):
         theta: float,
         underlying_price: float,
     ):
-        super().tickOptionComputation(req_id, tick_type, tick_attrib, implied_vol, delta, opt_price, pv_dividend, gamma, vega, theta, underlying_price)
-        print(f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}")
-        self._tick_option_computation_cb(req_id, tick_type, tick_attrib, implied_vol, delta, opt_price, pv_dividend, gamma, vega, theta, underlying_price)
+        super().tickOptionComputation(
+            req_id,
+            tick_type,
+            tick_attrib,
+            implied_vol,
+            delta,
+            opt_price,
+            pv_dividend,
+            gamma,
+            vega,
+            theta,
+            underlying_price,
+        )
+        print(
+            f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}"
+        )
+        self._tick_option_computation_cb(
+            req_id,
+            tick_type,
+            tick_attrib,
+            implied_vol,
+            delta,
+            opt_price,
+            pv_dividend,
+            gamma,
+            vega,
+            theta,
+            underlying_price,
+        )
 
     def tickSize(self, req_id: TickerId, tick_type: TickType, size: Decimal):
         super().tickSize(req_id, tick_type, size)
@@ -822,7 +863,9 @@ class IBDriver(EWrapper, EClient):
         if req_obj:
             req_obj.data_fetch_complete = True
 
-    def _tick_option_computation_cb(self, req_id: TickerId,
+    def _tick_option_computation_cb(
+        self,
+        req_id: TickerId,
         tick_type: TickType,
         tick_attrib: int,
         implied_vol: float,
@@ -833,7 +876,7 @@ class IBDriver(EWrapper, EClient):
         vega: float,
         theta: float,
         underlying_price: float,
-):
+    ):
         req_obj = self._request_option_objects.get(req_id)
         if req_obj and tick_type == 13:
             req_obj.option_info.implied_volatility = implied_vol
@@ -857,7 +900,9 @@ class IBDriver(EWrapper, EClient):
             if int(tick_type) == 30:
                 req_obj.option_info.set_volume(int(size), for_call=False)
             if int(tick_type) == 8:
-                req_obj.option_info.set_volume(int(size), for_call=req_obj.option_info.is_call)
+                req_obj.option_info.set_volume(
+                    int(size), for_call=req_obj.option_info.is_call
+                )
 
     def _error_cb(
         self,

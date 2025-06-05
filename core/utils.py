@@ -121,6 +121,7 @@ def get_datetime_as_str(dt: Union[datetime, str]) -> str:
         dt = get_datetime(dt)
     return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
 
+
 def is_trading_hours() -> bool:
     current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
     if 10 <= current_dt.hour < 16:

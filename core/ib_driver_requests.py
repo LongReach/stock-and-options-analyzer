@@ -79,6 +79,7 @@ class OptionChainInfoRequest(DataRequest):
             return self._exchange_map.get("SMART")
         return self.option_chain_info_list[-1]
 
+
 class OptionRequest(DataRequest):
 
     def __init__(self):
