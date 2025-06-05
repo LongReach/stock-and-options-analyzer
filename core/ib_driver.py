@@ -294,11 +294,12 @@ class IBDriver(IBWrapper):
         expiration: Optional[str] = None,
     ) -> Tuple[Optional[ContractDetails], Optional[str]]:
         """
-        Returns an IB ContractDetails object for given ticker
+        Returns an IB ContractDetails object for given ticker.
+
         :param ticker: ticker for stock, or underlying, if option
         :param primary_exchange: --
         :param is_option: True if option
-        :param is_call: True if call, False if put
+        :param is_call: True if option is a call, False if put
         :param strike: strike price of option
         :param expiration: expiration date, in IB format
         :return: (ContractDetails or None, error string or None)
@@ -333,17 +334,6 @@ class IBDriver(IBWrapper):
             self._request_contractdetail_objects.pop(req_id, None)
 
         return ret_cd, ret_error_str
-
-    @staticmethod
-    def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
-        """
-        Given a ContractDetails object, return a full symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)
-        """
-        contract = contract_details.contract
-        if contract.secType == "OPT":
-            return f"{contract.symbol}-{contract.right}-{contract.lastTradeDateOrContractMonth}-{contract.strike}"
-
-        return contract.symbol
 
     async def get_options_chain_info(
         self, ticker: str, underlying_contract_id: int
@@ -442,6 +432,17 @@ class IBDriver(IBWrapper):
             self._request_option_objects.pop(req_id, None)
 
         return req_obj.option_info, ret_error_str
+
+    @staticmethod
+    def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
+        """
+        Given a ContractDetails object, return a full symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)
+        """
+        contract = contract_details.contract
+        if contract.secType == "OPT":
+            return f"{contract.symbol}-{contract.right}-{contract.lastTradeDateOrContractMonth}-{contract.strike}"
+
+        return contract.symbol
 
     # ---------------------------------------------------
     # Private methods
@@ -747,7 +748,7 @@ class IBDriver(IBWrapper):
         """Makes and returns an IB Contract"""
 
         """
-        Option contract
+        Option contract example:
 
                 contract = Contract()
                 contract.symbol = "GOOG"
@@ -769,8 +770,10 @@ class IBDriver(IBWrapper):
         if is_option:
             the_contract.secType = "OPT"
             the_contract.right = "C" if is_call else "P"
-            the_contract.strike = int(strike)
-            the_contract.lastTradeDateOrContractMonth = expiration
+            if strike is not None:
+                the_contract.strike = int(strike)
+            if expiration is not None:
+                the_contract.lastTradeDateOrContractMonth = expiration
             the_contract.multiplier = "100"
         if primary_exchange:
             the_contract.primaryExchange = primary_exchange

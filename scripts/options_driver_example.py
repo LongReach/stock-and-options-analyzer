@@ -47,6 +47,12 @@ async def main():
         option_info, error_str = await ib_driver.get_greeks(contract_details)
         print(f"Option info is: {option_info.to_dict()}, error is {error_str}")
 
+        # Extra experimental
+        print("\nExtra experimental part")
+        contract_details, error_str = await ib_driver.get_contract_details(
+            "SPY", is_option=True, is_call=True, expiration="20250620"
+        )
+
     except Exception as ex:
         print(f"Exception: {ex}")
 

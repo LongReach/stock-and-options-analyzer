@@ -56,6 +56,8 @@ class BarDataRequest(DataRequest):
 class ContractDetailsRequest(DataRequest):
     """For tracking a contract details request and capturing results returned so far."""
 
+    # TODO: refactor this thing for the returning of multiple contract details
+
     def __init__(self):
         super().__init__()
         self.details_list: List[ContractDetails] = []
