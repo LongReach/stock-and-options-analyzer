@@ -71,16 +71,24 @@ class OptionChainInfoRequest(DataRequest):
         self._exchange_map: Dict[str, OptionChainInfo] = {}
 
     def add_option_chain_info(self, info: OptionChainInfo):
+        """There will be one of these for each exchange"""
         self.option_chain_info_list.append(info)
         self._exchange_map[info.exchange] = info
 
-    def get_best_option_chain_info(self):
+    def get_best_option_chain_info(self) -> Optional[OptionChainInfo]:
+        """
+        Return OptionChainInfo or None. Prefer the one from SMART exchange, if any has
+        arrived for that exchange.
+        """
+        if len(self.option_chain_info_list) == 0:
+            return None
         if self._exchange_map.get("SMART"):
             return self._exchange_map.get("SMART")
         return self.option_chain_info_list[-1]
 
 
 class OptionRequest(DataRequest):
+    """For tracking an options info request and capturing results returned so far."""
 
     def __init__(self):
         super().__init__()

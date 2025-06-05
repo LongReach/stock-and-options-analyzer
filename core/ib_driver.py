@@ -232,7 +232,10 @@ class IBDriver(EWrapper, EClient):
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ) -> Tuple[Optional[Tuple[dict, datetime]], Optional[str]]:
         """
-        Gets the most recent bar of data
+        Gets the most recent bar of data.
+
+        Note: don't use daily bars if you're getting data for an option
+
         :param symbol_full: e.g. AAPL or SPY-C-20250627-600.0
         :param bar_size: daily, hourly, weekly, etc.
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
@@ -345,7 +348,15 @@ class IBDriver(EWrapper, EClient):
 
     async def get_options_chain_info(
         self, ticker: str, underlying_contract_id: int
-    ) -> Optional[OptionChainInfo]:
+    ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
+        """
+        Gets basic information about the option chain for a stock. Strikes and expiration dates
+        are the most useful data returned.
+
+        :param ticker: ticker of underlying, e.g. AAPL
+        :param underlying_contract_id: contract ID for underlying stock
+        :return: (OptionChainInfo or None, error string or None)
+        """
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_optionchain_objects[req_id] = (
@@ -353,7 +364,6 @@ class IBDriver(EWrapper, EClient):
             )
 
         req_obj.data_fetch_complete = False
-        print("**** get_options_chain_info()")
         self.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
 
         timed_out = not await wait_for_condition(
@@ -374,23 +384,30 @@ class IBDriver(EWrapper, EClient):
         async with self._lock:
             self._request_optionchain_objects.pop(req_id, None)
 
-        return option_info
+        return option_info, ret_error_str
 
     async def get_greeks(
         self, contract_details: ContractDetails
-    ) -> Tuple[OptionInfo, str]:
+    ) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
+        Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
+        interest, etc.)
+
         For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
 
         :param contract_details: CD of option for which Greeks are wanted
+        :return: (OptionInfo or None, error string or None)
         """
+        if contract_details.contract.secType != "OPT":
+            return None, "Contract not for an option"
+
+        full_ticker = self.get_full_symbol_from_contract_details(contract_details)
+        self._logger.info(f"Getting Greeks and other info for option {full_ticker}")
+
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_option_objects[req_id] = OptionRequest()
 
-        print(f"Getting greeks for {contract_details}")
-        full_ticker = self.get_full_symbol_from_contract_details(contract_details)
-        print(f"Full ticker is {full_ticker}")
         req_obj.option_info.full_name = full_ticker
         req_obj.option_info.is_call = contract_details.contract.right == "C"
         req_obj.option_info.strike = contract_details.contract.strike
@@ -398,39 +415,12 @@ class IBDriver(EWrapper, EClient):
             contract_details.contract.lastTradeDateOrContractMonth
         )
         req_obj.option_info.set_live(is_trading_hours())
-
-        underlying_symbol = contract_details.contract.symbol
-        print(f"Underlying symbol is {underlying_symbol}")
-
-        """
-        data_tup, error_str = await self.get_most_recent_data(
-            underlying_symbol,
-            BarSize.ONE_MINUTE,
-            request_info_type=RequestedInfoType.ADJUSTED_LAST,
-        )
-        underlying_price = 0.0
-        if data_tup:
-            underlying_price = data_tup[0]["close"]
-        print(f"Underlying price for {full_ticker} is {underlying_price}")
-
-        data_tup, error_str = await self.get_most_recent_data(
-            full_ticker,
-            BarSize.ONE_MINUTE,
-            request_info_type=RequestedInfoType.ADJUSTED_LAST,
-        )
-        option_price = 0.0
-        if data_tup:
-            option_price = data_tup[0]["close"]
-        print(f"Option price for {full_ticker} is {option_price}")
-        """
-
         req_obj.data_fetch_complete = False
 
-        # option_contract = self._make_contract(underlying_symbol, is_option=True, is_call=True, strike=600.0, expiration="20250627")
         option_contract = contract_details.contract
 
-        # self.calculateImpliedVolatility(req_id, option_contract, option_price, underlying_price, [])
         await self.set_market_data_type(is_trading_hours())
+        # 100 and 101 are for volume and open interest, respectively
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
         timed_out = not await wait_for_condition(
@@ -470,7 +460,10 @@ class IBDriver(EWrapper, EClient):
         self.request_id = request_id
 
     def marketDataType(self, req_id: TickerId, market_data_type: int):
-        print(f"Market data type for {req_id} is {market_data_type}")
+        """
+        Called by TWS to report on market data type being used (1 = live, 2 = frozen)
+        """
+        self._logger.info(f"Market data type for {req_id} is {market_data_type}")
 
     def historicalData(self, req_id: int, bar: BarData):
         """
@@ -499,7 +492,6 @@ class IBDriver(EWrapper, EClient):
         :param bar: info about bar of data
         """
         super().historicalDataUpdate(req_id, bar)
-        print(f"**** Live data for {req_id} is {bar}")
         self._historical_data_cb(req_id, bar, True)
 
     def historicalDataEnd(self, req_id: int, start: str, end: str):
@@ -624,6 +616,9 @@ class IBDriver(EWrapper, EClient):
         theta: float,
         underlying_price: float,
     ):
+        """
+        Called by TWS when info about an option comes in. Response to reqMktData().
+        """
         super().tickOptionComputation(
             req_id,
             tick_type,
@@ -637,9 +632,9 @@ class IBDriver(EWrapper, EClient):
             theta,
             underlying_price,
         )
-        print(
-            f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}"
-        )
+        # print(
+        #    f"tickOptionComputation: req_id={req_id}, tick_type={tick_type}, tick_attrib={tick_attrib}, opt_price={opt_price}, underlying_price={underlying_price}, delta={delta}, theta={theta}, IV={implied_vol}"
+        # )
         self._tick_option_computation_cb(
             req_id,
             tick_type,
@@ -655,8 +650,11 @@ class IBDriver(EWrapper, EClient):
         )
 
     def tickSize(self, req_id: TickerId, tick_type: TickType, size: Decimal):
+        """
+        Called by TWS when volume or open interest info about an option comes in. Response to reqMktData().
+        """
         super().tickSize(req_id, tick_type, size)
-        print(f"tickSize: req_id={req_id}, tick_type={tick_type}, size={size}")
+        # print(f"tickSize: req_id={req_id}, tick_type={tick_type}, size={size}")
         self._tick_size_cb(req_id, tick_type, size)
 
     def error(
@@ -799,6 +797,7 @@ class IBDriver(EWrapper, EClient):
             req_obj.data_fetch_complete = True
 
     def _request_head_timestamp(self, req_id: int, contract: Contract):
+        """Requests head timestamp (datetime of earliest bar) from TWS"""
         # Request Head Timestamp
         #     reqId: ID of request
         #     contract: Contract object
@@ -819,11 +818,13 @@ class IBDriver(EWrapper, EClient):
         self._symbol_to_head_timestamp[symbol] = start
 
     def _contract_details_cb(self, req_id: int, contract_details: ContractDetails):
+        """Called when a ContractDetails object has arrived"""
         req_obj = self._request_contractdetail_objects.get(req_id)
         if req_obj:
             req_obj.details_list.append(contract_details)
 
     def _contract_details_end_cb(self, req_id: int):
+        """Called when ALL ContractDetails objects have arrived, in response to last request"""
         req_obj = self._request_contractdetail_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
@@ -859,6 +860,7 @@ class IBDriver(EWrapper, EClient):
             req_obj.add_option_chain_info(option_chain_info)
 
     def _option_chain_end_cb(self, req_id: int):
+        """Called when ALL option chain info has been sent"""
         req_obj = self._request_optionchain_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
@@ -877,6 +879,10 @@ class IBDriver(EWrapper, EClient):
         theta: float,
         underlying_price: float,
     ):
+        """
+        Called when info about an option's "Greeks" arrives. We only want to use it if tick type is 13.
+        See: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
+        """
         req_obj = self._request_option_objects.get(req_id)
         if req_obj and tick_type == 13:
             req_obj.option_info.implied_volatility = implied_vol
@@ -889,6 +895,11 @@ class IBDriver(EWrapper, EClient):
             req_obj.option_info.set_greeks_defined()
 
     def _tick_size_cb(self, req_id: TickerId, tick_type: TickType, size: Decimal):
+        """
+        Called when info about an option's open interest or volume arrives. We only want to use it if tick
+        type is 8 or 27 - 30.
+        See: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
+        """
         req_obj = self._request_option_objects.get(req_id)
         if req_obj:
             if int(tick_type) == 27:

@@ -30,7 +30,9 @@ async def main():
 
         print(f"Got {contract_details}, error is {error_str}")
         contract_id = contract_details.contract.conId
-        option_info = await ib_driver.get_options_chain_info("SPY", contract_id)
+        option_info, error_str = await ib_driver.get_options_chain_info(
+            "SPY", contract_id
+        )
         print(f"Get options info from exchange {option_info.exchange}")
         exp_list = sorted(option_info.expirations)
         print(f"Expirations are {exp_list}")
