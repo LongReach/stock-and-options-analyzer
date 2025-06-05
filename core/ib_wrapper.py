@@ -204,6 +204,7 @@ class IBWrapper(EWrapper, EClient):
         :param contract_details: ContractDetails object
         """
         super().contractDetails(req_id, contract_details)
+        print(f"**** CD is {contract_details}")
         self._contract_details_cb(req_id, contract_details)
 
     def contractDetailsEnd(self, req_id: int):
