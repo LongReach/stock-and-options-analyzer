@@ -30,26 +30,20 @@ async def main():
 
         print(f"Got {contract_details}, error is {error_str}")
         contract_id = contract_details.contract.conId
-        await ib_driver.get_options_chain_info("SPY", contract_id)
+        option_info = await ib_driver.get_options_chain_info("SPY", contract_id)
+        print(f"Get options info from exchange {option_info.exchange}")
+        exp_list = sorted(option_info.expirations)
+        print(f"Expirations are {exp_list}")
+        strike_list = sorted(option_info.strikes)
+        print(f"Strikes are {strike_list}")
 
         await asyncio.sleep(1.0)
 
         contract_details, error_str = await ib_driver.get_contract_details(
-            "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250627"
+            "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250620"
         )
-        print(f"Got {contract_details}, error is {error_str}")
-        full_ticker = ib_driver.get_full_symbol_from_contract_details(contract_details)
-        print(f"Full ticker is {full_ticker}")
-
-        data_tup, error_str = await ib_driver.get_most_recent_data(
-            full_ticker,
-            BarSize.ONE_HOUR,
-            request_info_type=RequestedInfoType.ADJUSTED_LAST,
-        )
-        option_price = 0.0
-        if data_tup:
-            option_price = data_tup[0]["close"]
-        print(f"Option price for {full_ticker} is {option_price}")
+        option_info, error_str = await ib_driver.get_greeks(contract_details)
+        print(f"Option info is: {option_info.to_dict()}")
 
     except Exception as ex:
         print(f"Exception: {ex}")

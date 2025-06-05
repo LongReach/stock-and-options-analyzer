@@ -71,3 +71,12 @@ To exit the program, close Gateway.
 ### Error about another client accessing IB from a different IP address
 
 You might have the IB app open on your phone (needed for authentication when you log on to a live trading account). Close it.
+
+### No market data during competing live session
+
+Sometimes efforts to get options Greeks will fail because of an error, `No market data during competing live session`. Try closing the Gateway and reopening it.
+
+### Limitations on historical price data for an option
+
+`No data of type EODChart is available for the exchange 'BEST' and the security type 'Option' and '1 d' and '1 day'`: When getting historical price data for an option, must use a smaller bar size than one-day.
+
