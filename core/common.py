@@ -125,6 +125,7 @@ class HistoricalData:
         ]
         return ret_bars
 
+
 class OptionChainInfo:
     """Receives very basic information about an option chain."""
 
@@ -176,7 +177,11 @@ class OptionInfo:
         self._greeks_defined = True
 
     def is_defined(self) -> bool:
-        return self._greeks_defined and self._interest_defined and (self._volume_defined or not self._live)
+        return (
+            self._greeks_defined
+            and self._interest_defined
+            and (self._volume_defined or not self._live)
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
