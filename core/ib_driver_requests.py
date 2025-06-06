@@ -60,7 +60,23 @@ class ContractDetailsRequest(DataRequest):
 
     def __init__(self):
         super().__init__()
-        self.details_list: List[ContractDetails] = []
+        self._exchange_map: Dict[str, List[ContractDetails]] = {}
+
+    def add_contract_details(self, details: ContractDetails):
+        exchange = details.contract.exchange
+        details_list = self._exchange_map.get(exchange)
+        if not details_list:
+            details_list = self._exchange_map[exchange] = []
+        details_list.append(details)
+
+    def get_best_list(self) -> List[ContractDetails]:
+        if len(self._exchange_map) == 0:
+            return []
+        if self._exchange_map.get("SMART"):
+            return self._exchange_map.get("SMART")
+        # Just pick some list
+        arbitrary_item = next(iter(self._exchange_map.items()))
+        return arbitrary_item[1]
 
 
 class OptionChainInfoRequest(DataRequest):

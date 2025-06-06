@@ -3,6 +3,8 @@ import copy
 import math
 
 from _decimal import Decimal
+from idlelib.window import add_windows_to_menu
+
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
@@ -43,6 +45,7 @@ LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
+OPTIONS_DATA_TIMEOUT = 2.0
 
 
 class IBDriver(IBWrapper):
@@ -292,7 +295,7 @@ class IBDriver(IBWrapper):
         is_call: bool = False,
         strike: Optional[float] = None,
         expiration: Optional[str] = None,
-    ) -> Tuple[Optional[ContractDetails], Optional[str]]:
+    ) -> Tuple[List[ContractDetails], Optional[str]]:
         """
         Returns an IB ContractDetails object for given ticker.
 
@@ -302,7 +305,7 @@ class IBDriver(IBWrapper):
         :param is_call: True if option is a call, False if put
         :param strike: strike price of option
         :param expiration: expiration date, in IB format
-        :return: (ContractDetails or None, error string or None)
+        :return: (list of ContractDetails, error string or None)
         """
         async with self._lock:
             req_id = self.next_id()
@@ -328,30 +331,48 @@ class IBDriver(IBWrapper):
             self._logger.error(ret_error_str)
         else:
             self._logger.info("get_contract_details() finished")
-        ret_cd = req_obj.details_list[0] if len(req_obj.details_list) > 0 else None
+        ret_list = req_obj.get_best_list()
 
         async with self._lock:
             self._request_contractdetail_objects.pop(req_id, None)
 
-        return ret_cd, ret_error_str
+        return ret_list, ret_error_str
+
+    async def get_contract_details_single(
+        self,
+        ticker: str,
+        primary_exchange: str = None,
+    ) -> Tuple[Optional[ContractDetails], Optional[str]]:
+        """
+        Gets a single ContractDetails object. Useful only for CDs on stocks, not options.
+        :param ticker:
+        :param primary_exchange:
+        :return:
+        """
+        cd_list, error_str = await self.get_contract_details(ticker, primary_exchange)
+        if len(cd_list) == 0:
+            return None, f"Couldn't find contract details for ticker {ticker}, primary exchange {primary_exchange}. Error was {error_str}"
+        return cd_list[0], error_str
 
     async def get_options_chain_info(
-        self, ticker: str, underlying_contract_id: int
+        self, contract_details: ContractDetails
     ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
         """
         Gets basic information about the option chain for a stock. Strikes and expiration dates
         are the most useful data returned.
 
-        :param ticker: ticker of underlying, e.g. AAPL
-        :param underlying_contract_id: contract ID for underlying stock
+        :param contract_details: ContractDetails for a stock
         :return: (OptionChainInfo or None, error string or None)
         """
+        ticker = contract_details.contract.symbol
+
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_optionchain_objects[req_id] = (
                 OptionChainInfoRequest(ticker)
             )
 
+        underlying_contract_id = contract_details.contract.conId
         req_obj.data_fetch_complete = False
         self.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
 
@@ -413,7 +434,7 @@ class IBDriver(IBWrapper):
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
         timed_out = not await wait_for_condition(
-            lambda: req_obj.option_info.is_defined(), timeout=HISTORICAL_DATA_TIMEOUT
+            lambda: req_obj.option_info.is_defined(), timeout=OPTIONS_DATA_TIMEOUT
         )
         ret_error_str = None
         if req_obj.has_error():
@@ -597,7 +618,7 @@ class IBDriver(IBWrapper):
         """Called when a ContractDetails object has arrived"""
         req_obj = self._request_contractdetail_objects.get(req_id)
         if req_obj:
-            req_obj.details_list.append(contract_details)
+            req_obj.add_contract_details(contract_details)
 
     def _contract_details_end_cb(self, req_id: int):
         """Called when ALL ContractDetails objects have arrived, in response to last request"""

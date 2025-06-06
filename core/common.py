@@ -190,10 +190,10 @@ class OptionInfo:
 
     def is_defined(self) -> bool:
         """Returns True when this object has been filled out with all desired info."""
+        # TODO: why does volume often not get defined?
         return (
             self._greeks_defined
             and self._interest_defined
-            and (self._volume_defined or not self._live)
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -213,3 +213,6 @@ class OptionInfo:
             "volume": self.volume,
             "implied_volatility": self.implied_volatility,
         }
+
+    def get_debug_info(self) -> str:
+        return f"Greeks defined: {self._greeks_defined}, interest defined: {self._interest_defined}, volume defined: {self._volume_defined}, is live: {self._live}"
