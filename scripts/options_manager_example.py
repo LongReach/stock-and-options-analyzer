@@ -44,7 +44,9 @@ async def main():
         print(f"Expirations for SPY between 30 and 50 days away are {expirations}")
 
         print("Here we go, part two")
-        option_data = await options_manager.get_option_chain("SPY", expiration=expirations[-1], right="C")
+        option_data = await options_manager.get_option_chain(
+            "SPY", expiration=expirations[-1], right="C"
+        )
         option_data.sort("open_interest", ascending=False)
         df = option_data.get_dataframe()
         print_df(df)

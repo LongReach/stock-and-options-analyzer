@@ -351,7 +351,10 @@ class IBDriver(IBWrapper):
         """
         cd_list, error_str = await self.get_contract_details(ticker, primary_exchange)
         if len(cd_list) == 0:
-            return None, f"Couldn't find contract details for ticker {ticker}, primary exchange {primary_exchange}. Error was {error_str}"
+            return (
+                None,
+                f"Couldn't find contract details for ticker {ticker}, primary exchange {primary_exchange}. Error was {error_str}",
+            )
         return cd_list[0], error_str
 
     async def get_options_chain_info(

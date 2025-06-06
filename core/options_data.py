@@ -18,14 +18,27 @@ class OptionData:
     """
     TODO: write
     """
-    column_names = ["date", "full_name", "right", "strike", "expiration", "price", "volume", "open_interest", "implied_volatility", "delta", "theta", "gamma", "vega"]
+
+    column_names = [
+        "date",
+        "full_name",
+        "right",
+        "strike",
+        "expiration",
+        "price",
+        "volume",
+        "open_interest",
+        "implied_volatility",
+        "delta",
+        "theta",
+        "gamma",
+        "vega",
+    ]
 
     def __init__(self, symbol: str, timestamp: datetime):
         self._symbol = symbol
         self._timestamp = timestamp
-        self._options_df: pd.DataFrame = pd.DataFrame(
-            columns=OptionData.column_names
-        )
+        self._options_df: pd.DataFrame = pd.DataFrame(columns=OptionData.column_names)
         self._current_index: int = 0
         self._underlying_price: float = 0.0
 
@@ -53,4 +66,3 @@ class OptionData:
     @property
     def underlying_price(self) -> float:
         return self._underlying_price
-
