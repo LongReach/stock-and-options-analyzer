@@ -33,9 +33,15 @@ class OptionDataManager:
         if not ib_driver.is_connected():
             self._ib_driver.connect()
 
-    async def get_expirations(self, ticker: str, min_days_away: int, max_days_away: int):
-        contract_details, error_str = await self._ib_driver.get_contract_details_single(ticker)
-        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(contract_details)
+    async def get_expirations(
+        self, ticker: str, min_days_away: int, max_days_away: int
+    ):
+        contract_details, error_str = await self._ib_driver.get_contract_details_single(
+            ticker
+        )
+        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(
+            contract_details
+        )
         if error_str:
             raise OptionDataException(error_str)
 
@@ -51,8 +57,17 @@ class OptionDataManager:
                 out_expirations.append(exp)
         return out_expirations
 
-    async def get_option_chain(self, ticker: str, expiration: str, right: str, min_delta: float = 0.08, max_delta: float = 0.7) -> OptionData:
-        contract_details_list, error_str = await self._ib_driver.get_contract_details(ticker, is_option=True, is_call=(right == "C"), expiration=expiration)
+    async def get_option_chain(
+        self,
+        ticker: str,
+        expiration: str,
+        right: str,
+        min_delta: float = 0.08,
+        max_delta: float = 0.7,
+    ) -> OptionData:
+        contract_details_list, error_str = await self._ib_driver.get_contract_details(
+            ticker, is_option=True, is_call=(right == "C"), expiration=expiration
+        )
         if error_str:
             raise OptionDataException(error_str)
 
@@ -61,49 +76,72 @@ class OptionDataManager:
             return option_data
 
         # Get the underlying price
-        option_info, error_str = await self._ib_driver.get_greeks(contract_details_list[0])
+        option_info, error_str = await self._ib_driver.get_greeks(
+            contract_details_list[0]
+        )
         if not option_info:
-            raise OptionDataException(f"Couldn't get underlying price, error is {error_str}")
+            raise OptionDataException(
+                f"Couldn't get underlying price, error is {error_str}"
+            )
         underlying_price = option_info.underlying_price
         print(f"**** Underlying price is {underlying_price}")
 
         # Create a list in which contract details with strike price closest to underlying are at the top of the list
-        sortable_cd_list = [(cd, math.fabs(cd.contract.strike - underlying_price)) for cd in contract_details_list]
+        sortable_cd_list = [
+            (cd, math.fabs(cd.contract.strike - underlying_price))
+            for cd in contract_details_list
+        ]
         sortable_cd_list.sort(key=lambda x: x[1])
 
         error_count = 0
         max_allowed_errors = 5
         for tup in sortable_cd_list:
             contract_details = tup[0]
-            print(f"**** Fetching Greeks for {self._ib_driver.get_full_symbol_from_contract_details(contract_details)}")
+            print(
+                f"**** Fetching Greeks for {self._ib_driver.get_full_symbol_from_contract_details(contract_details)}"
+            )
             option_info, error_str = await self._ib_driver.get_greeks(contract_details)
             if error_str:
-                print(f"**** Error: {error_str}, debug info {option_info.get_debug_info()}")
+                print(
+                    f"**** Error: {error_str}, debug info {option_info.get_debug_info()}"
+                )
                 if error_count > max_allowed_errors:
                     break
                 error_count += 1
             else:
                 # Can we break out of loop due to reaching sufficiently high or low delta?
                 if right == "C":
-                    if contract_details.contract.strike > underlying_price and option_info.delta < min_delta:
+                    if (
+                        contract_details.contract.strike > underlying_price
+                        and option_info.delta < min_delta
+                    ):
                         print(f"**** no 1 {option_info.delta}")
                         break
-                    if contract_details.contract.strike <= underlying_price and option_info.delta > max_delta:
+                    if (
+                        contract_details.contract.strike <= underlying_price
+                        and option_info.delta > max_delta
+                    ):
                         print("**** no 2")
                         break
                 else:
-                    if contract_details.contract.strike < underlying_price and option_info.delta < min_delta:
+                    if (
+                        contract_details.contract.strike < underlying_price
+                        and option_info.delta < min_delta
+                    ):
                         print("**** no 3")
                         break
-                    if contract_details.contract.strike >= underlying_price and option_info.delta > max_delta:
+                    if (
+                        contract_details.contract.strike >= underlying_price
+                        and option_info.delta > max_delta
+                    ):
                         print("**** no 4")
                         break
 
                 option_data.add_data(option_info)
 
         if error_count > max_allowed_errors:
-            raise OptionDataException(f"Too many errors getting option chain for {ticker}")
+            raise OptionDataException(
+                f"Too many errors getting option chain for {ticker}"
+            )
 
         return option_data
-
-
