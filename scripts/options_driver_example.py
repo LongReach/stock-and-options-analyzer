@@ -26,13 +26,15 @@ async def main():
     ib_driver = IBDriver(sim_account=True, client_id=17)
     try:
         ib_driver.connect()
-        contract_details, error_str = await ib_driver.get_contract_details("SPY")
+        contract_details_list, error_str = await ib_driver.get_contract_details("SPY")
+        if error_str or len(contract_details_list) == 0:
+            print(f"Error: {error_str}")
+            return
+        contract_details = contract_details_list[0]
 
-        print(f"Got {contract_details.contract}, error is {error_str}")
-        contract_id = contract_details.contract.conId
-        option_info, error_str = await ib_driver.get_options_chain_info(
-            "SPY", contract_id
-        )
+        print(f"Got {contract_details.contract}")
+        # contract_id = contract_details.contract.conId
+        option_info, error_str = await ib_driver.get_options_chain_info(contract_details)
         print(f"Get options info from exchange {option_info.exchange}")
         exp_list = sorted(option_info.expirations)
         print(f"Expirations are {exp_list}")
@@ -41,17 +43,23 @@ async def main():
 
         await asyncio.sleep(1.0)
 
-        contract_details, error_str = await ib_driver.get_contract_details(
+        contract_details_list, error_str = await ib_driver.get_contract_details(
             "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250620"
         )
+        if error_str or len(contract_details_list) == 0:
+            print(f"Error: {error_str}")
+            return
+        contract_details = contract_details_list[0]
         option_info, error_str = await ib_driver.get_greeks(contract_details)
-        print(f"Option info is: {option_info.to_dict()}, error is {error_str}")
+        print(f"Option info is: {option_info.to_dict()}")
 
         # Extra experimental
         print("\nExtra experimental part")
-        contract_details, error_str = await ib_driver.get_contract_details(
+        contract_details_list, error_str = await ib_driver.get_contract_details(
             "SPY", is_option=True, is_call=True, expiration="20250620"
         )
+        for contract_details in contract_details_list:
+            print(f"Contract Details are {ib_driver.get_full_symbol_from_contract_details(contract_details)}")
 
     except Exception as ex:
         print(f"Exception: {ex}")
