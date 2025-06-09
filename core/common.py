@@ -141,6 +141,7 @@ class OptionInfo:
     """Info about a particular option contract."""
 
     def __init__(self):
+        # E.g. SPY-C-20250627-600.0
         self.full_name: str = ""
         self.is_call: bool = True
         self.strike: float = 0.0
@@ -190,8 +191,8 @@ class OptionInfo:
 
     def is_defined(self) -> bool:
         """Returns True when this object has been filled out with all desired info."""
-        # TODO: why does volume often not get defined?
-        return self._greeks_defined and self._interest_defined
+        # TODO: why does volume often not get defined in live mode? Why does refer happen when not live?
+        return self._greeks_defined and (self._interest_defined and self._live or self._volume_defined and not self._live)
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns data as a dict"""
@@ -213,3 +214,14 @@ class OptionInfo:
 
     def get_debug_info(self) -> str:
         return f"Greeks defined: {self._greeks_defined}, interest defined: {self._interest_defined}, volume defined: {self._volume_defined}, is live: {self._live}"
+
+    @staticmethod
+    def make_empty_option_info(full_name: str):
+        # E.g. SPY-C-20250627-600.0
+        option_info = OptionInfo()
+        parts = full_name.split("-")
+        option_info.full_name = full_name
+        option_info.is_call = parts[1] == "C"
+        option_info.expiration = parts[2]
+        option_info.strike = float(parts[3])
+        return option_info

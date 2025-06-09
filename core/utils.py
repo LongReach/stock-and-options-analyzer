@@ -110,7 +110,7 @@ def get_datetime(ib_date: str) -> datetime:
         raise TypeError(f"Bad second value of {second} in IB date {ib_date}")
 
     try:
-        dt = datetime(year, month, day, hour, minute, second)
+        dt = datetime(year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE))
     except:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt
@@ -130,6 +130,10 @@ def is_trading_hours() -> bool:
     current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
     if 10 <= current_dt.hour < 16:
         return True
-    if current_dt.hour >= 9 and current_dt.minute >= 30:
+    if current_dt.hour == 9 and current_dt.minute >= 30:
         return True
     return False
+
+def current_datetime():
+    """Returns current datetime, but in Eastern standard time"""
+    return datetime.now(ZoneInfo(MARKETS_TIMEZONE))
