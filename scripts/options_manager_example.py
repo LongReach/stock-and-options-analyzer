@@ -47,7 +47,7 @@ async def main():
         option_data = await options_manager.get_option_chain(
             "SPY", expiration=expirations[-1], right="C"
         )
-        #option_data.sort("delta", ascending=True)
+        # option_data.sort("delta", ascending=True)
         df = option_data.get_dataframe()
         print_df(df)
 

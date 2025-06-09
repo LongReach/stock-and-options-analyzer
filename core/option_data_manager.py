@@ -18,7 +18,7 @@ from core.utils import (
     bar_size_to_time,
     get_datetime,
     get_datetime_as_str,
-    current_datetime
+    current_datetime,
 )
 from core.options_data import OptionData, OptionDataException
 from core.ib_driver import IBDriver
@@ -46,7 +46,9 @@ class OptionDataManager:
         :param max_days_away: maximum number of days until expiration
         :return: list of IB-style datetimes
         """
-        self._logger.info(f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}")
+        self._logger.info(
+            f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
+        )
         contract_details, error_str = await self._ib_driver.get_contract_details_single(
             ticker
         )
@@ -86,7 +88,9 @@ class OptionDataManager:
         :return: OptionData, holding all retrieved data
         :raise OptionDataException: if some problem encountered
         """
-        self._logger.info(f"Getting option chain for {ticker}, expiration={expiration}, right={right}, min_delta={min_delta}, max_delta={max_delta}")
+        self._logger.info(
+            f"Getting option chain for {ticker}, expiration={expiration}, right={right}, min_delta={min_delta}, max_delta={max_delta}"
+        )
         contract_details_list, error_str = await self._ib_driver.get_contract_details(
             ticker, is_option=True, is_call=(right == "C"), expiration=expiration
         )
@@ -98,7 +102,9 @@ class OptionDataManager:
             return option_data
 
         # Get the underlying price
-        ret_tup, error_str = await self._ib_driver.get_most_recent_data(ticker, BarSize.ONE_MINUTE)
+        ret_tup, error_str = await self._ib_driver.get_most_recent_data(
+            ticker, BarSize.ONE_MINUTE
+        )
         if not ret_tup or error_str:
             raise OptionDataException(
                 f"Couldn't get underlying price, error is {error_str}"
@@ -115,12 +121,27 @@ class OptionDataManager:
         sortable_cd_list.sort(key=lambda x: x[1])
 
         new_list = [item[0] for item in sortable_cd_list]
-        await self._batch_collect_options_data(new_list, option_data, underlying_price, right=right, max_delta=max_delta, min_delta=min_delta)
+        await self._batch_collect_options_data(
+            new_list,
+            option_data,
+            underlying_price,
+            right=right,
+            max_delta=max_delta,
+            min_delta=min_delta,
+        )
 
         option_data.sort("strike")
         return option_data
 
-    async def _batch_collect_options_data(self, contract_details_list: List[ContractDetails], option_data: OptionData, underlying_price: float, right: str = "C", max_delta: float = 0.8, min_delta: float = 0.07):
+    async def _batch_collect_options_data(
+        self,
+        contract_details_list: List[ContractDetails],
+        option_data: OptionData,
+        underlying_price: float,
+        right: str = "C",
+        max_delta: float = 0.8,
+        min_delta: float = 0.07,
+    ):
         """
         Grabs data for a bunch of different options contracts in parallel, rather than one-at-a-time (which is
         very slow). Effectively, multiple requests go out to IB at the same time. asyncio.Tasks are used to wait
@@ -163,17 +184,27 @@ class OptionDataManager:
 
         def _test_for_ignorable(_contract_details: ContractDetails):
             """Returns True if we don't need info for a particular options contract due to strike being too high or low"""
-            return not (ignore_strikes_below <= _contract_details.contract.strike <= ignore_strikes_above)
+            return not (
+                ignore_strikes_below
+                <= _contract_details.contract.strike
+                <= ignore_strikes_above
+            )
 
         while current_idx < len(contract_details_list) or len(task_queue) > 0:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible
-            while len(task_queue) < MAX_TO_RETRIEVE_AT_ONCE and current_idx < len(contract_details_list):
+            while len(task_queue) < MAX_TO_RETRIEVE_AT_ONCE and current_idx < len(
+                contract_details_list
+            ):
                 contract_details = contract_details_list[current_idx]
                 if not _test_for_ignorable(contract_details):
-                    task_name = self._ib_driver.get_full_symbol_from_contract_details(contract_details)
+                    task_name = self._ib_driver.get_full_symbol_from_contract_details(
+                        contract_details
+                    )
                     self._logger.debug(f"Creating retrieval task for {task_name}")
-                    task = asyncio.create_task(self._ib_driver.get_greeks(contract_details), name=task_name)
+                    task = asyncio.create_task(
+                        self._ib_driver.get_greeks(contract_details), name=task_name
+                    )
                     task_queue.append(task)
                 current_idx += 1
 
@@ -189,25 +220,43 @@ class OptionDataManager:
                         except CancelledError:
                             pass
                         except Exception as e:
-                            self._logger.error(f"Exception while retrieving Greeks for {task.get_name()}: {e}")
+                            self._logger.error(
+                                f"Exception while retrieving Greeks for {task.get_name()}: {e}"
+                            )
                             error_found = True
                         else:
                             if error_str:
-                                self._logger.error(f"Error while retrieving Greeks for {task.get_name()}: {error_str}")
+                                self._logger.error(
+                                    f"Error while retrieving Greeks for {task.get_name()}: {error_str}"
+                                )
                                 error_found = True
                             else:
-                                self._logger.debug(f"Task done for {option_info.full_name}")
+                                self._logger.debug(
+                                    f"Task done for {option_info.full_name}"
+                                )
                                 _set_ignorable_strikes(option_info)
-                                if ignore_strikes_below <= option_info.strike <= ignore_strikes_above:
+                                if (
+                                    ignore_strikes_below
+                                    <= option_info.strike
+                                    <= ignore_strikes_above
+                                ):
                                     option_data.add_data(option_info)
 
                         if error_found:
                             if error_count >= MAX_ERRORS:
-                                raise OptionDataException("Too many errors fetching option chain")
+                                raise OptionDataException(
+                                    "Too many errors fetching option chain"
+                                )
                             error_count += 1
                             # Put an empty OptionInfo object into option_data
-                            empty_option_info = OptionInfo.make_empty_option_info(task.get_name())
-                            if ignore_strikes_below <= empty_option_info.strike <= ignore_strikes_above:
+                            empty_option_info = OptionInfo.make_empty_option_info(
+                                task.get_name()
+                            )
+                            if (
+                                ignore_strikes_below
+                                <= empty_option_info.strike
+                                <= ignore_strikes_above
+                            ):
                                 option_data.add_data(empty_option_info)
 
                         # Time to remove this task

@@ -524,7 +524,9 @@ class IBDriver(IBWrapper):
         else:
             # Figure out duration from start and end date
             end_dt = (
-                current_datetime() if end_date_time == "" else get_datetime(end_date_time)
+                current_datetime()
+                if end_date_time == ""
+                else get_datetime(end_date_time)
             )
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt

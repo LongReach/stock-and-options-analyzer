@@ -16,7 +16,7 @@ from core.utils import (
     bar_size_to_time,
     get_datetime,
     get_datetime_as_str,
-    current_datetime
+    current_datetime,
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
