@@ -16,7 +16,11 @@ class OptionDataException(Exception):
 
 class OptionData:
     """
-    TODO: write
+    Holds data for a set of options contracts pertaining to a particular underlying security (e.g. SPY).
+    Price, delta, theta, etc. merely represent an instant in time -- actual values for option are
+    subject to rapid change.
+
+    Each entry winds up being a row in a pandas dataframe
     """
 
     column_names = [
@@ -43,6 +47,7 @@ class OptionData:
         self._underlying_price: float = 0.0
 
     def add_data(self, option_info: OptionInfo):
+        """Adds information about a single options contract"""
         info_dict = option_info.to_dict()
         self._underlying_price = option_info.underlying_price
 
@@ -58,11 +63,14 @@ class OptionData:
         self._current_index += 1
 
     def get_dataframe(self) -> DataFrame:
+        """Returns pandas dataframe"""
         return self._options_df
 
     def sort(self, column: str, ascending: bool = True):
+        """Sorts the rows of options data"""
         self._options_df.sort_values(by=column, inplace=True, ascending=ascending)
 
     @property
     def underlying_price(self) -> float:
+        """Returns price of underlying security"""
         return self._underlying_price

@@ -16,6 +16,7 @@ from core.utils import (
     bar_size_to_time,
     get_datetime,
     get_datetime_as_str,
+    current_datetime
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
@@ -93,7 +94,7 @@ class StockDataManager:
         start_dt = get_datetime(start_date)
 
         if end_date == "":
-            end_dt = datetime.now()
+            end_dt = current_datetime()
         else:
             end_dt = get_datetime(end_date)
 
@@ -181,7 +182,7 @@ class StockDataManager:
                 return success, error_str
 
         if end_date == "":
-            end_dt = datetime.now() if update_recent else None
+            end_dt = current_datetime() if update_recent else None
         else:
             end_dt = get_datetime(end_date)
 

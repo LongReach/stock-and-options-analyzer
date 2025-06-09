@@ -5,6 +5,7 @@ import math
 from _decimal import Decimal
 from idlelib.window import add_windows_to_menu
 
+from core.utils import current_datetime
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
@@ -45,7 +46,7 @@ LIVE_PORT = 4001
 SIM_PORT = 4002
 NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
-OPTIONS_DATA_TIMEOUT = 2.0
+OPTIONS_DATA_TIMEOUT = 8.0
 
 
 class IBDriver(IBWrapper):
@@ -523,7 +524,7 @@ class IBDriver(IBWrapper):
         else:
             # Figure out duration from start and end date
             end_dt = (
-                datetime.now() if end_date_time == "" else get_datetime(end_date_time)
+                current_datetime() if end_date_time == "" else get_datetime(end_date_time)
             )
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt

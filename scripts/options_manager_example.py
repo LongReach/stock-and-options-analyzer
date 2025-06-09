@@ -40,14 +40,14 @@ async def main():
         options_manager.add_driver(ib_driver)
 
         print("Here we go, part one")
-        expirations = await options_manager.get_expirations("SPY", 30, 47)
+        expirations = await options_manager.get_expirations("SPY", 30, 44)
         print(f"Expirations for SPY between 30 and 50 days away are {expirations}")
 
         print("Here we go, part two")
         option_data = await options_manager.get_option_chain(
             "SPY", expiration=expirations[-1], right="C"
         )
-        option_data.sort("open_interest", ascending=False)
+        #option_data.sort("delta", ascending=True)
         df = option_data.get_dataframe()
         print_df(df)
 
