@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from pandas.core.resample import maybe_warn_args_and_kwargs
 
-from core.common import HistoricalData
+from core.common import HistoricalData, RequestedInfoType
 from core.utils import (
     BarSize,
     bar_size_to_str,
@@ -17,7 +17,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
-    non_naive_datetime,
+    non_naive_datetime
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
@@ -34,7 +34,7 @@ class StockDataManager:
     TIME_BETWEEN_SCRAPES = 0.2
 
     def __init__(self):
-        self._data_map: Dict[str, Dict[BarSize, StockData]] = {}
+        self._data_map: Dict[Tuple[str, BarSize, RequestedInfoType], StockData] = {}
         self._ib_driver: Optional[IBDriver] = None
         self._log_to_stdout = False
 
@@ -45,56 +45,60 @@ class StockDataManager:
     def set_log_to_stdout(self, to_stdout: bool):
         self._log_to_stdout = True
 
-    def load_data(self, symbol: str, bar_size: BarSize, filename: Optional[str] = None):
+    def load_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, filename: Optional[str] = None) -> bool:
         """
         Creates a StockData object, attempts to load data from disk
         :param symbol: e.g. "AAPL"
         :param bar_size: --
+        :param info_type: --
         :param filename: if not given, a filename will be chosen from symbol/bar size
+        :return: True if file successfully loaded from disk
         """
         file_str = f" from file {filename}" if filename else ""
         self._log(f"Loading data for {symbol}, {bar_size.name}{file_str}")
-        stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
-        stock_data.load(filename)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        return stock_data.load(filename)
 
-    def save_data(self, symbol: str, bar_size: BarSize, filename: Optional[str] = None):
+    def save_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, filename: Optional[str] = None):
         """
         Creates a StockData object, attempts to load data from disk
         :param symbol: e.g. "AAPL"
         :param bar_size: --
+        :param info_type: --
         :param filename: if not given, a filename will be chosen from symbol/bar size
         :return:
         """
         file_str = f" to file {filename}" if filename else ""
         self._log(f"Saving data for {symbol}, {bar_size.name}{file_str}")
-        stock_data = self._get_stock_data(symbol, bar_size)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data:
             stock_data.save(filename)
 
-    def clear_data(self, symbol: str, bar_size: BarSize):
+    def clear_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
         """Clear out any data already loaded"""
-        stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         stock_data.clear()
 
     async def scrape_data(
-        self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""
+        self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, start_date: str = "", end_date: str = ""
     ) -> Tuple[bool, str]:
         """
         Scrapes data from online source, completely replacing any data already in memory.
 
         :param symbol: ticker symbol
         :param bar_size: --
+        :param info_type: --
         :param start_date: earliest date for which to get data
         :param end_date: data should be no newer than this date. If not given, use current datetime.
         :return: (success, error string)
         """
         self._log(
-            f"Scraping data for {symbol}, {bar_size.name}. start_date='{start_date}', end_date='{end_date}'"
+            f"Scraping data for {symbol}, {bar_size.name}, {info_type.name}. start_date='{start_date}', end_date='{end_date}'"
         )
         if not self._ib_driver:
             raise StockDataException("No driver set")
 
-        stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         if start_date == "":
             raise StockDataException("Need start date for data scraping")
         start_dt = get_datetime(start_date)
@@ -123,6 +127,7 @@ class StockDataManager:
                 bar_size=stock_data.bar_size,
                 start_date=current_start_dt,
                 end_date=current_end_dt,
+                request_info_type=info_type
             )
             if error_str:
                 ret_error_str = error_str
@@ -140,6 +145,7 @@ class StockDataManager:
         self,
         symbol: str,
         bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
         start_date: str = "",
         end_date: str = "",
         update_recent: bool = False,
@@ -150,6 +156,7 @@ class StockDataManager:
 
         :param symbol: ticker symbol
         :param bar_size: --
+        :param info_type: --
         :param start_date: earliest date for which to scrape data. If not given, don't attempt to scrape data
             that's earlier than data already loaded. If date is earlier than available data, then start from
             there.
@@ -159,12 +166,12 @@ class StockDataManager:
             scroped.
         :return:
         """
-        stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
 
         df = stock_data.get_data_frame()
         if len(df) == 0:
             # There's nothing "smart" we can do here, no data loaded at all
-            return await self.scrape_data(symbol, bar_size, start_date, end_date)
+            return await self.scrape_data(symbol, bar_size, info_type, start_date, end_date)
 
         # Oldest date for which there's data
         oldest_dt: datetime = df.iloc[0]["date"].to_pydatetime()
@@ -184,7 +191,7 @@ class StockDataManager:
         # Scrape data that's older than already-loaded data
         if start_dt is not None and start_dt < oldest_dt:
             success, error_str = await self.scrape_data(
-                symbol, bar_size, start_date, get_datetime_as_str(oldest_dt)
+                symbol, bar_size, info_type, start_date, get_datetime_as_str(oldest_dt)
             )
             if not success:
                 return success, error_str
@@ -199,6 +206,7 @@ class StockDataManager:
             success, error_str = await self.scrape_data(
                 symbol,
                 bar_size,
+                info_type,
                 get_datetime_as_str(newest_dt + bar_size_to_time(bar_size)),
                 get_datetime_as_str(end_dt),
             )
@@ -207,9 +215,9 @@ class StockDataManager:
 
         return True, ""
 
-    def get_pandas_df(self, symbol: str, bar_size: BarSize) -> Optional[pd.DataFrame]:
+    def get_pandas_df(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Optional[pd.DataFrame]:
         """Get the pandas dataframe for particular stock data."""
-        stock_data = self._get_stock_data(symbol, bar_size)
+        stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data is None:
             return None
         return stock_data.get_data_frame()
@@ -221,28 +229,24 @@ class StockDataManager:
         _logger.log(level, message)
 
     def _get_stock_data(
-        self, symbol: str, bar_size: BarSize, add_if_missing: bool = False
+        self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, add_if_missing: bool = False
     ) -> Optional[StockData]:
         """
         Return StockData object.
         :param symbol: --
         :param bar_size: --
+        :param info_type: --
         :param add_if_missing: if True, create new StockData object, if it doesn't exist already.
         :return:
         """
-        bar_size_dict = self._data_map.get(symbol)
-        stock_data = None
-        if bar_size_dict:
-            stock_data = bar_size_dict.get(bar_size)
+        key = (symbol, bar_size, info_type)
+        stock_data = self._data_map.get(key)
         if stock_data is None and add_if_missing:
-            stock_data = StockData(symbol, bar_size)
+            stock_data = StockData(symbol, bar_size, info_type)
             self._add_stock_data(stock_data)
         return stock_data
 
     def _add_stock_data(self, stock_data: StockData):
         """Adds a StockData object to tracking"""
-        bar_size_dict = self._data_map.get(stock_data.symbol)
-        if not bar_size_dict:
-            bar_size_dict = {}
-            self._data_map[stock_data.symbol] = bar_size_dict
-        bar_size_dict[stock_data.bar_size] = stock_data
+        key = (stock_data.symbol, stock_data.bar_size, stock_data.info_type)
+        self._data_map[key] = stock_data

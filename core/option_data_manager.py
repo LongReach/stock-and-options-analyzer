@@ -72,7 +72,7 @@ class OptionDataManager:
 
     async def get_strikes(
         self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
-    ) -> Tuple[List[float], float]:
+    ) -> Tuple[List[float], int]:
         """
         Gets all strikes for a particular stock at a particular expiration date.
         :param ticker: underlying stock/ETF
@@ -98,7 +98,7 @@ class OptionDataManager:
         underlying_price = await self._get_underlying_price(ticker)
 
         # Closest to being at the money
-        closest_strike_idx = 0
+        closest_strike_idx: int = 0
         best_dist = 1000000
         for idx, strike in enumerate(strikes):
             if math.fabs(strike - underlying_price) < best_dist:
@@ -112,14 +112,14 @@ class OptionDataManager:
         highest_idx = closest_strike_idx + num_above
         if highest_idx > len(strikes):
             highest_idx = len(strikes)
-        return strikes[lowest_idx:highest_idx], closest_strike_idx
+        return strikes[lowest_idx:highest_idx], closest_strike_idx - lowest_idx
 
     async def get_option_chain(
         self,
         ticker: str,
         expiration: str,
         right: str,
-        strike: Optional[float] = None,
+        strike: Optional[Union[float, List[float]]] = None,
         min_delta: float = 0.08,
         max_delta: float = 0.7,
     ) -> OptionData:
@@ -128,7 +128,7 @@ class OptionDataManager:
         :param ticker: symbol of underlying
         :param expiration: expiration date, IB style
         :param right: "C" for call, "P" for put
-        :param strike: strike price (for a single option contract) or None
+        :param strike: strike price (for a single option contract), list of strike prices, or None
         :param min_delta: don't want data for options contracts with delta below this value
         :param max_delta: don't want data for options contracts with delta above this value
         :return: OptionData, holding all retrieved data
@@ -137,15 +137,29 @@ class OptionDataManager:
         self._logger.info(
             f"Getting option chain for {ticker}, expiration={expiration}, right={right}, min_delta={min_delta}, max_delta={max_delta}"
         )
-        contract_details_list, error_str = await self._ib_driver.get_contract_details(
-            ticker,
-            is_option=True,
-            is_call=(right == "C"),
-            expiration=expiration,
-            strike=strike,
-        )
-        if error_str:
-            raise OptionDataException(error_str)
+
+        strike_list = [None]
+        if strike:
+            if isinstance(strike, list):
+                strike_list = strike
+            elif isinstance(strike, float):
+                strike_list = [strike]
+            else:
+                raise OptionDataException(f"Wrong data for strike data, is type {type(strike)}")
+
+        contract_details_list: List[ContractDetails] = []
+
+        for single_strike in strike_list:
+            temp_list, error_str = await self._ib_driver.get_contract_details(
+                ticker,
+                is_option=True,
+                is_call=(right == "C"),
+                expiration=expiration,
+                strike=single_strike,
+            )
+            if error_str:
+                raise OptionDataException(error_str)
+            contract_details_list.extend(temp_list)
 
         option_data = OptionData(ticker, current_datetime())
         if len(contract_details_list) == 0:
