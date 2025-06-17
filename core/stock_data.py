@@ -22,9 +22,10 @@ class StockData:
     Indexed by: human-readable date-time
     """
 
-    def __init__(self, symbol: str, bar_size: BarSize):
+    def __init__(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
         self._symbol = symbol
         self._bar_size = bar_size
+        self._info_type = info_type
         self.clear()
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
@@ -63,8 +64,8 @@ class StockData:
         """
         if filename:
             try:
-                self._symbol, self._bar_size = (
-                    self._infer_symbol_and_bar_size_from_file_name(filename)
+                self._symbol, self._bar_size, self._info_type = (
+                    self._infer_characteristics_from_file_name(filename)
                 )
             except:
                 _logger.warning(
@@ -120,15 +121,13 @@ class StockData:
     def bar_size(self) -> BarSize:
         return self._bar_size
 
+    @property
+    def info_type(self) -> RequestedInfoType:
+        return self._info_type
+
     @staticmethod
     def get_info_type_str(info_type: RequestedInfoType) -> str:
-        """
-        TRADES = "TRADES"
-        IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
-        HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
-        ADJUSTED_LAST = "ADJUSTED_LAST"
-        """
-        # TODO: docstring
+        """Convert a RequestedInfoType to a simple string"""
         _map: Dict[RequestedInfoType, str] = {
             RequestedInfoType.TRADES: "tr",
             RequestedInfoType.IMPLIED_VOLATILITY: "iv",
@@ -142,13 +141,7 @@ class StockData:
 
     @staticmethod
     def get_info_type(info_type_str: str) -> RequestedInfoType:
-        """
-        TRADES = "TRADES"
-        IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
-        HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
-        ADJUSTED_LAST = "ADJUSTED_LAST"
-        """
-        # TODO: docstring
+        """Convert a simple string to a RequestedInfoType"""
         _map: Dict[str, RequestedInfoType] = {
             "tr": RequestedInfoType.TRADES,
             "iv": RequestedInfoType.IMPLIED_VOLATILITY,
@@ -170,18 +163,20 @@ class StockData:
             return f"{dt.month:02}/{dt.day:02} {dt.hour:02}:{dt.minute:02}"
 
     def _get_file_name(self) -> str:
-        """Assigns a filename based on symbol and bar size, returns in a string"""
-        return f"{self._symbol}-{bar_size_to_str(self._bar_size)}.zip"
+        """Assigns a filename based on symbol, bar size, and info type, returns in a string"""
+        return f"{self._symbol}-{bar_size_to_str(self._bar_size)}-{StockData.get_info_type_str(self._info_type)}.zip"
 
-    def _infer_symbol_and_bar_size_from_file_name(
+    def _infer_characteristics_from_file_name(
         self, filename: str
-    ) -> Tuple[str, BarSize]:
-        """Attempts to infer symbol and bar size from a filename"""
+    ) -> Tuple[str, BarSize, RequestedInfoType]:
+        """Attempts to infer symbol, bar size, and info type from a filename"""
         try:
+            # Get part of filename before extension
             parts = filename.split(".")
-            sym_and_bar_size = parts[0].split("-")
-            symbol_str = sym_and_bar_size[0]
-            bar_size = str_to_bar_size(sym_and_bar_size[1])
-            return symbol_str, bar_size
+            characteristics_str = parts[0].split("-")
+            symbol_str = characteristics_str[0]
+            bar_size = str_to_bar_size(characteristics_str[1])
+            info_type = StockData.get_info_type(characteristics_str[2])
+            return symbol_str, bar_size, info_type
         except:
-            raise StockDataException(f"Couldn't infer symbol/bar size from {filename}")
+            raise StockDataException(f"Couldn't infer symbol/bar size/info y from {filename}")
