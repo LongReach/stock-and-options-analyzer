@@ -85,7 +85,9 @@ class StockData:
         # Go through date, make sure timezone is right for date
         for idx in range(len(self._price_and_vol_df)):
             # TODO: 0 is index of "date" column, make a constant for it
-            self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
+            self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(
+                self._price_and_vol_df.iloc[idx]["date"]
+            )
 
         return True
 
@@ -131,7 +133,7 @@ class StockData:
             RequestedInfoType.TRADES: "tr",
             RequestedInfoType.IMPLIED_VOLATILITY: "iv",
             RequestedInfoType.HISTORICAL_VOLATILITY: "hv",
-            RequestedInfoType.ADJUSTED_LAST: "al"
+            RequestedInfoType.ADJUSTED_LAST: "al",
         }
         result = _map.get(info_type)
         if not result:
@@ -151,11 +153,13 @@ class StockData:
             "tr": RequestedInfoType.TRADES,
             "iv": RequestedInfoType.IMPLIED_VOLATILITY,
             "hv": RequestedInfoType.HISTORICAL_VOLATILITY,
-            "al": RequestedInfoType.ADJUSTED_LAST
+            "al": RequestedInfoType.ADJUSTED_LAST,
         }
         result = _map.get(info_type_str)
         if not result:
-            raise StockDataException(f"Couldn't convert string {info_type_str} to RequestedInfoType")
+            raise StockDataException(
+                f"Couldn't convert string {info_type_str} to RequestedInfoType"
+            )
         return result
 
     def _get_readable_date(self, dt: datetime):

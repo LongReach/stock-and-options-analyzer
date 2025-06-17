@@ -114,7 +114,6 @@ class OptionDataManager:
             highest_idx = len(strikes)
         return strikes[lowest_idx:highest_idx], closest_strike_idx
 
-
     async def get_option_chain(
         self,
         ticker: str,
@@ -139,7 +138,11 @@ class OptionDataManager:
             f"Getting option chain for {ticker}, expiration={expiration}, right={right}, min_delta={min_delta}, max_delta={max_delta}"
         )
         contract_details_list, error_str = await self._ib_driver.get_contract_details(
-            ticker, is_option=True, is_call=(right == "C"), expiration=expiration, strike=strike
+            ticker,
+            is_option=True,
+            is_call=(right == "C"),
+            expiration=expiration,
+            strike=strike,
         )
         if error_str:
             raise OptionDataException(error_str)

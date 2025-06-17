@@ -17,7 +17,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
-    non_naive_datetime
+    non_naive_datetime,
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
