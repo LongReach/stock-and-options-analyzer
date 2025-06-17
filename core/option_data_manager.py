@@ -145,7 +145,9 @@ class OptionDataManager:
             elif isinstance(strike, float):
                 strike_list = [strike]
             else:
-                raise OptionDataException(f"Wrong data for strike data, is type {type(strike)}")
+                raise OptionDataException(
+                    f"Wrong data for strike data, is type {type(strike)}"
+                )
 
         contract_details_list: List[ContractDetails] = []
 

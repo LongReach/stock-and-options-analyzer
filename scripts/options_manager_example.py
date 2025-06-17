@@ -44,11 +44,19 @@ async def main():
         print(f"Expirations for SPY between 30 and 50 days away are {expirations}")
 
         print(f"Getting strikes for SPY, {expirations[-1]}...")
-        strikes, idx = await options_manager.get_strikes(ticker="SPY", expiration=expirations[-1], right="C", num_above=8, num_below=8)
+        strikes, idx = await options_manager.get_strikes(
+            ticker="SPY",
+            expiration=expirations[-1],
+            right="C",
+            num_above=8,
+            num_below=8,
+        )
         print(f"Strikes are: {strikes}, idx is {idx}")
         print(f"Closest to ATM strike is {strikes[idx]}")
 
-        print(f"Getting option chain for SPY at {expirations[-1]}, with strikes from above...")
+        print(
+            f"Getting option chain for SPY at {expirations[-1]}, with strikes from above..."
+        )
         option_data = await options_manager.get_option_chain(
             "SPY", expiration=expirations[-1], right="C", strike=strikes
         )

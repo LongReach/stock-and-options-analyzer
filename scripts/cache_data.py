@@ -11,7 +11,12 @@ from core.common import RequestedInfoType
 from core.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
-from core.utils import str_to_bar_size, get_datetime, get_datetime_as_str, current_datetime
+from core.utils import (
+    str_to_bar_size,
+    get_datetime,
+    get_datetime_as_str,
+    current_datetime,
+)
 
 
 def print_df(df):
@@ -26,7 +31,12 @@ def print_df(df):
 
 
 async def main(
-    symbol: str, bar_size_str: str, info_type_str: str, info_only: bool, update: bool, fresh: bool
+    symbol: str,
+    bar_size_str: str,
+    info_type_str: str,
+    info_only: bool,
+    update: bool,
+    fresh: bool,
 ):
     logger = getLogger(__name__)
     basicConfig(filename="cache_data.log", level=INFO)
@@ -88,7 +98,11 @@ parser.add_argument(
     type=str,
 )
 parser.add_argument(
-    "--info-type", help="type of info, e.g. tr, iv, hv, al", required=False, default="tr", type=str
+    "--info-type",
+    help="type of info, e.g. tr, iv, hv, al",
+    required=False,
+    default="tr",
+    type=str,
 )
 parser.add_argument(
     "--info-only", help="don't do any scraping, just show info", action="store_true"
@@ -99,4 +113,13 @@ parser.add_argument(
 parser.add_argument("--fresh", help="re-scrape all data", action="store_true")
 args = parser.parse_args()
 
-asyncio.run(main(args.symbol, args.barsize, args.info_type, args.info_only, args.update, args.fresh))
+asyncio.run(
+    main(
+        args.symbol,
+        args.barsize,
+        args.info_type,
+        args.info_only,
+        args.update,
+        args.fresh,
+    )
+)

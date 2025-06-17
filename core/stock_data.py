@@ -22,7 +22,12 @@ class StockData:
     Indexed by: human-readable date-time
     """
 
-    def __init__(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
+    def __init__(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+    ):
         self._symbol = symbol
         self._bar_size = bar_size
         self._info_type = info_type
@@ -179,4 +184,6 @@ class StockData:
             info_type = StockData.get_info_type(characteristics_str[2])
             return symbol_str, bar_size, info_type
         except:
-            raise StockDataException(f"Couldn't infer symbol/bar size/info y from {filename}")
+            raise StockDataException(
+                f"Couldn't infer symbol/bar size/info y from {filename}"
+            )
