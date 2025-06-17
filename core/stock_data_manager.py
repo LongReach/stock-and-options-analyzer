@@ -17,7 +17,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
-    non_naive_datetime
+    non_naive_datetime,
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
@@ -45,7 +45,13 @@ class StockDataManager:
     def set_log_to_stdout(self, to_stdout: bool):
         self._log_to_stdout = True
 
-    def load_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, filename: Optional[str] = None) -> bool:
+    def load_data(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        filename: Optional[str] = None,
+    ) -> bool:
         """
         Creates a StockData object, attempts to load data from disk
         :param symbol: e.g. "AAPL"
@@ -56,10 +62,18 @@ class StockDataManager:
         """
         file_str = f" from file {filename}" if filename else ""
         self._log(f"Loading data for {symbol}, {bar_size.name}{file_str}")
-        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data = self._get_stock_data(
+            symbol, bar_size, info_type, add_if_missing=True
+        )
         return stock_data.load(filename)
 
-    def save_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, filename: Optional[str] = None):
+    def save_data(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        filename: Optional[str] = None,
+    ):
         """
         Creates a StockData object, attempts to load data from disk
         :param symbol: e.g. "AAPL"
@@ -74,13 +88,25 @@ class StockDataManager:
         if stock_data:
             stock_data.save(filename)
 
-    def clear_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
+    def clear_data(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+    ):
         """Clear out any data already loaded"""
-        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data = self._get_stock_data(
+            symbol, bar_size, info_type, add_if_missing=True
+        )
         stock_data.clear()
 
     async def scrape_data(
-        self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, start_date: str = "", end_date: str = ""
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        start_date: str = "",
+        end_date: str = "",
     ) -> Tuple[bool, str]:
         """
         Scrapes data from online source, completely replacing any data already in memory.
@@ -98,7 +124,9 @@ class StockDataManager:
         if not self._ib_driver:
             raise StockDataException("No driver set")
 
-        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data = self._get_stock_data(
+            symbol, bar_size, info_type, add_if_missing=True
+        )
         if start_date == "":
             raise StockDataException("Need start date for data scraping")
         start_dt = get_datetime(start_date)
@@ -127,7 +155,7 @@ class StockDataManager:
                 bar_size=stock_data.bar_size,
                 start_date=current_start_dt,
                 end_date=current_end_dt,
-                request_info_type=info_type
+                request_info_type=info_type,
             )
             if error_str:
                 ret_error_str = error_str
@@ -166,12 +194,16 @@ class StockDataManager:
             scroped.
         :return:
         """
-        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data = self._get_stock_data(
+            symbol, bar_size, info_type, add_if_missing=True
+        )
 
         df = stock_data.get_data_frame()
         if len(df) == 0:
             # There's nothing "smart" we can do here, no data loaded at all
-            return await self.scrape_data(symbol, bar_size, info_type, start_date, end_date)
+            return await self.scrape_data(
+                symbol, bar_size, info_type, start_date, end_date
+            )
 
         # Oldest date for which there's data
         oldest_dt: datetime = df.iloc[0]["date"].to_pydatetime()
@@ -215,7 +247,12 @@ class StockDataManager:
 
         return True, ""
 
-    def get_pandas_df(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Optional[pd.DataFrame]:
+    def get_pandas_df(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+    ) -> Optional[pd.DataFrame]:
         """Get the pandas dataframe for particular stock data."""
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data is None:
@@ -229,7 +266,11 @@ class StockDataManager:
         _logger.log(level, message)
 
     def _get_stock_data(
-        self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES, add_if_missing: bool = False
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        add_if_missing: bool = False,
     ) -> Optional[StockData]:
         """
         Return StockData object.
