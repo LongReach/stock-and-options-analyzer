@@ -5,6 +5,7 @@ from typing import List, Tuple, Dict
 from ibapi.common import BarData
 from datetime import datetime
 import argparse
+import traceback
 
 from core.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
@@ -22,7 +23,7 @@ def print_df(df):
     print(df.tail())
 
 
-async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool):
+async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool, fresh: bool):
     logger = getLogger(__name__)
     basicConfig(filename="cache_data.log", level=INFO)
     stock_manager = StockDataManager()
@@ -44,7 +45,10 @@ async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool):
 
     df = None
     try:
-        stock_manager.load_data(symbol, bar_size)
+        if fresh:
+            stock_manager.clear_data(symbol, bar_size)
+        else:
+            stock_manager.load_data(symbol, bar_size)
         if not info_only:
             success, error_str = await stock_manager.scrape_data_smart(
                 symbol, bar_size, start_date="19700101", update_recent=update
@@ -55,6 +59,7 @@ async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool):
         df = stock_manager.get_pandas_df(symbol, bar_size)
     except Exception as ex:
         print(f"Exception: {ex}")
+        print(traceback.format_exc())
     print_df(df)
     print()
 
@@ -62,7 +67,7 @@ async def main(symbol: str, bar_size_str: str, info_only: bool, update: bool):
         ib_driver.disconnect()
 
 
-parser = argparse.ArgumentParser(description="StockDataManager test")
+parser = argparse.ArgumentParser(description="Tool for caching market data on disk")
 parser.add_argument("--symbol", help="ticker symbol", required=True, type=str)
 parser.add_argument(
     "--barsize",
@@ -77,6 +82,9 @@ parser.add_argument(
 parser.add_argument(
     "--update", help="add more recent data to file", action="store_true"
 )
+parser.add_argument(
+    "--fresh", help="re-scrape all data", action="store_true"
+)
 args = parser.parse_args()
 
-asyncio.run(main(args.symbol, args.barsize, args.info_only, args.update))
+asyncio.run(main(args.symbol, args.barsize, args.info_only, args.update, args.fresh))
