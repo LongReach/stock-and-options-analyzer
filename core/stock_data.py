@@ -4,7 +4,8 @@ import pandas as pd
 from pandas import DataFrame, read_pickle, DatetimeIndex
 from datetime import datetime, timedelta
 
-from core.utils import BarSize, bar_size_to_str, str_to_bar_size
+from core.utils import BarSize, bar_size_to_str, str_to_bar_size, non_naive_datetime
+from core.common import RequestedInfoType
 
 _logger = logging.getLogger(__name__)
 
@@ -24,9 +25,7 @@ class StockData:
     def __init__(self, symbol: str, bar_size: BarSize):
         self._symbol = symbol
         self._bar_size = bar_size
-        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(
-            columns=["date", "open", "close", "low", "high", "volume"]
-        )
+        self.clear()
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -35,6 +34,8 @@ class StockData:
         :param bar: dict of open, close, low, high, volume data
         :param date: datetime at which bar begins
         """
+        # Make sure the date is in the right timezone
+        date = non_naive_datetime(date)
         date_str = self._get_readable_date(date)
         df = self._price_and_vol_df
         df.loc[date_str] = [
@@ -80,6 +81,12 @@ class StockData:
         except:
             _logger.warning(f"Couldn't load file {filename}")
             return False
+
+        # Go through date, make sure timezone is right for date
+        for idx in range(len(self._price_and_vol_df)):
+            # TODO: 0 is index of "date" column, make a constant for it
+            self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
+
         return True
 
     def save(self, filename: Optional[str] = None) -> bool:
@@ -97,6 +104,12 @@ class StockData:
             return False
         return True
 
+    def clear(self):
+        """Make new, empty dataframe"""
+        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(
+            columns=["date", "open", "close", "low", "high", "volume"]
+        )
+
     @property
     def symbol(self) -> str:
         return self._symbol
@@ -104,6 +117,46 @@ class StockData:
     @property
     def bar_size(self) -> BarSize:
         return self._bar_size
+
+    @staticmethod
+    def get_info_type_str(info_type: RequestedInfoType) -> str:
+        """
+        TRADES = "TRADES"
+        IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
+        HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
+        ADJUSTED_LAST = "ADJUSTED_LAST"
+        """
+        # TODO: docstring
+        _map: Dict[RequestedInfoType, str] = {
+            RequestedInfoType.TRADES: "tr",
+            RequestedInfoType.IMPLIED_VOLATILITY: "iv",
+            RequestedInfoType.HISTORICAL_VOLATILITY: "hv",
+            RequestedInfoType.ADJUSTED_LAST: "al"
+        }
+        result = _map.get(info_type)
+        if not result:
+            raise StockDataException(f"Couldn't convert {info_type.name} to str")
+        return result
+
+    @staticmethod
+    def get_info_type(info_type_str: str) -> RequestedInfoType:
+        """
+        TRADES = "TRADES"
+        IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
+        HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
+        ADJUSTED_LAST = "ADJUSTED_LAST"
+        """
+        # TODO: docstring
+        _map: Dict[str, RequestedInfoType] = {
+            "tr": RequestedInfoType.TRADES,
+            "iv": RequestedInfoType.IMPLIED_VOLATILITY,
+            "hv": RequestedInfoType.HISTORICAL_VOLATILITY,
+            "al": RequestedInfoType.ADJUSTED_LAST
+        }
+        result = _map.get(info_type_str)
+        if not result:
+            raise StockDataException(f"Couldn't convert string {info_type_str} to RequestedInfoType")
+        return result
 
     def _get_readable_date(self, dt: datetime):
         """Converts a datetime into a human-readable string"""

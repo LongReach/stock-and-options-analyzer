@@ -70,11 +70,57 @@ class OptionDataManager:
                 out_expirations.append(exp)
         return out_expirations
 
+    async def get_strikes(
+        self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
+    ) -> Tuple[List[float], float]:
+        """
+        Gets all strikes for a particular stock at a particular expiration date.
+        :param ticker: underlying stock/ETF
+        :param expiration: IB-style date
+        :param right: "C" or "P"
+        :param num_below: number of strikes above at-the-money price
+        :param num_above: number of strikes below at-the-money price
+        :return: (list of strikes, index of which strike is closest to ATM)
+        """
+        self._logger.info(
+            f"Getting strikes for {ticker}, expiration={expiration}, right={right}, num_below={num_below}, num_above={num_above}"
+        )
+
+        contract_details_list, error_str = await self._ib_driver.get_contract_details(
+            ticker, is_option=True, is_call=(right == "C"), expiration=expiration
+        )
+        if error_str:
+            raise OptionDataException(error_str)
+
+        strikes = [cd.contract.strike for cd in contract_details_list]
+        strikes.sort()
+
+        underlying_price = await self._get_underlying_price(ticker)
+
+        # Closest to being at the money
+        closest_strike_idx = 0
+        best_dist = 1000000
+        for idx, strike in enumerate(strikes):
+            if math.fabs(strike - underlying_price) < best_dist:
+                best_dist = math.fabs(strike - underlying_price)
+                closest_strike_idx = idx
+
+        # Go from lowest allowed strike to highest
+        lowest_idx = closest_strike_idx - num_below
+        if lowest_idx < 0:
+            lowest_idx = 0
+        highest_idx = closest_strike_idx + num_above
+        if highest_idx > len(strikes):
+            highest_idx = len(strikes)
+        return strikes[lowest_idx:highest_idx], closest_strike_idx
+
+
     async def get_option_chain(
         self,
         ticker: str,
         expiration: str,
         right: str,
+        strike: Optional[float] = None,
         min_delta: float = 0.08,
         max_delta: float = 0.7,
     ) -> OptionData:
@@ -83,6 +129,7 @@ class OptionDataManager:
         :param ticker: symbol of underlying
         :param expiration: expiration date, IB style
         :param right: "C" for call, "P" for put
+        :param strike: strike price (for a single option contract) or None
         :param min_delta: don't want data for options contracts with delta below this value
         :param max_delta: don't want data for options contracts with delta above this value
         :return: OptionData, holding all retrieved data
@@ -92,7 +139,7 @@ class OptionDataManager:
             f"Getting option chain for {ticker}, expiration={expiration}, right={right}, min_delta={min_delta}, max_delta={max_delta}"
         )
         contract_details_list, error_str = await self._ib_driver.get_contract_details(
-            ticker, is_option=True, is_call=(right == "C"), expiration=expiration
+            ticker, is_option=True, is_call=(right == "C"), expiration=expiration, strike=strike
         )
         if error_str:
             raise OptionDataException(error_str)
@@ -101,17 +148,7 @@ class OptionDataManager:
         if len(contract_details_list) == 0:
             return option_data
 
-        # Get the underlying price
-        ret_tup, error_str = await self._ib_driver.get_most_recent_data(
-            ticker, BarSize.ONE_MINUTE
-        )
-        if not ret_tup or error_str:
-            raise OptionDataException(
-                f"Couldn't get underlying price, error is {error_str}"
-            )
-        underlying_price = ret_tup[0]["close"]
-        if underlying_price <= 0.0:
-            raise OptionDataException("Couldn't get underlying price")
+        underlying_price = await self._get_underlying_price(ticker)
 
         # Create a list in which contract details with strike price closest to underlying are at the top of the list
         sortable_cd_list = [
@@ -132,6 +169,20 @@ class OptionDataManager:
 
         option_data.sort("strike")
         return option_data
+
+    async def _get_underlying_price(self, ticker: str):
+        """Get the latest trading price (within a minute) for ticker"""
+        ret_tup, error_str = await self._ib_driver.get_most_recent_data(
+            ticker, BarSize.ONE_MINUTE
+        )
+        if not ret_tup or error_str:
+            raise OptionDataException(
+                f"Couldn't get underlying price, error is {error_str}"
+            )
+        underlying_price = ret_tup[0]["close"]
+        if underlying_price <= 0.0:
+            raise OptionDataException("Couldn't get underlying price")
+        return underlying_price
 
     async def _batch_collect_options_data(
         self,
@@ -156,7 +207,7 @@ class OptionDataManager:
         """
 
         # This limits the number of requests active with IB at once
-        MAX_TO_RETRIEVE_AT_ONCE = 10
+        MAX_TO_RETRIEVE_AT_ONCE = 15
         MAX_ERRORS = 5
 
         # Keep tracks of which entries in contract_details_list we've made tasks for
@@ -190,6 +241,7 @@ class OptionDataManager:
                 <= ignore_strikes_above
             )
 
+        # Loop until we've processed all ContractDetails and task queue is empty
         while current_idx < len(contract_details_list) or len(task_queue) > 0:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible

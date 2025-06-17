@@ -39,11 +39,11 @@ async def main():
         options_manager = OptionDataManager()
         options_manager.add_driver(ib_driver)
 
-        print("Here we go, part one")
+        print("Getting expirations for SPY...")
         expirations = await options_manager.get_expirations("SPY", 30, 44)
         print(f"Expirations for SPY between 30 and 50 days away are {expirations}")
 
-        print("Here we go, part two")
+        print("Getting option chain for SPY...")
         option_data = await options_manager.get_option_chain(
             "SPY", expiration=expirations[-1], right="C"
         )

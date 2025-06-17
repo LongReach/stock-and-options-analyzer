@@ -17,6 +17,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
+    non_naive_datetime
 )
 from core.stock_data import StockData, StockDataException
 from core.ib_driver import IBDriver
@@ -69,6 +70,11 @@ class StockDataManager:
         stock_data = self._get_stock_data(symbol, bar_size)
         if stock_data:
             stock_data.save(filename)
+
+    def clear_data(self, symbol: str, bar_size: BarSize):
+        """Clear out any data already loaded"""
+        stock_data = self._get_stock_data(symbol, bar_size, add_if_missing=True)
+        stock_data.clear()
 
     async def scrape_data(
         self, symbol: str, bar_size: BarSize, start_date: str = "", end_date: str = ""
@@ -161,9 +167,11 @@ class StockDataManager:
             return await self.scrape_data(symbol, bar_size, start_date, end_date)
 
         # Oldest date for which there's data
-        oldest_dt = df.iloc[0]["date"].to_pydatetime()
+        oldest_dt: datetime = df.iloc[0]["date"].to_pydatetime()
+        oldest_dt = non_naive_datetime(oldest_dt)
         # Newest date for which there's data
         newest_dt = df.iloc[-1]["date"].to_pydatetime()
+        newest_dt = non_naive_datetime(newest_dt)
 
         if start_date == "":
             start_dt = None

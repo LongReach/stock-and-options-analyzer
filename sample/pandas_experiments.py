@@ -44,7 +44,7 @@ def main():
     print()
 
     animal_data = {
-        "aninal": ["cat", "dog", "monkey", "parrot"],
+        "animal": ["cat", "dog", "monkey", "parrot"],
         "legs": [4, 4, 2, 2],
         "date": ["01012020", "05052020", "02022020", "04042020"],
     }
@@ -60,6 +60,9 @@ def main():
 
     print("Second row is:")
     print(animal_df.iloc[1])
+
+    print("1st column in second row is:")
+    print(animal_df.iloc[1, 0])
 
 
 main()
