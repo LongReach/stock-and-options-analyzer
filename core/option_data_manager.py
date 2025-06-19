@@ -49,8 +49,9 @@ class OptionDataManager:
         self._logger.info(
             f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
         )
+        # This is the CD for the stock, not any option
         contract_details, error_str = await self._ib_driver.get_contract_details_single(
-            ticker
+            ticker, primary_exchange="NYSE"
         )
         options_chain_info, error_str = await self._ib_driver.get_options_chain_info(
             contract_details
@@ -87,7 +88,11 @@ class OptionDataManager:
         )
 
         contract_details_list, error_str = await self._ib_driver.get_contract_details(
-            ticker, is_option=True, is_call=(right == "C"), expiration=expiration
+            ticker,
+            is_option=True,
+            is_call=(right == "C"),
+            expiration=expiration,
+            primary_exchange=None,
         )
         if error_str:
             raise OptionDataException(error_str)
@@ -196,7 +201,7 @@ class OptionDataManager:
         )
         if not ret_tup or error_str:
             raise OptionDataException(
-                f"Couldn't get underlying price, error is {error_str}"
+                f"Couldn't get underlying price, error is: {error_str}"
             )
         underlying_price = ret_tup[0]["close"]
         if underlying_price <= 0.0:

@@ -56,13 +56,13 @@ class BarDataRequest(DataRequest):
 class ContractDetailsRequest(DataRequest):
     """For tracking a contract details request and capturing results returned so far."""
 
-    # TODO: refactor this thing for the returning of multiple contract details
-
-    def __init__(self):
+    def __init__(self, ticker: str):
         super().__init__()
         self._exchange_map: Dict[str, List[ContractDetails]] = {}
+        self._ticker = ticker
 
     def add_contract_details(self, details: ContractDetails):
+        """Add a ContractDetails object to tracking. There might be duplicates, but for different exchanges."""
         exchange = details.contract.exchange
         details_list = self._exchange_map.get(exchange)
         if not details_list:
@@ -70,13 +70,17 @@ class ContractDetailsRequest(DataRequest):
         details_list.append(details)
 
     def get_best_list(self) -> List[ContractDetails]:
+        """Returns list of all ContractDetails objects associated with the best exchange (SMART, generally)"""
         if len(self._exchange_map) == 0:
             return []
         if self._exchange_map.get("SMART"):
-            return self._exchange_map.get("SMART")
-        # Just pick some list
-        arbitrary_item = next(iter(self._exchange_map.items()))
-        return arbitrary_item[1]
+            candidate_list = self._exchange_map.get("SMART")
+        else:
+            # Just pick some list
+            arbitrary_item = next(iter(self._exchange_map.items()))
+            candidate_list = arbitrary_item[1]
+
+        return candidate_list
 
 
 class OptionChainInfoRequest(DataRequest):
