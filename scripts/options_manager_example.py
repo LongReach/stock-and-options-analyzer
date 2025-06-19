@@ -20,6 +20,10 @@ Run like:
 python -m scripts.options_manager_example
 """
 
+TICKER = "AAPL"
+MIN_DAYS_AWAY = 5
+MAX_DAYS_AWAY = 70
+
 
 def print_df(df):
     print("Dataframe is:\n---------------")
@@ -39,13 +43,17 @@ async def main():
         options_manager = OptionDataManager()
         options_manager.add_driver(ib_driver)
 
-        print("Getting expirations for SPY...")
-        expirations = await options_manager.get_expirations("SPY", 30, 44)
-        print(f"Expirations for SPY between 30 and 50 days away are {expirations}")
+        print(f"Getting expirations for {TICKER}...")
+        expirations = await options_manager.get_expirations(
+            TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY
+        )
+        print(
+            f"Expirations for {TICKER} between {MIN_DAYS_AWAY} and {MAX_DAYS_AWAY} days away are {expirations}"
+        )
 
-        print(f"Getting strikes for SPY, {expirations[-1]}...")
+        print(f"Getting strikes for {TICKER}, {expirations[-1]}...")
         strikes, idx = await options_manager.get_strikes(
-            ticker="SPY",
+            ticker=TICKER,
             expiration=expirations[-1],
             right="C",
             num_above=8,
@@ -55,13 +63,13 @@ async def main():
         print(f"Closest to ATM strike is {strikes[idx]}")
 
         print(
-            f"Getting option chain for SPY at {expirations[-1]}, with strikes from above..."
+            f"Getting option chain for {TICKER} at {expirations[-1]}, with strikes from {strikes[0]} to {strikes[-1]}"
         )
         option_data = await options_manager.get_option_chain(
-            "SPY", expiration=expirations[-1], right="C", strike=strikes
+            TICKER, expiration=expirations[-1], right="C", strike=strikes
         )
         # option_data.sort("delta", ascending=True)
-        df = option_data.get_dataframe()
+        df = option_data.get_dataframe(drop_columns=["date", "full_name"])
         print_df(df)
 
     except Exception as ex:

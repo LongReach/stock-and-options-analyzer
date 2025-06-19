@@ -62,13 +62,17 @@ class OptionData:
         self._options_df.loc[self._current_index] = data_row
         self._current_index += 1
 
-    def get_dataframe(self) -> DataFrame:
+    def get_dataframe(self, drop_columns: Optional[List[str]] = None) -> DataFrame:
         """Returns pandas dataframe"""
-        return self._options_df
+        if drop_columns is None:
+            drop_columns = []
+        return self._options_df.drop(columns=drop_columns)
 
     def sort(self, column: str, ascending: bool = True):
         """Sorts the rows of options data"""
         self._options_df.sort_values(by=column, inplace=True, ascending=ascending)
+        # The indexes will now be out of order, so reorder them
+        self._options_df.reset_index(drop=True, inplace=True)
 
     @property
     def underlying_price(self) -> float:

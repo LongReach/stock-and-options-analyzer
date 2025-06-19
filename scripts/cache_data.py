@@ -59,7 +59,7 @@ async def main(
             f"{action_str} {info_type.value} data for {symbol}, {bar_size_str}\n======================================"
         )
 
-    if info_type.name == RequestedInfoType.TRADES:
+    if info_type == RequestedInfoType.TRADES:
         start_date = "19700101"
     else:
         start_date = get_datetime_as_str(current_datetime() - timedelta(days=365))

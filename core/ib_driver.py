@@ -311,7 +311,7 @@ class IBDriver(IBWrapper):
         async with self._lock:
             req_id = self.next_id()
             req_obj = self._request_contractdetail_objects[req_id] = (
-                ContractDetailsRequest()
+                ContractDetailsRequest(ticker)
             )
 
         contract = self._make_contract(
@@ -660,7 +660,10 @@ class IBDriver(IBWrapper):
             option_chain_info.multiplier = int(multiplier)
             option_chain_info.expirations = copy.copy(expirations)
             option_chain_info.strikes = copy.copy(strikes)
-            req_obj.add_option_chain_info(option_chain_info)
+            # This is necessary because sometimes we get a weird trading_class,
+            # e.g. "2AAPL" instead of "AAPL".
+            if req_obj.ticker == trading_class:
+                req_obj.add_option_chain_info(option_chain_info)
 
     def _option_chain_end_cb(self, req_id: int):
         """Called when ALL option chain info has been sent"""
@@ -801,7 +804,6 @@ class IBDriver(IBWrapper):
                 the_contract.strike = int(strike)
             if expiration is not None:
                 the_contract.lastTradeDateOrContractMonth = expiration
-            the_contract.multiplier = "100"
         if primary_exchange:
             the_contract.primaryExchange = primary_exchange
         return the_contract
