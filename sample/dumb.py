@@ -1,8 +1,29 @@
 # I'm lazy
 
-TRADES_COLUMNS = ["position number", "date opened", "right", "expiration", "strike", "num contracts", "opening price",
-                  "date closed", "last price", "IV", "delta", "theta", "gamma", "vega"]
-POSITIONS_COLUMNS = ["position number", "strategy", "ticker", "date opened", "rolled from", "date closed"]
+TRADES_COLUMNS = [
+    "position number",
+    "date opened",
+    "right",
+    "expiration",
+    "strike",
+    "num contracts",
+    "opening price",
+    "date closed",
+    "last price",
+    "IV",
+    "delta",
+    "theta",
+    "gamma",
+    "vega",
+]
+POSITIONS_COLUMNS = [
+    "position number",
+    "strategy",
+    "ticker",
+    "date opened",
+    "rolled from",
+    "date closed",
+]
 
 the_lists = [TRADES_COLUMNS, POSITIONS_COLUMNS]
 
