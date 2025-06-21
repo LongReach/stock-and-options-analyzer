@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Union, Optional, Tuple
 from app.common import TradeColumn, PositionColumn, column_enum_to_str
 from core.utils import get_datetime
 
+
 class Dialog:
     """Base class for a 'dialog box' (really just a series of questions) in text-based interface"""
 
@@ -15,7 +16,9 @@ class Dialog:
         self._fields_and_outputs: Dict[Union[TradeColumn, PositionColumn], Any] = {}
         self._other_fields: Dict[str, Any] = {}
 
-    def set_fields_and_defaults(self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]):
+    def set_fields_and_defaults(
+        self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]
+    ):
         """Sets which fields user must input, as well as their default values"""
         self._fields_and_defaults = fields_and_defs
 
@@ -24,7 +27,7 @@ class Dialog:
         out_dict = {}
         print("Enter fields")
         for field, default in self._fields_and_defaults.items():
-            empty_default = (default == "" or default == -1 or default == -1.0)
+            empty_default = default == "" or default == -1 or default == -1.0
             default_hint = "" if empty_default else f" (default is {default})"
             got_input = False
             field_type = type(default)
@@ -54,7 +57,9 @@ class Dialog:
         return self._other_fields
 
     @staticmethod
-    def _validate_field(val: str, field: Union[PositionColumn, TradeColumn], field_type: type) -> Tuple[bool, str]:
+    def _validate_field(
+        val: str, field: Union[PositionColumn, TradeColumn], field_type: type
+    ) -> Tuple[bool, str]:
         """
         Confirms that user input for a particular field is valid
         :param val: value the user has inputted
@@ -72,10 +77,23 @@ class Dialog:
 
         position_fields = isinstance(field, PositionColumn)
 
-        if position_fields and field == PositionColumn.POSITION_NUMBER or not position_fields and field == TradeColumn.POSITION_NUMBER:
+        if (
+            position_fields
+            and field == PositionColumn.POSITION_NUMBER
+            or not position_fields
+            and field == TradeColumn.POSITION_NUMBER
+        ):
             if val < 0:
                 return False, f"Bad position number {val}"
-        elif position_fields and (field == PositionColumn.DATE_OPENED or field == PositionColumn.DATE_CLOSED) or not position_fields and (field == TradeColumn.DATE_OPENED or field == TradeColumn.DATE_CLOSED):
+        elif (
+            position_fields
+            and (
+                field == PositionColumn.DATE_OPENED
+                or field == PositionColumn.DATE_CLOSED
+            )
+            or not position_fields
+            and (field == TradeColumn.DATE_OPENED or field == TradeColumn.DATE_CLOSED)
+        ):
             try:
                 as_dt = get_datetime(val)
             except:
@@ -96,6 +114,7 @@ class Dialog:
                 return False, f"Bad strike {val}"
         return True, ""
 
+
 class MainDialog(Dialog):
 
     def __init__(self, dialog_name: Optional[str] = None):
@@ -105,7 +124,9 @@ class MainDialog(Dialog):
         choice_made = False
         while not choice_made:
             print("\nMake choice:")
-            print("1) New position, 2) Modify position, 3) Show positions, 4) Show single position, 5) Exit")
+            print(
+                "1) New position, 2) Modify position, 3) Show positions, 4) Show single position, 5) Exit"
+            )
             choice = input(": ")
             if choice == "1":
                 self._other_fields["choice"] = "new position"
@@ -129,6 +150,7 @@ class MainDialog(Dialog):
             else:
                 print("Invalid choice.")
 
+
 class PositionDialog(Dialog):
 
     def __init__(self, dialog_name: Optional[str] = None):
@@ -138,6 +160,7 @@ class PositionDialog(Dialog):
         print()
         print(self._dialog_name)
         super().collect_input()
+
 
 class TradeDialog(Dialog):
 

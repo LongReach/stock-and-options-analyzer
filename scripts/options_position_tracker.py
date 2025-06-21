@@ -23,6 +23,7 @@ from app.opt_position_tracker import OptionPositionTracker
 
 position_tracker: OptionPositionTracker = None
 
+
 def print_df(df):
     if df is None:
         print("ERROR: no dataframe")
@@ -32,6 +33,7 @@ def print_df(df):
     print(df.head())
     print("Tail:")
     print(df.tail())
+
 
 def input_trades_new(position_fields: Dict[PositionColumn, Any]):
     pos_num = position_fields[PositionColumn.POSITION_NUMBER]
@@ -44,7 +46,7 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
             TradeColumn.EXPIRATION: "",
             TradeColumn.STRIKE: -1.0,
             TradeColumn.NUM_CONTRACTS: 1,
-            TradeColumn.OPENING_PRICE: -1.0
+            TradeColumn.OPENING_PRICE: -1.0,
         }
         dialog.set_fields_and_defaults(input_fields)
         dialog.collect_input()
@@ -63,14 +65,16 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_2[TradeColumn.DATE_OPENED] = date_opened
         out_fields_2[TradeColumn.RIGHT] = out_fields_1[TradeColumn.RIGHT]
         out_fields_2[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
+        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[
+            TradeColumn.NUM_CONTRACTS
+        ]
     if strategy == "IC":
         dialog = TradeDialog("Short bull leg")
         input_fields = {
             TradeColumn.EXPIRATION: "",
             TradeColumn.STRIKE: -1.0,
             TradeColumn.NUM_CONTRACTS: 1,
-            TradeColumn.OPENING_PRICE: -1.0
+            TradeColumn.OPENING_PRICE: -1.0,
         }
         dialog.set_fields_and_defaults(input_fields)
         dialog.collect_input()
@@ -89,7 +93,9 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_2[TradeColumn.DATE_OPENED] = date_opened
         out_fields_2[TradeColumn.RIGHT] = "P"
         out_fields_2[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
+        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[
+            TradeColumn.NUM_CONTRACTS
+        ]
 
         dialog = TradeDialog("Short bear leg")
         dialog.set_fields_and_defaults(input_fields)
@@ -99,7 +105,9 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_3[TradeColumn.DATE_OPENED] = date_opened
         out_fields_3[TradeColumn.RIGHT] = "C"
         out_fields_3[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_3[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
+        out_fields_3[TradeColumn.NUM_CONTRACTS] = out_fields_1[
+            TradeColumn.NUM_CONTRACTS
+        ]
 
         dialog = TradeDialog("Long bear leg")
         dialog.set_fields_and_defaults(input_fields)
@@ -109,7 +117,9 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_4[TradeColumn.DATE_OPENED] = date_opened
         out_fields_4[TradeColumn.RIGHT] = "C"
         out_fields_4[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_4[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
+        out_fields_4[TradeColumn.NUM_CONTRACTS] = out_fields_1[
+            TradeColumn.NUM_CONTRACTS
+        ]
 
 
 async def run():
@@ -135,6 +145,7 @@ async def run():
         elif other_fields["choice"] == "exit":
             break
 
+
 async def main(
     set_name: str,
 ):
@@ -151,6 +162,4 @@ parser = argparse.ArgumentParser(description="Tool for tracking options position
 parser.add_argument("--set", help="name of a set of positions", required=True, type=str)
 args = parser.parse_args()
 
-asyncio.run(
-    main(args.set)
-)
+asyncio.run(main(args.set))

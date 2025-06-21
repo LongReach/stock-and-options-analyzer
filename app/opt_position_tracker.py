@@ -8,18 +8,30 @@ from app.common import TradeColumn, PositionColumn, column_enum_to_str
 
 _logger = logging.getLogger(__name__)
 
+
 class OptionPositionTracker:
 
     def __init__(self, set_name: str):
         self._set_name = set_name
-        self._trade_column_name_map: Dict[str, int] = {column_enum_to_str(col): col.value for col in TradeColumn}
-        self._position_column_name_map: Dict[str, int] = {column_enum_to_str(col): col.value for col in PositionColumn}
-        self._trades_df = pandas.DataFrame(columns=[key for key in self._trade_column_name_map.keys()])
-        self._positions_df = pandas.DataFrame(columns=[key for key in self._position_column_name_map.keys()])
+        self._trade_column_name_map: Dict[str, int] = {
+            column_enum_to_str(col): col.value for col in TradeColumn
+        }
+        self._position_column_name_map: Dict[str, int] = {
+            column_enum_to_str(col): col.value for col in PositionColumn
+        }
+        self._trades_df = pandas.DataFrame(
+            columns=[key for key in self._trade_column_name_map.keys()]
+        )
+        self._positions_df = pandas.DataFrame(
+            columns=[key for key in self._position_column_name_map.keys()]
+        )
         self._new_position_number = 0
 
     def load(self):
-        filenames = [f"{self._set_name}_opt_trades.zip", f"{self._set_name}_opt_positions.zip"]
+        filenames = [
+            f"{self._set_name}_opt_trades.zip",
+            f"{self._set_name}_opt_positions.zip",
+        ]
         load_success = True
         for i, filename in enumerate(filenames):
             path = f"./data/{filename}"
@@ -35,7 +47,10 @@ class OptionPositionTracker:
         return load_success
 
     def save(self):
-        filenames = [f"{self._set_name}_opt_trades.zip", f"{self._set_name}_opt_positions.zip"]
+        filenames = [
+            f"{self._set_name}_opt_trades.zip",
+            f"{self._set_name}_opt_positions.zip",
+        ]
         save_success = True
         for i, filename in enumerate(filenames):
             path = f"./data/{filename}"
@@ -55,4 +70,3 @@ class OptionPositionTracker:
         num = self._new_position_number
         self._new_position_number += 1
         return num
-
