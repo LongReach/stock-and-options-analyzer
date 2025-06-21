@@ -80,3 +80,41 @@ Sometimes efforts to get options Greeks will fail because of an error, `No marke
 
 `No data of type EODChart is available for the exchange 'BEST' and the security type 'Option' and '1 d' and '1 day'`: When getting historical price data for an option, must use a smaller bar size than one-day.
 
+## Notes
+
+Fields for each option in a position
+- position number
+- date opened
+- right
+- expiration
+- strike
+- num contracts
+- opening price (negative for short leg)
+- date closed
+- closing/current price
+- IV
+- delta
+- theta
+- gamma
+- vega
+
+Fields for each position
+- position number
+- strategy
+- ticker
+- date opened
+- rolled from (position number)
+- date closed
+
+Commands
+- enter position
+  - strategy dialogue
+  - enter position dialogue
+  - enter row dialog
+- show position
+- modify position
+  - modify position choices: overall position, row, append, delete
+
+Dialog
+- receives list of fields to populate
+- receives list of default values
