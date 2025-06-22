@@ -24,7 +24,7 @@ def main():
 
     # Add new items and removed one
     fruit_df.loc[4] = ["Pancake", "brown", 5]
-    fruit_df.loc[5] = ["Grape", "purple", 7]
+    fruit_df.loc[5] = {"Fruit": "Grape", "Color": "purple", "Rating": 7}
     fruit_df.drop(4, inplace=True)
     print("Added two rows, dropped one")
     print(fruit_df)
@@ -63,6 +63,14 @@ def main():
 
     print("1st column in second row is:")
     print(animal_df.iloc[1, 0])
+
+    print("\nAnimals with four legs:")
+    selection = animal_df[animal_df["legs"] == 4]
+    print(selection)
+
+    single_row_df = pd.DataFrame({"name": "George", "salary": "a million"})
+    print("\nSingle row DF:")
+    print(single_row_df)
 
 
 main()
