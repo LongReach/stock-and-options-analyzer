@@ -2,6 +2,10 @@ from enum import IntEnum
 from typing import Union
 
 
+class PositionTrackerException(Exception):
+    pass
+
+
 class TradeColumn(IntEnum):
     """Fields in the "spreadsheet", one for each individual options trade from open to close"""
 
@@ -13,7 +17,7 @@ class TradeColumn(IntEnum):
     NUM_CONTRACTS = 5
     OPENING_PRICE = 6  # price of contract
     DATE_CLOSED = 7  # date at which trade closed, or empty
-    LAST_PRICE = 8  # price when trade closed, or last checkec price
+    LAST_PRICE = 8  # price when trade closed, or last checked price
     IV = 9
     DELTA = 10
     THETA = 11
