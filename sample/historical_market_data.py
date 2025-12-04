@@ -23,7 +23,9 @@ class TestApp(EClient, EWrapper):
         return self.orderId
 
     def error(self, reqId, errorCode, errorString, advancedOrderReject=""):
-        print(f"reqId: {reqId}, errorCode: {errorCode}, errorString: {errorString}, orderReject: {advancedOrderReject}")
+        print(
+            f"reqId: {reqId}, errorCode: {errorCode}, errorString: {errorString}, orderReject: {advancedOrderReject}"
+        )
 
     def historicalData(self, reqId, bar):
         print(reqId, bar)
@@ -44,5 +46,15 @@ mycontract.secType = "STK"
 mycontract.exchange = "SMART"
 mycontract.currency = "USD"
 
-app.reqHistoricalData(app.nextId(), mycontract, "20240523 16:00:00 US/Eastern", "1 D", "1 hour", "TRADES", 1, 1, False,
-                      [])
+app.reqHistoricalData(
+    app.nextId(),
+    mycontract,
+    "20240523 16:00:00 US/Eastern",
+    "1 D",
+    "1 hour",
+    "TRADES",
+    1,
+    1,
+    False,
+    [],
+)

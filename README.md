@@ -1,8 +1,20 @@
 # Suite of Tools for Stock/Options Market Analysis
 
+## Work in Progress!
+
+![](./images/WIP.png)
+
+I'm sharing this repository to show potential employers an example of something I worked on in my free time. The code and documentation are not as polished as they'd be in a "finished" project.
+
+The "secret sauce" elements of my stock/options trading strategy don't appear here, but are kept privately elsewhere. The focus of these tools is on getting data and keeping a record of trades. Options a lot more complex than stocks, with aspects like implied volatility, delta, theta, and gamma coming into play. Woe to the one who attempts options trading without a grasp of these things!
+
 ## Description
 
 This is a suite of command line tools for analyzing stock and options market data pulled from [Interactive Brokers](https://www.interactivebrokers.com/). The specifics of dealing with Interactive Brokers are abstracted away, allowing easy access to "clean" data representations. It wouldn't be difficult to use a data provider other than Interactive Brokers.
+
+## For Potential Employers
+
+This project is entirely my own creation, at least on the level of design, architecture, general coding choices, and documentation. Of course, I made some use of Google, ChatGPT, and Stackoverflow to refresh my memory on certain Python packages or language features. 
 
 ## Design Thoughts
 
@@ -67,3 +79,50 @@ To exit the program, close Gateway.
 ### Error about another client accessing IB from a different IP address
 
 You might have the IB app open on your phone (needed for authentication when you log on to a live trading account). Close it.
+
+### No market data during competing live session
+
+Sometimes efforts to get options Greeks will fail because of an error, `No market data during competing live session`. Try closing the Gateway and reopening it.
+
+### Limitations on historical price data for an option
+
+`No data of type EODChart is available for the exchange 'BEST' and the security type 'Option' and '1 d' and '1 day'`: When getting historical price data for an option, must use a smaller bar size than one-day.
+
+## Notes
+
+Fields for each option in a position
+- position number
+- date opened
+- right
+- expiration
+- strike
+- num contracts
+- opening price (negative for short leg)
+- date closed
+- closing/current price
+- IV
+- delta
+- theta
+- gamma
+- vega
+
+Fields for each position
+- position number
+- strategy
+- ticker
+- date opened
+- rolled from (position number)
+- date closed
+
+Commands
+- enter position
+  - strategy dialogue
+  - enter position dialogue
+  - enter row dialog
+- show position
+- modify position
+  - modify position choices: overall position, row, append, delete
+
+Dialog
+- receives list of fields to populate
+- receives list of default values

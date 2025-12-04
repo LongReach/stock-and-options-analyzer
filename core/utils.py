@@ -1,7 +1,61 @@
 import asyncio
-from datetime import datetime, timezone
+from typing import Union
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+from enum import Enum, auto
 
-async def wait_for_condition(condition, timeout: float, check_interval: float=0.1):
+from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
+
+
+def bar_size_to_str(bar_size: BarSize) -> str:
+    """Convert BarSize to a string description"""
+    conversion_map = {
+        BarSize.ONE_MINUTE: "1m",
+        BarSize.FIVE_MINUTES: "5m",
+        BarSize.ONE_HOUR: "1h",
+        BarSize.FOUR_HOURS: "4h",
+        BarSize.ONE_DAY: "1d",
+        BarSize.ONE_WEEK: "1w",
+    }
+    try:
+        return conversion_map[bar_size]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size.name} to string")
+
+
+def str_to_bar_size(bar_size_str: str) -> BarSize:
+    """Given a string description, return a BarSize"""
+    conversion_map = {
+        "1m": BarSize.ONE_MINUTE,
+        "5m": BarSize.FIVE_MINUTES,
+        "1h": BarSize.ONE_HOUR,
+        "4h": BarSize.FOUR_HOURS,
+        "1d": BarSize.ONE_DAY,
+        "1w": BarSize.ONE_WEEK,
+    }
+    try:
+        return conversion_map[bar_size_str]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size_str} to BarSize")
+
+
+def bar_size_to_time(bar_size: BarSize) -> timedelta:
+    """Given a BarSize, return a timedelta object"""
+    conversion_map = {
+        BarSize.ONE_MINUTE: timedelta(minutes=1),
+        BarSize.FIVE_MINUTES: timedelta(minutes=5),
+        BarSize.ONE_HOUR: timedelta(hours=1),
+        BarSize.FOUR_HOURS: timedelta(hours=4),
+        BarSize.ONE_DAY: timedelta(days=1),
+        BarSize.ONE_WEEK: timedelta(weeks=1),
+    }
+    try:
+        return conversion_map[bar_size]
+    except:
+        raise CoreException(f"Couldn't convert {bar_size.name} to timedelta")
+
+
+async def wait_for_condition(condition, timeout: float, check_interval: float = 0.1):
     """
     Waits for a condition to be true with a timeout.
 
@@ -16,6 +70,7 @@ async def wait_for_condition(condition, timeout: float, check_interval: float=0.
             return True
         await asyncio.sleep(check_interval)
     return False
+
 
 def get_datetime(ib_date: str) -> datetime:
     """
@@ -55,13 +110,38 @@ def get_datetime(ib_date: str) -> datetime:
         raise TypeError(f"Bad second value of {second} in IB date {ib_date}")
 
     try:
-        dt = datetime(year, month, day, hour, minute, second)
+        dt = datetime(
+            year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE)
+        )
     except:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt
 
-def get_datetime_as_str(dt: datetime) -> str:
+
+def get_datetime_as_str(dt: Union[datetime, str]) -> str:
     """
     Given a datetimte, return it as an IB-style datetime string, e.g. "20250523 09:30:00 US/Eastern"
     """
+    if isinstance(dt, str):
+        dt = get_datetime(dt)
     return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
+
+
+def is_trading_hours() -> bool:
+    """Returns True if it's trading hours right now"""
+    current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
+    if 10 <= current_dt.hour < 16:
+        return True
+    if current_dt.hour == 9 and current_dt.minute >= 30:
+        return True
+    return False
+
+
+def current_datetime():
+    """Returns current datetime, but in Eastern standard time"""
+    return datetime.now(ZoneInfo(MARKETS_TIMEZONE))
+
+
+def non_naive_datetime(dt: datetime) -> datetime:
+    """Given a naive datetime (no timezone), set it to market time"""
+    return dt.replace(tzinfo=ZoneInfo(MARKETS_TIMEZONE))
