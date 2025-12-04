@@ -1,5 +1,13 @@
 # Suite of Tools for Stock/Options Market Analysis
 
+## Work in Progress!
+
+![](./images/WIP.png)
+
+I'm sharing this repository to show potential employers an example of something I worked on in my free time. The code and documentation are not as polished as they'd be in a "finished" project.
+
+The "secret sauce" elements of my stock/options trading strategy don't appear here, but are kept privately elsewhere. The focus of these tools is on getting data and keeping a record of trades. Options a lot more complex than stocks, with aspects like implied volatility, delta, theta, and gamma coming into play. Woe to the one who attempts options trading without a grasp of these things!
+
 ## Description
 
 This is a suite of command line tools for analyzing stock and options market data pulled from [Interactive Brokers](https://www.interactivebrokers.com/). The specifics of dealing with Interactive Brokers are abstracted away, allowing easy access to "clean" data representations. It wouldn't be difficult to use a data provider other than Interactive Brokers.
