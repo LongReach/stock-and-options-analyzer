@@ -1,6 +1,7 @@
 from typing import Dict, List, Tuple, Optional, Set, Any
 from datetime import datetime
 from enum import Enum, auto
+from threading import Lock
 from ibapi.common import BarData
 
 LOCAL_TIMEZONE = "America/New_York"
@@ -17,7 +18,9 @@ class BarSize(Enum):
     """Corresponds to width of a candle on a stock chart"""
 
     ONE_MINUTE = auto()
+    TWO_MINUTES = auto()
     FIVE_MINUTES = auto()
+    FIFTEEN_MINUTES = auto()
     ONE_HOUR = auto()
     FOUR_HOURS = auto()
     ONE_DAY = auto()
@@ -60,11 +63,17 @@ class SecurityDescriptor:
 
 
 class HistoricalData:
-    """Holds historical data returned by IBDriver"""
+    """
+    Holds multiple bars of historical data returned by IBDriver.
+
+    The Lock is important because data might be continuously streaming back from IB, containing
+    updates to the bar in progress.
+    """
 
     def __init__(self):
         self.bar_data: List[BarData] = []
         self.timestamps: List[datetime] = []
+        self.lock = Lock()
 
     def add_data(self, bar: BarData, bar_dt: datetime):
         """
@@ -83,47 +92,69 @@ class HistoricalData:
             existing.open = new.open
             existing.volume = new.volume
 
-        # Go backwards through the list, insert received bar after first encountered existing bar
-        # that it's newer than.
-        insert_idx = 0
-        for idx in range(len(self.bar_data) - 1, -1, -1):
-            compare_bar = self.bar_data[idx]
-            compare_dt = self.timestamps[idx]
-            if compare_dt < bar_dt:
-                # Want to insert AFTER this index
-                insert_idx = idx + 1
-                break
-            if compare_dt == bar_dt:
-                # Simply replace data
-                _replace_bar_data(compare_bar, bar)
-                return
+        with self.lock:
+            # Go backwards through the list, insert received bar after first encountered existing bar
+            # that it's newer than.
+            insert_idx = 0
+            for idx in range(len(self.bar_data) - 1, -1, -1):
+                compare_bar = self.bar_data[idx]
+                compare_dt = self.timestamps[idx]
+                if compare_dt == bar_dt:
+                    # Simply replace data
+                    _replace_bar_data(compare_bar, bar)
+                    return
+                if compare_dt < bar_dt:
+                    # Want to insert AFTER this index
+                    insert_idx = idx + 1
+                    break
 
-        self.bar_data.insert(insert_idx, bar)
-        self.timestamps.insert(insert_idx, bar_dt)
+            self.bar_data.insert(insert_idx, bar)
+            self.timestamps.insert(insert_idx, bar_dt)
 
     def is_empty(self):
         """Returns True if no data present"""
-        return len(self.bar_data) == 0
+        with self.lock:
+            list_len = len(self.bar_data)
+        return list_len
 
     def get_zipped_lists(self) -> List[Tuple[Dict, datetime]]:
         """Returns list of (bar data dict, timestamp for bar)"""
-        bar_data_dicts = self.get_bar_data_as_dicts()
-        return list(zip(bar_data_dicts, self.timestamps))
+        with self.lock:
+            bar_data_dicts = self.get_bar_data_as_dicts()
+            return list(zip(bar_data_dicts, self.timestamps))
 
     def get_bar_data_as_dicts(self):
         """Gets bar data as list of Dicts"""
-        ret_bars = [
-            {
-                "date": bar.date,
-                "open": bar.open,
-                "close": bar.close,
-                "low": bar.low,
-                "high": bar.high,
-                "volume": float(bar.volume),
-            }
-            for bar in self.bar_data
-        ]
-        return ret_bars
+        with self.lock:
+            ret_bars = [
+                {
+                    "date": bar.date,
+                    "open": bar.open,
+                    "close": bar.close,
+                    "low": bar.low,
+                    "high": bar.high,
+                    "volume": float(bar.volume),
+                }
+                for bar in self.bar_data
+            ]
+            return ret_bars
+
+    def get_current_bar(self) -> Optional[Tuple[Dict, datetime]]:
+        with self.lock:
+            if len(self.bar_data) == 0:
+                return None
+
+            bar = self.bar_data[-1]
+            dt = self.timestamps[-1]
+            ret_bar =  {
+                    "date": bar.date,
+                    "open": bar.open,
+                    "close": bar.close,
+                    "low": bar.low,
+                    "high": bar.high,
+                    "volume": float(bar.volume),
+                }
+            return ret_bar, dt
 
 
 class OptionChainInfo:

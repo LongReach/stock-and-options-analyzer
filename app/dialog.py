@@ -127,6 +127,7 @@ class MainDialog(Dialog):
             print(
                 "1) New position, 2) Modify position, 3) Show positions, 4) Show single position, 5) Exit"
             )
+            # TODO: add close position, add trades, close trades
             choice = input(": ")
             if choice == "1":
                 self._other_fields["choice"] = "new position"

@@ -44,9 +44,9 @@ def main():
     print()
 
     animal_data = {
-        "animal": ["cat", "dog", "monkey", "parrot"],
-        "legs": [4, 4, 2, 2],
-        "date": ["01012020", "05052020", "02022020", "04042020"],
+        "animal": ["cat", "dog", "monkey", "parrot", "lizard"],
+        "legs": [4, 4, 2, 2, 4],
+        "date": ["01012020", "05052020", "02022020", "04042020", "04052020"],
     }
     animal_df = pd.DataFrame(animal_data)
     print("Unsorted DF:")
@@ -65,12 +65,18 @@ def main():
     print(animal_df.iloc[1, 0])
 
     print("\nAnimals with four legs:")
-    selection = animal_df[animal_df["legs"] == 4]
+    selection: pd.DataFrame = animal_df[animal_df["legs"] == 4]
+    print(selection)
+    print("Second row:")
+    print(selection.iloc[1])
+    print(f"Index of second row {selection.iloc[1].name}")
+
+    print("\nFour-leg selection sorted by index")
+    selection = selection.sort_index()
     print(selection)
 
-    single_row_df = pd.DataFrame({"name": "George", "salary": "a million"})
-    print("\nSingle row DF:")
-    print(single_row_df)
+    # Want lizard
+    print(f"\nShould be lizard: {selection.loc[4]}")
 
 
 main()
