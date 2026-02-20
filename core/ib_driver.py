@@ -51,16 +51,25 @@ OPTIONS_DATA_TIMEOUT = 8.0
 
 class IBDriver(IBWrapper):
     """
-    This class permits communication with Interactive Brokers. Commands go out via functions in EClient (a parent
-    of this class) and responses come back to the callbacks in IBWrapper, which passes the information on
-    to functions in this class.
+    This class abstracts away communication with Interactive Brokers. It provides an async interface, meant to
+    hide the threaded-ness of EClient and the need for callers to think about IB's callback-based communication
+    framework. Notice how the function get_historical_data() waits for all data to arrive before returning a result.
 
-    This is an async interface, meant to abstract away the threaded-ness of EClient and the need for callers to think
-    about IB's callback-based communication framework. Note how the function get_historical_data() waits for all data
-    to arrive before returning a result.
+    Under the hood, commands go out via functions in EClient (a parent of this class) and responses come back to the
+    callbacks in IBWrapper, which passes the information on to functions in this class.
+
+    Important concepts:
+    * Request IDs: each request sent to IB has its own unique ID
+    * Request objects: these hold data that comes back from IB, in response to specific requests
     """
 
     def __init__(self, sim_account: bool, client_id: int = 0):
+        """
+        Constructor.
+
+        :param sim_account: if True, for connection to a paper-trading account; if False, for live trading with real money.
+        :param client_id: unique ID of this client to Interactive Brokers
+        """
         super().__init__()
         self._app_thread: Optional[threading.Thread] = None
         self._sim_account = sim_account
@@ -83,7 +92,9 @@ class IBDriver(IBWrapper):
 
         self._bar_size_map: Dict[BarSize:str] = {
             BarSize.ONE_MINUTE: "1 min",
+            BarSize.TWO_MINUTES: "2 mins",
             BarSize.FIVE_MINUTES: "5 mins",
+            BarSize.FIFTEEN_MINUTES: "15 mins",
             BarSize.ONE_HOUR: "1 hour",
             BarSize.FOUR_HOURS: "4 hours",
             BarSize.ONE_DAY: "1 day",
@@ -145,12 +156,15 @@ class IBDriver(IBWrapper):
         start_date: Optional[Union[datetime, str]] = None,
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        regular_trading_hours_only: bool = True,
     ) -> Tuple[HistoricalData, Optional[str]]:
         """
-        Requests historical data from TWS, and waits for it to arrive before returning results. Each dict of returned bar
-        data includes fields: "date", "open", "close", "low", "high", "volume".
+        Requests historical data from TWS, and waits for it to arrive before returning results.
 
-        Note: incomplete historical data might be returned; check results for error string
+        In the case of live data, i.e. data that continues to flow in on the current, unfinished bar, the caller must
+        hang onto the returned HistoricalData object. Bar data within it will continue to be updated.
+
+        Note: incomplete historical data might be returned; check results for error string.
 
         :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param num_bars: how many bars of data to collect. If not given (0), then start_state will be used
@@ -159,6 +173,7 @@ class IBDriver(IBWrapper):
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
         :param live_data: if True, data will continue to flow in
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
+        :param regular_trading_hours_only: if True, premarket or extended hours data will not be included
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
@@ -172,7 +187,10 @@ class IBDriver(IBWrapper):
         self._logger.info(
             f"get_historical_data(), ticker={symbol_full}, num_bars={num_bars}, bar_size={bar_size.name}"
         )
+
+        # This field becomes true when all data has come in
         req_obj.data_fetch_complete = False
+
         if start_date is not None:
             req_obj.earliest_permitted_dt = (
                 start_date
@@ -186,6 +204,7 @@ class IBDriver(IBWrapper):
             )
         else:
             start_date = ""
+
         if end_date is not None:
             end_date = (
                 get_datetime_as_str(end_date)
@@ -194,7 +213,9 @@ class IBDriver(IBWrapper):
             )
         else:
             end_date = ""
+
         try:
+            # Send out the request to IB
             self._request_historical_data(
                 req_id,
                 bar_size,
@@ -203,12 +224,14 @@ class IBDriver(IBWrapper):
                 start_date,
                 live_data,
                 request_info_type,
+                regular_trading_hours_only,
             )
         except Exception as e:
             raise IBDriverException(
                 f"Failure with historical data request, exception was {e}"
             )
 
+        # Now, wait for all the data to come back
         timed_out = not await wait_for_condition(
             lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT
         )
@@ -235,7 +258,8 @@ class IBDriver(IBWrapper):
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ) -> Tuple[Optional[Tuple[dict, datetime]], Optional[str]]:
         """
-        Gets the most recent bar of data.
+        Gets the most recent bar of data. A dict of returned bar data includes fields: "date",
+        "open", "close", "low", "high", "volume".
 
         Note: don't use daily bars if you're getting data for an option
 
@@ -298,7 +322,8 @@ class IBDriver(IBWrapper):
         expiration: Optional[str] = None,
     ) -> Tuple[List[ContractDetails], Optional[str]]:
         """
-        Returns an IB ContractDetails object for given ticker.
+        Returns an IB ContractDetails object for given ticker. A CD might be for stock/ETF data, or for
+        a put/call option.
 
         :param ticker: ticker for stock, or underlying, if option
         :param primary_exchange: --
@@ -482,6 +507,7 @@ class IBDriver(IBWrapper):
         start_date_time: str = "",
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        regular_trading_hours_only: bool = True
     ):
         """
         Sends request for historical data to TWS.
@@ -507,8 +533,12 @@ class IBDriver(IBWrapper):
         if num_bars > 0:
             if bar_size == BarSize.ONE_MINUTE:
                 duration_str = str(num_bars * 60) + " S"
+            elif bar_size == BarSize.TWO_MINUTES:
+                duration_str = str(num_bars * 60 * 2) + " S"
             elif bar_size == BarSize.FIVE_MINUTES:
                 duration_str = str(num_bars * 60 * 5) + " S"
+            elif bar_size == BarSize.FIFTEEN_MINUTES:
+                duration_str = str(num_bars * 60 * 15) + " S"
             elif bar_size == BarSize.ONE_HOUR:
                 days = int(math.ceil(num_bars / 8))
                 duration_str = str(days) + " D"
@@ -560,7 +590,7 @@ class IBDriver(IBWrapper):
             duration_str,
             bar_size_str,
             request_info_type.value,
-            1,
+            1 if regular_trading_hours_only else 0,
             1,
             live_data,
             [],
@@ -569,8 +599,8 @@ class IBDriver(IBWrapper):
 
     def _historical_data_cb(self, req_id: int, in_bar: BarData, real_time: bool):
         """
-        Receives a single bar of historical data. This function is called multiple times, when multiple bars of data
-        are requested.
+        Receives a single bar of historical data. When multiple bars of data are requested, this function
+        will be called once for each.
 
         :param req_id: applicable request
         :param in_bar: --
