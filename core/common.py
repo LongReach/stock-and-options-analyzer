@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple, Optional, Set, Any
 from datetime import datetime
 from enum import Enum, auto
 from threading import Lock
+from logging import getLogger
 from ibapi.common import BarData
 
 LOCAL_TIMEZONE = "America/New_York"
@@ -74,6 +75,7 @@ class HistoricalData:
         self.bar_data: List[BarData] = []
         self.timestamps: List[datetime] = []
         self.lock = Lock()
+        self._logger = getLogger(__file__)
 
     def add_data(self, bar: BarData, bar_dt: datetime):
         """
@@ -108,14 +110,14 @@ class HistoricalData:
                     insert_idx = idx + 1
                     break
 
+            self._logger.info(f"**** addy {insert_idx}, bar is {bar}")
             self.bar_data.insert(insert_idx, bar)
             self.timestamps.insert(insert_idx, bar_dt)
 
     def is_empty(self):
         """Returns True if no data present"""
         with self.lock:
-            list_len = len(self.bar_data)
-        return list_len
+            return len(self.bar_data) == 0
 
     def get_zipped_lists(self) -> List[Tuple[Dict, datetime]]:
         """Returns list of (bar data dict, timestamp for bar)"""
