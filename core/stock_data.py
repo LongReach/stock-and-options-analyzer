@@ -23,10 +23,10 @@ class StockData:
     """
 
     def __init__(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ):
         self._symbol = symbol
         self._bar_size = bar_size
@@ -172,7 +172,7 @@ class StockData:
         return f"{self._symbol}-{bar_size_to_str(self._bar_size)}-{StockData.get_info_type_str(self._info_type)}.zip"
 
     def _infer_characteristics_from_file_name(
-        self, filename: str
+            self, filename: str
     ) -> Tuple[str, BarSize, RequestedInfoType]:
         """Attempts to infer symbol, bar size, and info type from a filename"""
         try:

@@ -46,11 +46,11 @@ class StockDataManager:
         self._log_to_stdout = True
 
     def load_data(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        filename: Optional[str] = None,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            filename: Optional[str] = None,
     ) -> bool:
         """
         Creates a StockData object, attempts to load data from disk
@@ -68,11 +68,11 @@ class StockDataManager:
         return stock_data.load(filename)
 
     def save_data(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        filename: Optional[str] = None,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            filename: Optional[str] = None,
     ):
         """
         Creates a StockData object, attempts to load data from disk
@@ -89,10 +89,10 @@ class StockDataManager:
             stock_data.save(filename)
 
     def clear_data(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ):
         """Clear out any data already loaded"""
         stock_data = self._get_stock_data(
@@ -101,12 +101,12 @@ class StockDataManager:
         stock_data.clear()
 
     async def scrape_data(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        start_date: str = "",
-        end_date: str = "",
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            start_date: str = "",
+            end_date: str = "",
     ) -> Tuple[bool, str]:
         """
         Scrapes data from online source, completely replacing any data already in memory.
@@ -170,13 +170,13 @@ class StockDataManager:
         return ret_error_str is None, ret_error_str
 
     async def scrape_data_smart(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        start_date: str = "",
-        end_date: str = "",
-        update_recent: bool = False,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            start_date: str = "",
+            end_date: str = "",
+            update_recent: bool = False,
     ) -> Tuple[bool, str]:
         """
         Like scrape_data(), but avoids looking online for data already loaded, if loaded data overlaps with specified
@@ -248,10 +248,10 @@ class StockDataManager:
         return True, ""
 
     def get_pandas_df(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ) -> Optional[pd.DataFrame]:
         """Get the pandas dataframe for particular stock data."""
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
@@ -266,11 +266,11 @@ class StockDataManager:
         _logger.log(level, message)
 
     def _get_stock_data(
-        self,
-        symbol: str,
-        bar_size: BarSize,
-        info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        add_if_missing: bool = False,
+            self,
+            symbol: str,
+            bar_size: BarSize,
+            info_type: RequestedInfoType = RequestedInfoType.TRADES,
+            add_if_missing: bool = False,
     ) -> Optional[StockData]:
         """
         Return StockData object.
