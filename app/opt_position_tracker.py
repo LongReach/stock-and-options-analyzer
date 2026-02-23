@@ -112,7 +112,7 @@ class OptionPositionTracker:
         self._trades_df.loc[len(self._trades_df)] = row_copy
 
     def get_position_rows(
-            self, position_num: int = -1, is_open: Optional[bool] = None
+        self, position_num: int = -1, is_open: Optional[bool] = None
     ) -> pd.DataFrame:
         """
         Gets pandas Dataframe containing a set of selected position rows
@@ -125,16 +125,16 @@ class OptionPositionTracker:
             filtered_df = filtered_df[
                 filtered_df[column_enum_to_str(PositionColumn.POSITION_NUMBER)]
                 == position_num
-                ]
+            ]
         if is_open is not None:
             if is_open:
                 filtered_df = filtered_df[
                     filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] == ""
-                    ]
+                ]
             else:
                 filtered_df = filtered_df[
                     filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] != ""
-                    ]
+                ]
         return filtered_df
 
     def get_position_row(self, position_num: int = -1) -> Dict[str, Any]:
@@ -157,5 +157,5 @@ class OptionPositionTracker:
             filtered_df = filtered_df[
                 filtered_df[column_enum_to_str(TradeColumn.POSITION_NUMBER)]
                 == position_num
-                ]
+            ]
         return filtered_df

@@ -17,6 +17,7 @@ live, constantly streaming data.
 
 TICKER = "AAPL"
 
+
 def print_historical_data(bars: HistoricalData):
     for bar in bars.bar_data:
         print(f"{bar}")
@@ -62,7 +63,9 @@ async def main():
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
         )
-        print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
+        print(
+            f"One day bars for {TICKER} (implied volatility) are\n------------------------"
+        )
         print_historical_data(iv_data)
 
         hv_data, error_str = await ib_driver.get_historical_data(
@@ -83,9 +86,8 @@ async def main():
             live_data=True,
             bar_size=BarSize.TWO_MINUTES,
             request_info_type=RequestedInfoType.TRADES,
-            regular_trading_hours_only=False
+            regular_trading_hours_only=False,
         )
-
 
     except Exception as ex:
         print(f"Exception: {ex}")
