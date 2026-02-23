@@ -159,14 +159,14 @@ class IBWrapper(EWrapper, EClient):
         self._callback_map[CallbackID.HEAD_TIMESTAMP_CB](req_id, head_time_stamp)
 
     def securityDefinitionOptionParameter(
-        self,
-        req_id: int,
-        exchange: str,
-        underlying_con_id: int,
-        trading_class: str,
-        multiplier: str,
-        expirations: SetOfString,
-        strikes: SetOfFloat,
+            self,
+            req_id: int,
+            exchange: str,
+            underlying_con_id: int,
+            trading_class: str,
+            multiplier: str,
+            expirations: SetOfString,
+            strikes: SetOfFloat,
     ):
         """
         Called by TWS when info about options for a particular security arrived.
@@ -194,13 +194,13 @@ class IBWrapper(EWrapper, EClient):
         )
         self._verify_callback(CallbackID.OPTION_CHAIN_CB)
         self._callback_map[CallbackID.OPTION_CHAIN_CB](req_id,
-            exchange,
-            underlying_con_id,
-            trading_class,
-            multiplier,
-            set(expirations),
-            set(strikes)
-        )
+                                                       exchange,
+                                                       underlying_con_id,
+                                                       trading_class,
+                                                       multiplier,
+                                                       set(expirations),
+                                                       set(strikes)
+                                                       )
         # print("SecurityDefinitionOptionParameter.",
         #   "ReqId:", req_id, "Exchange:", exchange, "Underlying conId:", intMaxString(underlying_con_id),
         #   "TradingClass:", trading_class, "Multiplier:", multiplier,
@@ -244,18 +244,18 @@ class IBWrapper(EWrapper, EClient):
         self._callback_map[CallbackID.CONTRACT_DETAILS_END_CB](req_id)
 
     def tickOptionComputation(
-        self,
-        req_id: TickerId,
-        tick_type: TickType,
-        tick_attrib: int,
-        implied_vol: float,
-        delta: float,
-        opt_price: float,
-        pv_dividend: float,
-        gamma: float,
-        vega: float,
-        theta: float,
-        underlying_price: float,
+            self,
+            req_id: TickerId,
+            tick_type: TickType,
+            tick_attrib: int,
+            implied_vol: float,
+            delta: float,
+            opt_price: float,
+            pv_dividend: float,
+            gamma: float,
+            vega: float,
+            theta: float,
+            underlying_price: float,
     ):
         """
         Called by TWS when info about an option comes in. Response to reqMktData().
@@ -278,16 +278,16 @@ class IBWrapper(EWrapper, EClient):
         # )
         self._verify_callback(CallbackID.TICK_OPTION_COMPUTATION_CB)
         self._callback_map[CallbackID.TICK_OPTION_COMPUTATION_CB](req_id,
-            tick_type,
-            tick_attrib,
-            implied_vol,
-            delta,
-            opt_price,
-            pv_dividend,
-            gamma,
-            vega,
-            theta,
-            underlying_price)
+                                                                  tick_type,
+                                                                  tick_attrib,
+                                                                  implied_vol,
+                                                                  delta,
+                                                                  opt_price,
+                                                                  pv_dividend,
+                                                                  gamma,
+                                                                  vega,
+                                                                  theta,
+                                                                  underlying_price)
 
     def tickSize(self, req_id: TickerId, tick_type: TickType, size: Decimal):
         """
@@ -299,18 +299,18 @@ class IBWrapper(EWrapper, EClient):
         self._callback_map[CallbackID.TICK_SIZE_CB](req_id, tick_type, size)
 
     def orderStatus(
-        self,
-        orderId: OrderId,
-        status: str,
-        filled: Decimal,
-        remaining: Decimal,
-        avgFillPrice: float,
-        permId: int,
-        parentId: int,
-        lastFillPrice: float,
-        clientId: int,
-        whyHeld: str,
-        mktCapPrice: float,
+            self,
+            orderId: OrderId,
+            status: str,
+            filled: Decimal,
+            remaining: Decimal,
+            avgFillPrice: float,
+            permId: int,
+            parentId: int,
+            lastFillPrice: float,
+            clientId: int,
+            whyHeld: str,
+            mktCapPrice: float,
     ):
         """
         This event is called whenever the status of an order changes. It is also fired after reconnecting to TWS if the
@@ -352,7 +352,7 @@ class IBWrapper(EWrapper, EClient):
         pass
 
     def openOrder(
-        self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState
+            self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState
     ):
         """
         This function is called to feed in open orders.
@@ -381,11 +381,11 @@ class IBWrapper(EWrapper, EClient):
         pass
 
     def error(
-        self,
-        req_id: int,
-        error_code: int,
-        error_string: str,
-        advanced_order_reject_json="",
+            self,
+            req_id: int,
+            error_code: int,
+            error_string: str,
+            advanced_order_reject_json="",
     ):
         """Called by TWS when there's an error with a request."""
         super().error(req_id, error_code, error_string, advanced_order_reject_json)

@@ -148,14 +148,14 @@ class HistoricalData:
 
             bar = self.bar_data[-1]
             dt = self.timestamps[-1]
-            ret_bar =  {
-                    "date": bar.date,
-                    "open": bar.open,
-                    "close": bar.close,
-                    "low": bar.low,
-                    "high": bar.high,
-                    "volume": float(bar.volume),
-                }
+            ret_bar = {
+                "date": bar.date,
+                "open": bar.open,
+                "close": bar.close,
+                "low": bar.low,
+                "high": bar.high,
+                "volume": float(bar.volume),
+            }
             return ret_bar, dt
 
 
@@ -227,7 +227,7 @@ class OptionInfo:
         # TODO: why does volume often not get defined in live mode? Why does refer happen when not live?
         # print(f"is_defined(), greeks_defined={self._greeks_defined}, interest_defined={self._interest_defined}, volume_defined={self._volume_defined}, live={self._live}")
         return self._greeks_defined and (
-            self._interest_defined and self._live or not self._live
+                self._interest_defined and self._live or not self._live
         )
 
     def to_dict(self) -> Dict[str, Any]:
