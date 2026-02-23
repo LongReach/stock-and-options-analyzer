@@ -40,7 +40,7 @@ from core.ib_driver_requests import (
     BarDataRequest,
     IBDriverException,
 )
-from core.ib_wrapper import IBWrapper
+from core.ib_wrapper import IBWrapper, CallbackID
 
 LIVE_PORT = 4001
 SIM_PORT = 4002
@@ -100,6 +100,17 @@ class IBDriver(IBWrapper):
             BarSize.ONE_DAY: "1 day",
             BarSize.ONE_WEEK: "7 days",
         }
+
+        self.set_callback(CallbackID.HISTORICAL_DATA_CB, self._historical_data_cb)
+        self.set_callback(CallbackID.HISTORICAL_DATA_END_CB, self._historical_data_end_cb)
+        self.set_callback(CallbackID.HEAD_TIMESTAMP_CB, self._head_timestamp_cb)
+        self.set_callback(CallbackID.CONTRACT_DETAILS_CB, self._contract_details_cb)
+        self.set_callback(CallbackID.CONTRACT_DETAILS_END_CB, self._contract_details_end_cb)
+        self.set_callback(CallbackID.OPTION_CHAIN_CB, self._option_chain_cb)
+        self.set_callback(CallbackID.OPTION_CHAIN_END_CB, self._option_chain_end_cb)
+        self.set_callback(CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb)
+        self.set_callback(CallbackID.TICK_SIZE_CB, self._tick_size_cb)
+        self.set_callback(CallbackID.ERROR_CB, self._error_cb)
 
         self._logger = getLogger(__file__)
 
@@ -268,6 +279,7 @@ class IBDriver(IBWrapper):
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
         :return: ((bar dict, datetime) or None, error string or None)
         """
+        self._logger.info("**** oob 1")
         historical_data, error_str = await self.get_historical_data(
             symbol_full,
             bar_size=bar_size,
@@ -275,7 +287,9 @@ class IBDriver(IBWrapper):
             num_bars=5,
         )
         ret_tuple = None
+        self._logger.info("**** oob 2")
         if not historical_data.is_empty():
+            self._logger.info("**** oob 3")
             bar_data_dicts = historical_data.get_bar_data_as_dicts()
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
@@ -607,12 +621,15 @@ class IBDriver(IBWrapper):
         :param real_time: True if this is a real-time update, for current bar
         """
         req_obj = self._request_bardata_objects.get(req_id)
+        self._logger.info(f"**** historical data cb with req_id {req_id}, bar {in_bar}")
         if req_obj:
             dt = get_datetime(in_bar.date)
+            self._logger.info("**** hdc 2")
             if (
                 req_obj.earliest_permitted_dt is None
                 or dt >= req_obj.earliest_permitted_dt
             ):
+                self._logger.info("**** hdc 3")
                 req_obj.add_or_update_bar(in_bar, allow_update=real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):

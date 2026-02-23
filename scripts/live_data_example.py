@@ -10,6 +10,12 @@ from core.common import HistoricalData, RequestedInfoType
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
+"""
+An example of how to get recent data bars (price, volatility) from the market, as well as how to get
+live, constantly streaming data.
+"""
+
+TICKER = "AAPL"
 
 def print_historical_data(bars: HistoricalData):
     for bar in bars.bar_data:
@@ -40,39 +46,39 @@ async def main():
         ib_driver.connect()
 
         price_data_five, error_str = await ib_driver.get_historical_data(
-            "SPY",
+            TICKER,
             num_bars=10,
             live_data=False,
             bar_size=BarSize.FIVE_MINUTES,
             request_info_type=RequestedInfoType.TRADES,
         )
-        print("Five minute bars for SPY (trades) are\n------------------------")
+        print(f"Five minute bars for {TICKER} (trades) are\n------------------------")
         print_historical_data(price_data_five)
 
         iv_data, error_str = await ib_driver.get_historical_data(
-            "SPY",
+            TICKER,
             num_bars=10,
             live_data=False,
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
         )
-        print("One day bars for SPY (implied volatility) are\n------------------------")
+        print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
         print_historical_data(iv_data)
 
         hv_data, error_str = await ib_driver.get_historical_data(
-            "SPY",
+            TICKER,
             num_bars=10,
             live_data=False,
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY,
         )
         print(
-            "One day bars for SPY (historical volatility) are\n------------------------"
+            f"One day bars for {TICKER} (historical volatility) are\n------------------------"
         )
         print_historical_data(hv_data)
 
         price_data_two, error_str = await ib_driver.get_historical_data(
-            "SPY",
+            TICKER,
             num_bars=10,
             live_data=True,
             bar_size=BarSize.TWO_MINUTES,
