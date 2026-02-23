@@ -37,7 +37,7 @@ class OptionDataManager:
             self._ib_driver.connect()
 
     async def get_expirations(
-            self, ticker: str, min_days_away: int, max_days_away: int
+        self, ticker: str, min_days_away: int, max_days_away: int
     ) -> List[str]:
         """
         Gets a set of available expiration dates
@@ -72,7 +72,7 @@ class OptionDataManager:
         return out_expirations
 
     async def get_strikes(
-            self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
+        self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
     ) -> Tuple[List[float], int]:
         """
         Gets all strikes for a particular stock at a particular expiration date.
@@ -120,13 +120,13 @@ class OptionDataManager:
         return strikes[lowest_idx:highest_idx], closest_strike_idx - lowest_idx
 
     async def get_option_chain(
-            self,
-            ticker: str,
-            expiration: str,
-            right: str,
-            strike: Optional[Union[float, List[float]]] = None,
-            min_delta: float = 0.08,
-            max_delta: float = 0.7,
+        self,
+        ticker: str,
+        expiration: str,
+        right: str,
+        strike: Optional[Union[float, List[float]]] = None,
+        min_delta: float = 0.08,
+        max_delta: float = 0.7,
     ) -> OptionData:
         """
         Returns a whole options chain, within an OptionData object.
@@ -209,13 +209,13 @@ class OptionDataManager:
         return underlying_price
 
     async def _batch_collect_options_data(
-            self,
-            contract_details_list: List[ContractDetails],
-            option_data: OptionData,
-            underlying_price: float,
-            right: str = "C",
-            max_delta: float = 0.8,
-            min_delta: float = 0.07,
+        self,
+        contract_details_list: List[ContractDetails],
+        option_data: OptionData,
+        underlying_price: float,
+        right: str = "C",
+        max_delta: float = 0.8,
+        min_delta: float = 0.07,
     ):
         """
         Grabs data for a bunch of different options contracts in parallel, rather than one-at-a-time (which is
@@ -260,9 +260,9 @@ class OptionDataManager:
         def _test_for_ignorable(_contract_details: ContractDetails):
             """Returns True if we don't need info for a particular options contract due to strike being too high or low"""
             return not (
-                    ignore_strikes_below
-                    <= _contract_details.contract.strike
-                    <= ignore_strikes_above
+                ignore_strikes_below
+                <= _contract_details.contract.strike
+                <= ignore_strikes_above
             )
 
         # Loop until we've processed all ContractDetails and task queue is empty
@@ -270,7 +270,7 @@ class OptionDataManager:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible
             while len(task_queue) < MAX_TO_RETRIEVE_AT_ONCE and current_idx < len(
-                    contract_details_list
+                contract_details_list
             ):
                 contract_details = contract_details_list[current_idx]
                 if not _test_for_ignorable(contract_details):
@@ -312,9 +312,9 @@ class OptionDataManager:
                                 )
                                 _set_ignorable_strikes(option_info)
                                 if (
-                                        ignore_strikes_below
-                                        <= option_info.strike
-                                        <= ignore_strikes_above
+                                    ignore_strikes_below
+                                    <= option_info.strike
+                                    <= ignore_strikes_above
                                 ):
                                     option_data.add_data(option_info)
 
@@ -329,9 +329,9 @@ class OptionDataManager:
                                 task.get_name()
                             )
                             if (
-                                    ignore_strikes_below
-                                    <= empty_option_info.strike
-                                    <= ignore_strikes_above
+                                ignore_strikes_below
+                                <= empty_option_info.strike
+                                <= ignore_strikes_above
                             ):
                                 option_data.add_data(empty_option_info)
 

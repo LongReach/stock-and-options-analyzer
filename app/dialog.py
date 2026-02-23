@@ -17,7 +17,7 @@ class Dialog:
         self._other_fields: Dict[str, Any] = {}
 
     def set_fields_and_defaults(
-            self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]
+        self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]
     ):
         """Sets which fields user must input, as well as their default values"""
         self._fields_and_defaults = fields_and_defs
@@ -58,7 +58,7 @@ class Dialog:
 
     @staticmethod
     def _validate_field(
-            val: str, field: Union[PositionColumn, TradeColumn], field_type: type
+        val: str, field: Union[PositionColumn, TradeColumn], field_type: type
     ) -> Tuple[bool, str]:
         """
         Confirms that user input for a particular field is valid
@@ -78,21 +78,21 @@ class Dialog:
         position_fields = isinstance(field, PositionColumn)
 
         if (
-                position_fields
-                and field == PositionColumn.POSITION_NUMBER
-                or not position_fields
-                and field == TradeColumn.POSITION_NUMBER
+            position_fields
+            and field == PositionColumn.POSITION_NUMBER
+            or not position_fields
+            and field == TradeColumn.POSITION_NUMBER
         ):
             if val < 0:
                 return False, f"Bad position number {val}"
         elif (
-                position_fields
-                and (
-                        field == PositionColumn.DATE_OPENED
-                        or field == PositionColumn.DATE_CLOSED
-                )
-                or not position_fields
-                and (field == TradeColumn.DATE_OPENED or field == TradeColumn.DATE_CLOSED)
+            position_fields
+            and (
+                field == PositionColumn.DATE_OPENED
+                or field == PositionColumn.DATE_CLOSED
+            )
+            or not position_fields
+            and (field == TradeColumn.DATE_OPENED or field == TradeColumn.DATE_CLOSED)
         ):
             try:
                 as_dt = get_datetime(val)

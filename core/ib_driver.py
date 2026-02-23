@@ -102,13 +102,19 @@ class IBDriver(IBWrapper):
         }
 
         self.set_callback(CallbackID.HISTORICAL_DATA_CB, self._historical_data_cb)
-        self.set_callback(CallbackID.HISTORICAL_DATA_END_CB, self._historical_data_end_cb)
+        self.set_callback(
+            CallbackID.HISTORICAL_DATA_END_CB, self._historical_data_end_cb
+        )
         self.set_callback(CallbackID.HEAD_TIMESTAMP_CB, self._head_timestamp_cb)
         self.set_callback(CallbackID.CONTRACT_DETAILS_CB, self._contract_details_cb)
-        self.set_callback(CallbackID.CONTRACT_DETAILS_END_CB, self._contract_details_end_cb)
+        self.set_callback(
+            CallbackID.CONTRACT_DETAILS_END_CB, self._contract_details_end_cb
+        )
         self.set_callback(CallbackID.OPTION_CHAIN_CB, self._option_chain_cb)
         self.set_callback(CallbackID.OPTION_CHAIN_END_CB, self._option_chain_end_cb)
-        self.set_callback(CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb)
+        self.set_callback(
+            CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb
+        )
         self.set_callback(CallbackID.TICK_SIZE_CB, self._tick_size_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
 
@@ -159,15 +165,15 @@ class IBDriver(IBWrapper):
         return self.request_id
 
     async def get_historical_data(
-            self,
-            symbol_full: str,
-            num_bars: int = 0,
-            bar_size: BarSize = BarSize.ONE_DAY,
-            end_date: Optional[Union[datetime, str]] = None,
-            start_date: Optional[Union[datetime, str]] = None,
-            live_data: bool = False,
-            request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
-            regular_trading_hours_only: bool = True,
+        self,
+        symbol_full: str,
+        num_bars: int = 0,
+        bar_size: BarSize = BarSize.ONE_DAY,
+        end_date: Optional[Union[datetime, str]] = None,
+        start_date: Optional[Union[datetime, str]] = None,
+        live_data: bool = False,
+        request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        regular_trading_hours_only: bool = True,
     ) -> Tuple[HistoricalData, Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results.
@@ -263,10 +269,10 @@ class IBDriver(IBWrapper):
         return req_obj.historical_data, ret_error_str
 
     async def get_most_recent_data(
-            self,
-            symbol_full: str,
-            bar_size: BarSize = BarSize.ONE_DAY,
-            request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        self,
+        symbol_full: str,
+        bar_size: BarSize = BarSize.ONE_DAY,
+        request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ) -> Tuple[Optional[Tuple[dict, datetime]], Optional[str]]:
         """
         Gets the most recent bar of data. A dict of returned bar data includes fields: "date",
@@ -327,13 +333,13 @@ class IBDriver(IBWrapper):
         return result
 
     async def get_contract_details(
-            self,
-            ticker: str,
-            primary_exchange: str = None,
-            is_option: bool = False,
-            is_call: bool = False,
-            strike: Optional[float] = None,
-            expiration: Optional[str] = None,
+        self,
+        ticker: str,
+        primary_exchange: str = None,
+        is_option: bool = False,
+        is_call: bool = False,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
     ) -> Tuple[List[ContractDetails], Optional[str]]:
         """
         Returns an IB ContractDetails object for given ticker. A CD might be for stock/ETF data, or for
@@ -379,9 +385,9 @@ class IBDriver(IBWrapper):
         return ret_list, ret_error_str
 
     async def get_contract_details_single(
-            self,
-            ticker: str,
-            primary_exchange: str = None,
+        self,
+        ticker: str,
+        primary_exchange: str = None,
     ) -> Tuple[Optional[ContractDetails], Optional[str]]:
         """
         Gets a single ContractDetails object. Useful only for CDs on stocks, not options.
@@ -398,7 +404,7 @@ class IBDriver(IBWrapper):
         return cd_list[0], error_str
 
     async def get_options_chain_info(
-            self, contract_details: ContractDetails
+        self, contract_details: ContractDetails
     ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
         """
         Gets basic information about the option chain for a stock. Strikes and expiration dates
@@ -440,7 +446,7 @@ class IBDriver(IBWrapper):
         return option_info, ret_error_str
 
     async def get_greeks(
-            self, contract_details: ContractDetails
+        self, contract_details: ContractDetails
     ) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
         Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
@@ -513,15 +519,15 @@ class IBDriver(IBWrapper):
     # ---------------------------------------------------
 
     def _request_historical_data(
-            self,
-            req_id: int,
-            bar_size: BarSize,
-            num_bars: int = 0,
-            end_date_time: str = "",
-            start_date_time: str = "",
-            live_data: bool = False,
-            request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
-            regular_trading_hours_only: bool = True
+        self,
+        req_id: int,
+        bar_size: BarSize,
+        num_bars: int = 0,
+        end_date_time: str = "",
+        start_date_time: str = "",
+        live_data: bool = False,
+        request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        regular_trading_hours_only: bool = True,
     ):
         """
         Sends request for historical data to TWS.
@@ -626,8 +632,8 @@ class IBDriver(IBWrapper):
             dt = get_datetime(in_bar.date)
             self._logger.info("**** hdc 2")
             if (
-                    req_obj.earliest_permitted_dt is None
-                    or dt >= req_obj.earliest_permitted_dt
+                req_obj.earliest_permitted_dt is None
+                or dt >= req_obj.earliest_permitted_dt
             ):
                 self._logger.info("**** hdc 3")
                 req_obj.add_or_update_bar(in_bar, allow_update=real_time)
@@ -680,14 +686,14 @@ class IBDriver(IBWrapper):
             req_obj.data_fetch_complete = True
 
     def _option_chain_cb(
-            self,
-            req_id: int,
-            exchange: str,
-            underlying_con_id: int,
-            trading_class: str,
-            multiplier: str,
-            expirations: Set,
-            strikes: Set,
+        self,
+        req_id: int,
+        exchange: str,
+        underlying_con_id: int,
+        trading_class: str,
+        multiplier: str,
+        expirations: Set,
+        strikes: Set,
     ):
         """
         Called when info about options for a particular security arrived.
@@ -719,18 +725,18 @@ class IBDriver(IBWrapper):
             req_obj.data_fetch_complete = True
 
     def _tick_option_computation_cb(
-            self,
-            req_id: TickerId,
-            tick_type: TickType,
-            tick_attrib: int,
-            implied_vol: float,
-            delta: float,
-            opt_price: float,
-            pv_dividend: float,
-            gamma: float,
-            vega: float,
-            theta: float,
-            underlying_price: float,
+        self,
+        req_id: TickerId,
+        tick_type: TickType,
+        tick_attrib: int,
+        implied_vol: float,
+        delta: float,
+        opt_price: float,
+        pv_dividend: float,
+        gamma: float,
+        vega: float,
+        theta: float,
+        underlying_price: float,
     ):
         """
         Called when info about an option's "Greeks" arrives. We only want to use it if tick type is 13.
@@ -769,11 +775,11 @@ class IBDriver(IBWrapper):
                 )
 
     def _error_cb(
-            self,
-            req_id: int,
-            error_code: int,
-            error_string: str,
-            advanced_order_reject_json="",
+        self,
+        req_id: int,
+        error_code: int,
+        error_string: str,
+        advanced_order_reject_json="",
     ):
         """
         Called when there's an error.
@@ -793,15 +799,15 @@ class IBDriver(IBWrapper):
             pass
         elif error_code in info_errors:
             err_out = (
-                    "Error (ignorable): code is "
-                    + str(error_code)
-                    + ", string is "
-                    + error_string
+                "Error (ignorable): code is "
+                + str(error_code)
+                + ", string is "
+                + error_string
             )
             self._logger.info(err_out)
         else:
             err_out = (
-                    "Error: code is " + str(error_code) + ", string is " + error_string
+                "Error: code is " + str(error_code) + ", string is " + error_string
             )
             self._logger.warning(err_out)
             req_obj = self._request_bardata_objects.get(req_id)
@@ -814,13 +820,13 @@ class IBDriver(IBWrapper):
                 req_obj.last_error_string = error_string
 
     def _make_contract(
-            self,
-            ticker: str,
-            primary_exchange: str = None,
-            is_option: bool = False,
-            is_call: bool = False,
-            strike: Optional[float] = None,
-            expiration: Optional[str] = None,
+        self,
+        ticker: str,
+        primary_exchange: str = None,
+        is_option: bool = False,
+        is_call: bool = False,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
     ) -> Contract:
         """Makes and returns an IB Contract"""
 
