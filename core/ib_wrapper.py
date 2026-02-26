@@ -58,7 +58,12 @@ class CallbackID(IntEnum):
     OPTION_CHAIN_END_CB = 6
     TICK_OPTION_COMPUTATION_CB = 7
     TICK_SIZE_CB = 8
-    ERROR_CB = 9
+    ORDER_STATUS = 9
+    OPEN_ORDER = 10
+    OPEN_ORDER_END = 11
+    EXEC_DETAILS = 12
+    EXEC_DETAILS_END = 13
+    ERROR_CB = 14
 
 
 class IBWrapper(EWrapper, EClient):
@@ -353,7 +358,8 @@ class IBWrapper(EWrapper, EClient):
         :param mktCapPrice:
         :return:
         """
-        pass
+        self._verify_callback(CallbackID.ORDER_STATUS)
+        self._callback_map[CallbackID.ORDER_STATUS](orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice)
 
     def openOrder(
         self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState
@@ -367,22 +373,23 @@ class IBWrapper(EWrapper, EClient):
         :param orderState: The orderState class includes attributes used for both pre and post trade margin and commission data.
         :return:
         """
-        pass
+        self._verify_callback(CallbackID.OPEN_ORDER)
+        self._callback_map[CallbackID.OPEN_ORDER](orderId, contract, order, orderState)
 
     def openOrderEnd(self):
         """This is called at the end of a given request for open orders."""
-
-        pass
+        self._verify_callback(CallbackID.OPEN_ORDER_END)
+        self._callback_map[CallbackID.OPEN_ORDER_END]()
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
         """This event is fired when the reqExecutions() functions is invoked, or when an order is filled."""
-
-        pass
+        self._verify_callback(CallbackID.EXEC_DETAILS)
+        self._callback_map[CallbackID.EXEC_DETAILS](reqId, contract, execution)
 
     def execDetailsEnd(self, reqId: int):
         """This function is called once all executions have been sent to a client in response to reqExecutions()."""
-
-        pass
+        self._verify_callback(CallbackID.EXEC_DETAILS_END)
+        self._callback_map[CallbackID.EXEC_DETAILS_END](reqId)
 
     def error(
         self,
