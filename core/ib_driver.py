@@ -9,7 +9,9 @@ from core.utils import current_datetime
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
+from ibapi.order_state import OrderState
 from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
+from ibapi.execution import Execution
 from ibapi.ticktype import TickType
 from ibapi.wrapper import EWrapper, OrderId
 from logging import getLogger, basicConfig
@@ -25,6 +27,8 @@ from core.common import (
     SecurityDescriptor,
     OptionChainInfo,
     OptionInfo,
+    OrderType, OrderStatus,
+    OrderInfo
 )
 from core.utils import (
     wait_for_condition,
@@ -39,15 +43,18 @@ from core.ib_driver_requests import (
     OptionRequest,
     BarDataRequest,
     IBDriverException,
+    OrderRequest
 )
 from core.ib_wrapper import IBWrapper, CallbackID
 
-LIVE_PORT = 4001
-SIM_PORT = 4002
+GATEWAY_LIVE_PORT = 4001
+GATEWAY_SIM_PORT = 4002
+APP_LIVE_PORT = 7496
+APP_SIM_PORT = 7497
 NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
-
+ORDER_DATA_TIMEOUT = 30.0
 
 class IBDriver(IBWrapper):
     """
@@ -63,16 +70,18 @@ class IBDriver(IBWrapper):
     * Request objects: these hold data that comes back from IB, in response to specific requests
     """
 
-    def __init__(self, sim_account: bool, client_id: int = 0):
+    def __init__(self, sim_account: bool, client_id: int = 0, gateway_connection: bool = True):
         """
         Constructor.
 
         :param sim_account: if True, for connection to a paper-trading account; if False, for live trading with real money.
         :param client_id: unique ID of this client to Interactive Brokers
+        :param gateway_connection: if True, connection should be made through IB Gateway; if False, through IB app
         """
         super().__init__()
         self._app_thread: Optional[threading.Thread] = None
         self._sim_account = sim_account
+        self._gateway_connection = gateway_connection
         self._client_id = client_id
 
         # Maps request ID to BarDataRequest, which receives arriving data
@@ -81,6 +90,8 @@ class IBDriver(IBWrapper):
         self._request_contractdetail_objects: Dict[int, ContractDetailsRequest] = {}
         self._request_optionchain_objects: Dict[int, OptionChainInfoRequest] = {}
         self._request_option_objects: Dict[int, OptionRequest] = {}
+        # Maps order ID to OrderRequest object
+        self._request_order_objects: Dict[int, OrderRequest] = {}
 
         # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
@@ -116,6 +127,11 @@ class IBDriver(IBWrapper):
             CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb
         )
         self.set_callback(CallbackID.TICK_SIZE_CB, self._tick_size_cb)
+        self.set_callback(CallbackID.ORDER_STATUS, self.order_status_cb)
+        self.set_callback(CallbackID.OPEN_ORDER, self.open_order_cb)
+        self.set_callback(CallbackID.OPEN_ORDER_END, self.open_order_end_cb)
+        self.set_callback(CallbackID.EXEC_DETAILS, self.exec_details_cb)
+        self.set_callback(CallbackID.EXEC_DETAILS_END, self.exec_details_end_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
 
         self._logger = getLogger(__file__)
@@ -128,7 +144,10 @@ class IBDriver(IBWrapper):
 
         self._logger.info("Attempting connection...")
 
-        port = SIM_PORT if self._sim_account else LIVE_PORT
+        if self._gateway_connection:
+            port = GATEWAY_SIM_PORT if self._sim_account else GATEWAY_LIVE_PORT
+        else:
+            port = APP_SIM_PORT if self._sim_account else APP_LIVE_PORT
         super().connect("127.0.0.1", port, self._client_id)
 
         self._app_thread = threading.Thread(target=self.run)
@@ -285,7 +304,6 @@ class IBDriver(IBWrapper):
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
         :return: ((bar dict, datetime) or None, error string or None)
         """
-        self._logger.info("**** oob 1")
         historical_data, error_str = await self.get_historical_data(
             symbol_full,
             bar_size=bar_size,
@@ -293,9 +311,7 @@ class IBDriver(IBWrapper):
             num_bars=5,
         )
         ret_tuple = None
-        self._logger.info("**** oob 2")
         if not historical_data.is_empty():
-            self._logger.info("**** oob 3")
             bar_data_dicts = historical_data.get_bar_data_as_dicts()
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
@@ -502,6 +518,100 @@ class IBDriver(IBWrapper):
             self._request_option_objects.pop(req_id, None)
 
         return req_obj.option_info, ret_error_str
+
+    async def place_order(self,
+        ticker: str,
+        primary_exchange: str = None,
+        is_option: bool = False,
+        is_call: bool = False,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
+        buy: bool = True,
+        quantity: int = 0,
+        price: float = 0.0,
+        order_type: OrderType = OrderType.MARKET,
+        transmit: bool = True,
+        parent_order: Optional[OrderInfo] = None
+    ) -> Tuple[OrderInfo, Optional[str]]:
+        """
+        Places an order with IB. Can be for a stock/ETF or for an option.
+
+        :param ticker: e.g. "QQQ"
+        :param primary_exchange: --
+        :param is_option: True if option, False if stock/ETF
+        :param is_call: True if call option, False if put
+        :param strike: strike price of option or None
+        :param expiration: expiration date of option or None
+        :param buy: True for going long or exiting a short position, False for going short or exiting a long position
+        :param quantity: number of shares/contracts
+        :param price: desired price (for limit or stop orders)
+        :param order_type: market, limit, stop, or stop limit
+        :param transmit: TODO -- come back to
+        :param parent_order: set if there is a parent order for this one, e.g. this on is a stop loss order paired
+            to a market order.
+        :return: (OrderInfo object, error string or None)
+        """
+
+        async with self._lock:
+            order_id = self.next_id()
+            # Will be filled out as response comes back
+            order_request = self._request_order_objects[order_id] = OrderRequest()
+
+        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
+
+        order_type_map: Dict[OrderType, str] = {
+            OrderType.MARKET: 'MKT',
+            OrderType.LIMIT: 'LMT',
+            OrderType.STOP: 'STP',
+            OrderType.STOP_LIMIT: 'STP LMT'
+        }
+
+        def price_float(price_num):
+            return round(float(price_num), 2)
+
+        order = Order()
+        order.orderId = order_id
+        if parent_order:
+            order.parentId = parent_order.order_id
+        order.totalQuantity = quantity
+        order.action = 'BUY' if buy else 'SELL'
+        order.orderType = order_type_map[order_type]
+        if order_type == OrderType.LIMIT:
+            order.lmtPrice = price_float(price)
+        elif order_type == OrderType.STOP:
+            order.auxPrice = price_float(price)
+        elif order_type == OrderType.STOP_LIMIT:
+            order.auxPrice = price_float(price)
+            order.lmtPrice = price_float(price)
+
+        order.transmit = transmit
+
+        # Will be filled out as response comes back
+        order_request.data_fetch_complete = False
+        order_request.order_info.order_id = order_id
+        if parent_order:
+            order_request.order_info.parent_order_id = parent_order.order_id
+        order_request.order_info.order_type = order_type
+
+        self._logger.info(f"Placing order with ID {order_id}. Ticker: {ticker}, order type: {order_type}, price: {price}")
+        self.placeOrder(order_id, contract, order)
+
+        # Now, wait for the data to come back
+        timed_out = not await wait_for_condition(
+            lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT
+        )
+        ret_error_str = None
+        if order_request.has_error():
+            ret_error_str = f"Error fulfilling order. Error code is {order_request.last_error_code}, error string is {order_request.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out fulfilling order."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("place_order() finished")
+
+        return order_request.order_info, ret_error_str
+
 
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
@@ -773,6 +883,118 @@ class IBDriver(IBWrapper):
                 req_obj.option_info.set_volume(
                     int(size), for_call=req_obj.option_info.is_call
                 )
+
+    def order_status_cb(
+        self,
+        order_id: OrderId,
+        status: str,
+        filled: Decimal,
+        remaining: Decimal,
+        avg_fill_price: float,
+        perm_id: int,
+        parent_id: int,
+        last_fill_price: float,
+        client_id: int,
+        why_held: str,
+        mkt_cap_price: float,
+    ):
+        """
+        This event is called whenever the status of an order changes. It is also fired after reconnecting to TWS if the
+        client has any open orders.
+
+        :param order_id: The order ID that was specified previously in the call to placeOrder()
+        :param status: The order status. Possible values include:
+            PendingSubmit - indicates that you have transmitted the order, but have not  yet received confirmation that
+                it has been accepted by the order destination. NOTE: This order status is not sent by TWS and should be
+                explicitly set by the API developer when an order is submitted.
+            PendingCancel - indicates that you have sent a request to cancel the order but have not yet received cancel
+                confirmation from the order destination. At this point, your order is not confirmed canceled. You may
+                still receive an execution while your cancellation request is pending. NOTE: This order status is
+                not sent by TWS and should be explicitly set by the API developer when an order is canceled.
+            PreSubmitted - indicates that a simulated order type has been accepted by the IB system and that this order
+                has yet to be elected. The order is held in the IB system until the election criteria are met. At that
+                time, the order is transmitted to the order destination as specified.
+            Submitted - indicates that your order has been accepted at the order destination and is working.
+            Cancelled - indicates that the balance of your order has been confirmed canceled by the IB system. This
+                could occur unexpectedly when IB or the destination has rejected your order.
+            Filled - indicates that the order has been completely filled.
+            Inactive - indicates that the order has been accepted by the system (simulated orders) or an exchange
+                (native orders) but that currently the order is inactive due to system, exchange or other issues.
+        :param filled: Specifies the number of shares that have been executed.
+        :param remaining: Specifies the number of shares still outstanding.
+        :param avg_fill_price: The average price of the shares that have been executed. This parameter is valid only if
+            the filled parameter value is greater than zero. Otherwise, the price parameter will be zero.
+        :param perm_id: The TWS id used to identify orders. Remains the same over TWS sessions.
+        :param parent_id: The order ID of the parent order, used for bracket and auto trailing stop orders.
+        :param last_fill_price: The last price of the shares that have been executed. This parameter is valid only if the
+            filled parameter value is greater than zero. Otherwise, the price parameter will be zero.
+        :param client_id: The ID of the client (or TWS) that placed the order. Note that TWS orders have a fixed
+            clientId and orderId of 0 that distinguishes them from API orders.
+        :param why_held: This field is used to identify an order held when TWS is trying to locate shares for a short
+            sell. The value used to indicate this is 'locate'.
+        :param mkt_cap_price: ???
+        :return:
+        """
+        order_status = OrderStatus.NONE
+        if status == "PreSubmitted" or status == "Submitted":
+            order_status = OrderStatus.SUBMITTED
+        elif status == "Cancelled" or status == "ApiCancelled":
+            order_status = OrderStatus.CANCELLED
+        elif status == "Filled":
+            order_status = OrderStatus.FILLED
+        self._receive_order_data(order_id, order_status, int(filled), int(remaining), None)
+
+    def open_order_cb(
+        self, order_id: OrderId, contract: Contract, order: Order, order_state: OrderState
+    ):
+        """
+        This function is called to feed in open orders.
+
+        :param order_id: The order ID assigned by TWS. Use to cancel or update TWS order.
+        :param contract: The Contract class attributes describe the contract.
+        :param order: The Order class gives the details of the open order.
+        :param order_state: The orderState class includes attributes used for both pre and post trade margin and commission data.
+        :return:
+        """
+        order_status = OrderStatus.NONE
+        num_shares = 0
+        remaining_shares = 0
+        if order_state.status == "PreSubmitted" or order_state.status == "Submitted":
+            order_status = OrderStatus.SUBMITTED
+            remaining_shares = order.totalQuantity
+        elif order_state.status == "Cancelled" or order_state.status == "ApiCancelled":
+            order_status = OrderStatus.CANCELLED
+        elif order_state.status == "Filled":
+            order_status = OrderStatus.FILLED
+            num_shares = order.totalQuantity
+        self._receive_order_data(order_id, order_status, int(num_shares), int(remaining_shares), order.auxPrice)
+
+    def open_order_end_cb(self):
+        """This is called at the end of a given request for open orders."""
+        pass
+
+    def exec_details_cb(self, req_id: int, contract: Contract, execution: Execution):
+        """This event is fired when the reqExecutions() functions is invoked, or when an order is filled."""
+        self._receive_order_data(execution.orderId, OrderStatus.FILLED, execution.shares, 0, None)
+
+    def exec_details_end_cb(self, req_id: int):
+        """This function is called once all executions have been sent to a client in response to reqExecutions()."""
+        pass
+
+    def _receive_order_data(self, order_id: OrderId, order_status: OrderStatus, filled_shares: int, remaining_shares: int, price: Optional[float]):
+        """Receive information about the new state of an order, as sent back from TWS."""
+        order_obj = self._request_order_objects.get(order_id)
+        if not order_obj:
+            self._logger.warning(f"Couldn't find order data for order {order_id}")
+            return
+
+        self._logger.info(f"Received order data for order {order_id}. Status: {order_status}, filled shares: {filled_shares}, remaining shares: {remaining_shares}, average price: {price}")
+        order_obj.order_info.order_status = order_status
+        order_obj.order_info.shares_filled = filled_shares
+        order_obj.order_info.shares_remaining = remaining_shares
+        if price is not None:
+            order_obj.order_info.avg_fill_price = price
+        order_obj.data_fetch_complete = True
 
     def _error_cb(
         self,

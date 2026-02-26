@@ -37,6 +37,27 @@ class RequestedInfoType(Enum):
     ADJUSTED_LAST = "ADJUSTED_LAST"
 
 
+class OrderType(Enum):
+    """The standard types of orders offered by most brokerages"""
+
+    MARKET = auto()
+    LIMIT = auto()
+    STOP = auto()
+    STOP_LIMIT = auto()
+
+
+class OrderStatus(Enum):
+    """
+    For tracking the state of an order sent to IB. Not all orders are filled right away --
+    e.g. a limit sell order will only trigger when a security hits a certain price.
+    """
+
+    NONE = auto()
+    SUBMITTED = auto()
+    CANCELLED = auto()
+    FILLED = auto()
+
+
 class SecurityDescriptor:
     """
     Describes a security, either a stock or an option. E.g.:
@@ -261,3 +282,15 @@ class OptionInfo:
         option_info.expiration = parts[2]
         option_info.strike = float(parts[3])
         return option_info
+
+class OrderInfo:
+    """Info about a particular order in IB"""
+
+    def __init__(self):
+        self.order_id: int = -1
+        self.parent_order_id: int = -1
+        self.order_type: OrderType = OrderType.MARKET
+        self.order_status: OrderStatus = OrderStatus.NONE
+        self.shares_filled: int = 0
+        self.shares_remaining: int = 0
+        self.avg_fill_price: Optional[float] = None
