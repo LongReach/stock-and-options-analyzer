@@ -359,7 +359,19 @@ class IBWrapper(EWrapper, EClient):
         :return:
         """
         self._verify_callback(CallbackID.ORDER_STATUS)
-        self._callback_map[CallbackID.ORDER_STATUS](orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice)
+        self._callback_map[CallbackID.ORDER_STATUS](
+            orderId,
+            status,
+            filled,
+            remaining,
+            avgFillPrice,
+            permId,
+            parentId,
+            lastFillPrice,
+            clientId,
+            whyHeld,
+            mktCapPrice,
+        )
 
     def openOrder(
         self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState

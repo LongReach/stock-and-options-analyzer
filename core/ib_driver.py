@@ -27,8 +27,9 @@ from core.common import (
     SecurityDescriptor,
     OptionChainInfo,
     OptionInfo,
-    OrderType, OrderStatus,
-    OrderInfo
+    OrderType,
+    OrderStatus,
+    OrderInfo,
 )
 from core.utils import (
     wait_for_condition,
@@ -43,7 +44,7 @@ from core.ib_driver_requests import (
     OptionRequest,
     BarDataRequest,
     IBDriverException,
-    OrderRequest
+    OrderRequest,
 )
 from core.ib_wrapper import IBWrapper, CallbackID
 
@@ -55,6 +56,7 @@ NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
+
 
 class IBDriver(IBWrapper):
     """
@@ -70,7 +72,9 @@ class IBDriver(IBWrapper):
     * Request objects: these hold data that comes back from IB, in response to specific requests
     """
 
-    def __init__(self, sim_account: bool, client_id: int = 0, gateway_connection: bool = True):
+    def __init__(
+        self, sim_account: bool, client_id: int = 0, gateway_connection: bool = True
+    ):
         """
         Constructor.
 
@@ -519,7 +523,8 @@ class IBDriver(IBWrapper):
 
         return req_obj.option_info, ret_error_str
 
-    async def place_order(self,
+    async def place_order(
+        self,
         ticker: str,
         primary_exchange: str = None,
         is_option: bool = False,
@@ -531,7 +536,7 @@ class IBDriver(IBWrapper):
         price: float = 0.0,
         order_type: OrderType = OrderType.MARKET,
         transmit: bool = True,
-        parent_order: Optional[OrderInfo] = None
+        parent_order: Optional[OrderInfo] = None,
     ) -> Tuple[OrderInfo, Optional[str]]:
         """
         Places an order with IB. Can be for a stock/ETF or for an option.
@@ -557,13 +562,15 @@ class IBDriver(IBWrapper):
             # Will be filled out as response comes back
             order_request = self._request_order_objects[order_id] = OrderRequest()
 
-        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
+        contract = self._make_contract(
+            ticker, primary_exchange, is_option, is_call, strike, expiration
+        )
 
         order_type_map: Dict[OrderType, str] = {
-            OrderType.MARKET: 'MKT',
-            OrderType.LIMIT: 'LMT',
-            OrderType.STOP: 'STP',
-            OrderType.STOP_LIMIT: 'STP LMT'
+            OrderType.MARKET: "MKT",
+            OrderType.LIMIT: "LMT",
+            OrderType.STOP: "STP",
+            OrderType.STOP_LIMIT: "STP LMT",
         }
 
         def price_float(price_num):
@@ -574,7 +581,7 @@ class IBDriver(IBWrapper):
         if parent_order:
             order.parentId = parent_order.order_id
         order.totalQuantity = quantity
-        order.action = 'BUY' if buy else 'SELL'
+        order.action = "BUY" if buy else "SELL"
         order.orderType = order_type_map[order_type]
         if order_type == OrderType.LIMIT:
             order.lmtPrice = price_float(price)
@@ -593,7 +600,9 @@ class IBDriver(IBWrapper):
             order_request.order_info.parent_order_id = parent_order.order_id
         order_request.order_info.order_type = order_type
 
-        self._logger.info(f"Placing order with ID {order_id}. Ticker: {ticker}, order type: {order_type}, price: {price}")
+        self._logger.info(
+            f"Placing order with ID {order_id}. Ticker: {ticker}, order type: {order_type}, price: {price}"
+        )
         self.placeOrder(order_id, contract, order)
 
         # Now, wait for the data to come back
@@ -611,7 +620,6 @@ class IBDriver(IBWrapper):
             self._logger.info("place_order() finished")
 
         return order_request.order_info, ret_error_str
-
 
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
@@ -942,10 +950,16 @@ class IBDriver(IBWrapper):
             order_status = OrderStatus.CANCELLED
         elif status == "Filled":
             order_status = OrderStatus.FILLED
-        self._receive_order_data(order_id, order_status, int(filled), int(remaining), None)
+        self._receive_order_data(
+            order_id, order_status, int(filled), int(remaining), None
+        )
 
     def open_order_cb(
-        self, order_id: OrderId, contract: Contract, order: Order, order_state: OrderState
+        self,
+        order_id: OrderId,
+        contract: Contract,
+        order: Order,
+        order_state: OrderState,
     ):
         """
         This function is called to feed in open orders.
@@ -967,7 +981,13 @@ class IBDriver(IBWrapper):
         elif order_state.status == "Filled":
             order_status = OrderStatus.FILLED
             num_shares = order.totalQuantity
-        self._receive_order_data(order_id, order_status, int(num_shares), int(remaining_shares), order.auxPrice)
+        self._receive_order_data(
+            order_id,
+            order_status,
+            int(num_shares),
+            int(remaining_shares),
+            order.auxPrice,
+        )
 
     def open_order_end_cb(self):
         """This is called at the end of a given request for open orders."""
@@ -975,20 +995,31 @@ class IBDriver(IBWrapper):
 
     def exec_details_cb(self, req_id: int, contract: Contract, execution: Execution):
         """This event is fired when the reqExecutions() functions is invoked, or when an order is filled."""
-        self._receive_order_data(execution.orderId, OrderStatus.FILLED, execution.shares, 0, None)
+        self._receive_order_data(
+            execution.orderId, OrderStatus.FILLED, execution.shares, 0, None
+        )
 
     def exec_details_end_cb(self, req_id: int):
         """This function is called once all executions have been sent to a client in response to reqExecutions()."""
         pass
 
-    def _receive_order_data(self, order_id: OrderId, order_status: OrderStatus, filled_shares: int, remaining_shares: int, price: Optional[float]):
+    def _receive_order_data(
+        self,
+        order_id: OrderId,
+        order_status: OrderStatus,
+        filled_shares: int,
+        remaining_shares: int,
+        price: Optional[float],
+    ):
         """Receive information about the new state of an order, as sent back from TWS."""
         order_obj = self._request_order_objects.get(order_id)
         if not order_obj:
             self._logger.warning(f"Couldn't find order data for order {order_id}")
             return
 
-        self._logger.info(f"Received order data for order {order_id}. Status: {order_status}, filled shares: {filled_shares}, remaining shares: {remaining_shares}, average price: {price}")
+        self._logger.info(
+            f"Received order data for order {order_id}. Status: {order_status}, filled shares: {filled_shares}, remaining shares: {remaining_shares}, average price: {price}"
+        )
         order_obj.order_info.order_status = order_status
         order_obj.order_info.shares_filled = filled_shares
         order_obj.order_info.shares_remaining = remaining_shares

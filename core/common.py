@@ -283,6 +283,7 @@ class OptionInfo:
         option_info.strike = float(parts[3])
         return option_info
 
+
 class OrderInfo:
     """Info about a particular order in IB"""
 
