@@ -4,7 +4,13 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import SecurityDescriptor, HistoricalData, OptionChainInfo, OptionInfo, OrderInfo
+from core.common import (
+    SecurityDescriptor,
+    HistoricalData,
+    OptionChainInfo,
+    OptionInfo,
+    OrderInfo,
+)
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 
