@@ -9,6 +9,8 @@ import argparse
 from core.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 
+CLIENT_ID = 17
+
 
 def print_df(df):
     print("Dataframe is:\n---------------")
@@ -21,7 +23,7 @@ def print_df(df):
 async def main(mode: int):
     logger = getLogger(__name__)
     basicConfig(filename="test_2.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=13)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     stock_manager = StockDataManager()
     stock_manager.add_driver(ib_driver)
     try:

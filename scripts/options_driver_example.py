@@ -19,11 +19,13 @@ Run like:
 python -m scripts.options_driver_example
 """
 
+CLIENT_ID = 15
+
 
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_driver_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=17)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
         contract_details_list, error_str = await ib_driver.get_contract_details("SPY")

@@ -9,6 +9,12 @@ from core.common import HistoricalData
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
+"""
+Very basic example of collecting bars of market data via IB Gateway. Notice the different bar sizes.
+"""
+
+CLIENT_ID = 12
+
 
 def print_historical_data(bars: HistoricalData):
     for bar in bars.bar_data:
@@ -19,7 +25,7 @@ def print_historical_data(bars: HistoricalData):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=12)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
 

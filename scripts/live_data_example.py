@@ -16,6 +16,9 @@ live, constantly streaming data.
 """
 
 TICKER = "AAPL"
+# If True, communicate with TWS app instead of Gateway
+USE_GATEWAY = False
+CLIENT_ID = 14
 
 
 def print_historical_data(bars: HistoricalData):
@@ -42,7 +45,9 @@ async def wait_for_keypress(stop_event: asyncio.Event):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="live_data_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=45)
+    ib_driver = IBDriver(
+        sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY
+    )
     try:
         ib_driver.connect()
 

@@ -745,15 +745,12 @@ class IBDriver(IBWrapper):
         :param real_time: True if this is a real-time update, for current bar
         """
         req_obj = self._request_bardata_objects.get(req_id)
-        self._logger.info(f"**** historical data cb with req_id {req_id}, bar {in_bar}")
         if req_obj:
             dt = get_datetime(in_bar.date)
-            self._logger.info("**** hdc 2")
             if (
                 req_obj.earliest_permitted_dt is None
                 or dt >= req_obj.earliest_permitted_dt
             ):
-                self._logger.info("**** hdc 3")
                 req_obj.add_or_update_bar(in_bar, allow_update=real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
