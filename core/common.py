@@ -131,7 +131,6 @@ class HistoricalData:
                     insert_idx = idx + 1
                     break
 
-            self._logger.info(f"**** addy {insert_idx}, bar is {bar}")
             self.bar_data.insert(insert_idx, bar)
             self.timestamps.insert(insert_idx, bar_dt)
 
@@ -295,3 +294,6 @@ class OrderInfo:
         self.shares_filled: int = 0
         self.shares_remaining: int = 0
         self.avg_fill_price: Optional[float] = None
+
+    def get_info_str(self) -> str:
+        return f"Order info: order_id={self.order_id}, order_type={OrderType(self.order_type).name}, order_status={OrderStatus(self.order_status).name}, shares_filled={self.shares_filled}, shares_remaining={self.shares_remaining}, price={self.avg_fill_price}"

@@ -24,7 +24,7 @@ def bar_size_to_str(bar_size: BarSize) -> str:
 
 
 def str_to_bar_size(bar_size_str: str) -> BarSize:
-    """Given a string description, return a BarSize"""
+    """Given a string description, e.g. '1d', return a BarSize"""
     conversion_map = {
         "1m": BarSize.ONE_MINUTE,
         "5m": BarSize.FIVE_MINUTES,

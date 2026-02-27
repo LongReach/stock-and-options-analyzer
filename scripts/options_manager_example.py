@@ -20,6 +20,7 @@ Run like:
 python -m scripts.options_manager_example
 """
 
+CLIENT_ID = 16
 TICKER = "AAPL"
 MIN_DAYS_AWAY = 5
 MAX_DAYS_AWAY = 70
@@ -36,7 +37,7 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=2112)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
         await asyncio.sleep(1.0)
