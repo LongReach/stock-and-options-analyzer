@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Union
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -145,3 +146,31 @@ def current_datetime():
 def non_naive_datetime(dt: datetime) -> datetime:
     """Given a naive datetime (no timezone), set it to market time"""
     return dt.replace(tzinfo=ZoneInfo(MARKETS_TIMEZONE))
+
+@asynccontextmanager
+async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
+    """
+    Helper function for waiting for an asyncio.Lock, but with a timeout.
+
+    Use like:
+
+    async with lock_with_timeout(lock, 5) as acquired:
+        if not acquired:
+            return
+        # do something
+
+    :param lock: --
+    :param timeout: timeout in seconds
+    """
+    acquired = False
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout)
+        acquired = True
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()
