@@ -110,7 +110,7 @@ async def stop_limit_order(ib_driver: IBDriver, price_data: HistoricalData):
         quantity=5,
         price=limit_order_price + 5,
         order_type=OrderType.STOP,
-        parent_order=order_info
+        parent_order=order_info,
     )
     if error_str_2 is not None:
         print(f"Error placing order: {error_str_2}")

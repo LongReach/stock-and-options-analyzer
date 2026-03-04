@@ -106,7 +106,13 @@ class SecurityDescriptor:
             return f"{self.ticker}"
 
     @classmethod
-    def create(cls, ticker: str, right: Optional[str] = None, expiration: Optional[str] = None, strike: Optional[float] = None):
+    def create(
+        cls,
+        ticker: str,
+        right: Optional[str] = None,
+        expiration: Optional[str] = None,
+        strike: Optional[float] = None,
+    ):
         """
         Create SecurityDescriptor object.
 

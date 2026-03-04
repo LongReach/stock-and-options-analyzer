@@ -147,6 +147,7 @@ def non_naive_datetime(dt: datetime) -> datetime:
     """Given a naive datetime (no timezone), set it to market time"""
     return dt.replace(tzinfo=ZoneInfo(MARKETS_TIMEZONE))
 
+
 @asynccontextmanager
 async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
     """
