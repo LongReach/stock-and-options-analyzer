@@ -3,12 +3,24 @@ from typing import Optional, Dict, List, Tuple
 from enum import Enum, auto
 from logging import getLogger
 
-from core.common import OrderInfo, SecurityDescriptor, OrderAction, OrderType, OrderStatus
+from core.common import (
+    OrderInfo,
+    SecurityDescriptor,
+    OrderAction,
+    OrderType,
+    OrderStatus,
+)
 from core.ib_driver import IBDriver
+
 
 class OrderGroup:
 
-    def __init__(self, entry_order: OrderInfo, stop_loss_order: OrderInfo, half_out_order: Optional[OrderInfo] = None):
+    def __init__(
+        self,
+        entry_order: OrderInfo,
+        stop_loss_order: OrderInfo,
+        half_out_order: Optional[OrderInfo] = None,
+    ):
         self.entry_order: OrderInfo = entry_order
         self.stop_loss_order: Optional[OrderInfo] = stop_loss_order
         self.half_out_order: Optional[OrderInfo] = half_out_order
@@ -54,7 +66,6 @@ class Position:
     logger = getLogger(__file__)
     next_id = 1
 
-
     def __init__(self, security_descriptor: SecurityDescriptor):
         self.security_descriptor: SecurityDescriptor = security_descriptor
         self.position_state: PositionState = PositionState.NONE
@@ -65,7 +76,13 @@ class Position:
 
         self._task_stack: List[asyncio.Task] = []
 
-    async def activate(self, direction: PositionDirection, entry_prices: List[float], stop_prices: List[float], max_loss: float):
+    async def activate(
+        self,
+        direction: PositionDirection,
+        entry_prices: List[float],
+        stop_prices: List[float],
+        max_loss: float,
+    ):
         """
         Sets up stop orders for a position entry. If going long, the position will be entered when the stop is triggered.
         Same idea with going short. If a "dual" entry, then both long and short orders will be set up. However, when one
@@ -79,16 +96,33 @@ class Position:
         """
 
         if self.position_state != PositionState.NONE:
-            raise PositionException(f"Can't activate position, current state is {PositionState(self.position_state).name}")
+            raise PositionException(
+                f"Can't activate position, current state is {PositionState(self.position_state).name}"
+            )
         if len(self._task_stack) > 0:
             raise PositionException(f"Can't activate position, tasks in progress")
 
         async def _setup_long(_entry, _stop):
             num_shares = int(max_loss / (_entry - _stop))
-            entry_order, error_str = await self.ib_driver.place_order(symbol_full=self.security_descriptor.to_string(), action=OrderAction.BUY, quantity=num_shares, price=_entry, order_type=OrderType.STOP, transmit=False)
+            entry_order, error_str = await self.ib_driver.place_order(
+                symbol_full=self.security_descriptor.to_string(),
+                action=OrderAction.BUY,
+                quantity=num_shares,
+                price=_entry,
+                order_type=OrderType.STOP,
+                transmit=False,
+            )
             if error_str is not None:
                 raise PositionException(f"Error activating order: {error_str}")
-            stop_loss_order, error_str = await self.ib_driver.place_order(symbol_full=self.security_descriptor.to_string(), action=OrderAction.SELL, quantity=num_shares, price=_stop, order_type=OrderType.STOP, parent_order=entry_order, transmit=True)
+            stop_loss_order, error_str = await self.ib_driver.place_order(
+                symbol_full=self.security_descriptor.to_string(),
+                action=OrderAction.SELL,
+                quantity=num_shares,
+                price=_stop,
+                order_type=OrderType.STOP,
+                parent_order=entry_order,
+                transmit=True,
+            )
             if error_str is not None:
                 raise PositionException(f"Error activating order: {error_str}")
             self.long_order_group = OrderGroup(entry_order, stop_loss_order)
@@ -96,10 +130,25 @@ class Position:
 
         async def _setup_short(_entry, _stop):
             num_shares = int(max_loss / (_stop - _entry))
-            entry_order, error_str = await self.ib_driver.place_order(symbol_full=self.security_descriptor.to_string(), action=OrderAction.SELL, quantity=num_shares, price=_entry, order_type=OrderType.STOP, transmit=False)
+            entry_order, error_str = await self.ib_driver.place_order(
+                symbol_full=self.security_descriptor.to_string(),
+                action=OrderAction.SELL,
+                quantity=num_shares,
+                price=_entry,
+                order_type=OrderType.STOP,
+                transmit=False,
+            )
             if error_str is not None:
                 raise PositionException(f"Error activating order: {error_str}")
-            stop_loss_order, error_str = await self.ib_driver.place_order(symbol_full=self.security_descriptor.to_string(), action=OrderAction.BUY, quantity=num_shares, price=_stop, order_type=OrderType.STOP, parent_order=entry_order, transmit=True)
+            stop_loss_order, error_str = await self.ib_driver.place_order(
+                symbol_full=self.security_descriptor.to_string(),
+                action=OrderAction.BUY,
+                quantity=num_shares,
+                price=_stop,
+                order_type=OrderType.STOP,
+                parent_order=entry_order,
+                transmit=True,
+            )
             if error_str is not None:
                 raise PositionException(f"Error activating order: {error_str}")
             self.short_order_group = OrderGroup(entry_order, stop_loss_order)
@@ -150,7 +199,10 @@ class Position:
         """
         The position has been created. From here, it can either be entered or canceled.
         """
-        groups: List[Optional[OrderGroup]] = [self.long_order_group, self.short_order_group]
+        groups: List[Optional[OrderGroup]] = [
+            self.long_order_group,
+            self.short_order_group,
+        ]
         cancel_group_idx = -1
         for idx, group in enumerate(groups):
             if group is not None:
@@ -161,25 +213,45 @@ class Position:
                     if self.position_direction == PositionDirection.DUAL:
                         # We must cancel the other entry and update direction
                         cancel_group_idx = 1 - idx
-                        self.position_direction = PositionDirection.LONG if idx == 0 else PositionDirection.SHORT
+                        self.position_direction = (
+                            PositionDirection.LONG
+                            if idx == 0
+                            else PositionDirection.SHORT
+                        )
 
                     # Create half-out order
                     if idx == 0:
-                        half_out_price = group.entry_price + (group.entry_price - group.exit_price) * 2.0
+                        half_out_price = (
+                            group.entry_price
+                            + (group.entry_price - group.exit_price) * 2.0
+                        )
                         half_out_quantity = int(group.num_shares / 2)
                     else:
-                        half_out_price = group.entry_price - (group.exit_price - group.entry_price) * 2.0
+                        half_out_price = (
+                            group.entry_price
+                            - (group.exit_price - group.entry_price) * 2.0
+                        )
                         half_out_quantity = int(group.num_shares / 2)
-                    task = asyncio.create_task(self._create_half_out_order(self.position_direction, half_out_price, half_out_quantity))
+                    task = asyncio.create_task(
+                        self._create_half_out_order(
+                            self.position_direction, half_out_price, half_out_quantity
+                        )
+                    )
                     self._task_stack.append(task)
 
                 if entry_order.order_status == OrderStatus.CANCELLED:
                     # Position has been canceled, mark it so
-                    cancel_task = asyncio.create_task(self._cancel_orders(self.position_direction))
+                    cancel_task = asyncio.create_task(
+                        self._cancel_orders(self.position_direction)
+                    )
                     self._task_stack.append(cancel_task)
 
         if cancel_group_idx != -1:
-            cancel_direction = PositionDirection.LONG if cancel_group_idx == 0 else PositionDirection.SHORT
+            cancel_direction = (
+                PositionDirection.LONG
+                if cancel_group_idx == 0
+                else PositionDirection.SHORT
+            )
             cancel_task = asyncio.create_task(self._cancel_orders(cancel_direction))
             self._task_stack.append(cancel_task)
 
@@ -187,7 +259,10 @@ class Position:
         """
         The position has been entered. From here, it can either be half-exited or fully-exited.
         """
-        groups: List[Optional[OrderGroup]] = [self.long_order_group, self.short_order_group]
+        groups: List[Optional[OrderGroup]] = [
+            self.long_order_group,
+            self.short_order_group,
+        ]
         cancel_group_idx = -1
         for idx, group in enumerate(groups):
             if group is not None:
@@ -197,7 +272,9 @@ class Position:
                         self.logger.info(f"XXX")
                         self.shares_entered = entry_order.shares_filled
 
-    async def _cancel_orders(self, direction: PositionDirection, stops_only: bool = False):
+    async def _cancel_orders(
+        self, direction: PositionDirection, stops_only: bool = False
+    ):
         """
         Cancels unfilled orders that are still active, if they need to be cancelled. Should be wrapped in a
         task by caller.
@@ -240,13 +317,27 @@ class Position:
             self.long_order_group = None
             self.short_order_group = None
 
-    async def _create_half_out_order(self, direction: PositionDirection, price: float, num_shares: int):
-        group = self.long_order_group if direction == PositionDirection.LONG else self.short_order_group
+    async def _create_half_out_order(
+        self, direction: PositionDirection, price: float, num_shares: int
+    ):
+        group = (
+            self.long_order_group
+            if direction == PositionDirection.LONG
+            else self.short_order_group
+        )
         if group is None:
             return
 
-        action = OrderAction.SELL if direction == PositionDirection.LONG else OrderAction.BUY
-        half_out_order, error_str = await self.ib_driver.place_order(self.security_descriptor.to_string(), action=action, quantity=num_shares, price=price, order_type=OrderType.LIMIT)
+        action = (
+            OrderAction.SELL if direction == PositionDirection.LONG else OrderAction.BUY
+        )
+        half_out_order, error_str = await self.ib_driver.place_order(
+            self.security_descriptor.to_string(),
+            action=action,
+            quantity=num_shares,
+            price=price,
+            order_type=OrderType.LIMIT,
+        )
         if error_str is not None:
             self.logger.warning(f"Error while creating half-out order: {error_str}")
             group.half_out_order = None

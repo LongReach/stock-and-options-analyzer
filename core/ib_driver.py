@@ -29,7 +29,8 @@ from core.common import (
     OptionInfo,
     OrderType,
     OrderStatus,
-    OrderInfo, OrderAction,
+    OrderInfo,
+    OrderAction,
 )
 from core.utils import (
     wait_for_condition,
@@ -574,7 +575,12 @@ class IBDriver(IBWrapper):
 
         security_descriptor = SecurityDescriptor(symbol_full)
         contract = self._make_contract(
-            security_descriptor.ticker, primary_exchange, security_descriptor.is_option(), security_descriptor.is_call(), security_descriptor.strike, security_descriptor.expiration
+            security_descriptor.ticker,
+            primary_exchange,
+            security_descriptor.is_option(),
+            security_descriptor.is_call(),
+            security_descriptor.strike,
+            security_descriptor.expiration,
         )
 
         order_type_map: Dict[OrderType, str] = {
@@ -664,7 +670,12 @@ class IBDriver(IBWrapper):
 
         security_descriptor = order.security_descriptor
         contract = self._make_contract(
-            security_descriptor.ticker, None, security_descriptor.is_option(), security_descriptor.is_call(), security_descriptor.strike, security_descriptor.expiration
+            security_descriptor.ticker,
+            None,
+            security_descriptor.is_option(),
+            security_descriptor.is_call(),
+            security_descriptor.strike,
+            security_descriptor.expiration,
         )
 
         order_type_map: Dict[OrderType, str] = {
@@ -727,7 +738,9 @@ class IBDriver(IBWrapper):
         """Cancels an order, given the OrderInfo object"""
         order_id = await self._find_order_request(order_info)
         if order_id is None:
-            self._logger.warning(f"No order request found for {order_info.security_descriptor.to_string()}")
+            self._logger.warning(
+                f"No order request found for {order_info.security_descriptor.to_string()}"
+            )
 
         self.cancelOrder(order_id, OrderCancel())
 
@@ -1234,7 +1247,9 @@ class IBDriver(IBWrapper):
         """Call before calling reqMktData() to set whether live or frozen data"""
         self.reqMarketDataType(1 if live else 2)
 
-    async def _find_bardata_request(self, historical_data: HistoricalData) -> Optional[int]:
+    async def _find_bardata_request(
+        self, historical_data: HistoricalData
+    ) -> Optional[int]:
         """Given a HistoricalData object, return the associated request ID or None"""
         req_id: Optional[int] = None
         async with self._lock:
@@ -1253,4 +1268,3 @@ class IBDriver(IBWrapper):
                     order_id = id
                     break
         return order_id
-
