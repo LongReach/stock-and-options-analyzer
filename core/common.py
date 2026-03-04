@@ -1,9 +1,14 @@
-from typing import Dict, List, Tuple, Optional, Set, Any
+from typing import Dict, List, Tuple, Optional, Set, Any, Self
 from datetime import datetime
 from enum import Enum, auto
 from threading import Lock
 from logging import getLogger
 from ibapi.common import BarData
+
+"""
+Classes in this file represent data returned by or give to IBDriver. However, they are generic enough
+that they might be repurposed for communications with some other broker.
+"""
 
 LOCAL_TIMEZONE = "America/New_York"
 MARKETS_TIMEZONE = "America/New_York"
@@ -35,6 +40,11 @@ class RequestedInfoType(Enum):
     IMPLIED_VOLATILITY = "OPTION_IMPLIED_VOLATILITY"
     HISTORICAL_VOLATILITY = "HISTORICAL_VOLATILITY"
     ADJUSTED_LAST = "ADJUSTED_LAST"
+
+
+class OrderAction(Enum):
+    BUY = auto()
+    SELL = auto()
 
 
 class OrderType(Enum):
@@ -80,8 +90,40 @@ class SecurityDescriptor:
             self.expiration = parts[2]
             self.strike = float(parts[3])
 
+    def is_option(self):
+        """Returns True if this is a descriptor for an option contract"""
+        return self.right is not None
+
     def is_call(self):
+        """Returns True if for a call contract"""
         return self.right == "C"
+
+    def to_string(self) -> str:
+        """Returns string representation, e.g. 'SPY-C-20250627-600.0'"""
+        if self.is_opt:
+            return f"{self.ticker}-{self.right}-{self.expiration}-{self.strike:.2f}"
+        else:
+            return f"{self.ticker}"
+
+    @classmethod
+    def create(cls, ticker: str, right: Optional[str] = None, expiration: Optional[str] = None, strike: Optional[float] = None):
+        """
+        Create SecurityDescriptor object.
+
+        :param ticker: ticker for stock/ETF or underlying, e.g. 'SPY'
+        :param right: 'C' if call, 'P' if put, or None if not for option contract
+        :param expiration: exp. date of option, or None
+        :param strike: strike price of option, or None
+        :return: new descriptor object
+        """
+        descriptor = SecurityDescriptor(ticker)
+        if right is not None:
+            descriptor.right = right
+        if expiration is not None:
+            descriptor.expiration = expiration
+        if strike is not None:
+            descriptor.strike = strike
+        return descriptor
 
 
 class HistoricalData:
@@ -287,8 +329,10 @@ class OrderInfo:
     """Info about a particular order in IB"""
 
     def __init__(self):
-        self.order_id: int = -1
-        self.parent_order_id: int = -1
+        self.security_descriptor: Optional[SecurityDescriptor] = None
+        # Will reference an OrderInfo that represents a parent order. For example, this order will have a parent if it's
+        # a half-out order attached to a stop order that causes a trade to be entered.
+        self.parent_order: Optional[Self] = None
         self.order_type: OrderType = OrderType.MARKET
         self.order_status: OrderStatus = OrderStatus.NONE
         self.shares_filled: int = 0
@@ -296,4 +340,7 @@ class OrderInfo:
         self.avg_fill_price: Optional[float] = None
 
     def get_info_str(self) -> str:
-        return f"Order info: order_id={self.order_id}, order_type={OrderType(self.order_type).name}, order_status={OrderStatus(self.order_status).name}, shares_filled={self.shares_filled}, shares_remaining={self.shares_remaining}, price={self.avg_fill_price}"
+        parent_order_str = ""
+        if self.parent_order:
+            parent_order_str = f"parent_order={OrderType(self.parent_order.order_type).name}/{OrderStatus(self.parent_order.order_status).name}, "
+        return f"Order info: symbol={self.security_descriptor.to_string()}, {parent_order_str}order_type={OrderType(self.order_type).name}, order_status={OrderStatus(self.order_status).name}, shares_filled={self.shares_filled}, shares_remaining={self.shares_remaining}, price={self.avg_fill_price}"

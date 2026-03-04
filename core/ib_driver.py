@@ -3,12 +3,12 @@ import copy
 import math
 
 from _decimal import Decimal
-from idlelib.window import add_windows_to_menu
 
-from core.utils import current_datetime
+from core.utils import current_datetime, lock_with_timeout
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
+from ibapi.order_cancel import OrderCancel
 from ibapi.order_state import OrderState
 from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
 from ibapi.execution import Execution
@@ -29,7 +29,7 @@ from core.common import (
     OptionInfo,
     OrderType,
     OrderStatus,
-    OrderInfo,
+    OrderInfo, OrderAction,
 )
 from core.utils import (
     wait_for_condition,
@@ -291,6 +291,24 @@ class IBDriver(IBWrapper):
 
         return req_obj.historical_data, ret_error_str
 
+    async def cancel_historical_data(self, historical_data: HistoricalData):
+        """Cancels a historical data request, which one might eventually do with streaming data"""
+        req_id = await self._find_bardata_request(historical_data)
+        if req_id is None:
+            self._logger.warning(f"No historical data request found")
+
+        self.cancelHistoricalData(req_id)
+
+        async with self._lock:
+            self._request_bardata_objects.pop(req_id, None)
+
+    async def cancel_all_historical_data(self):
+        """Cancels all historical data requests"""
+        async with self._lock:
+            for req_id, req_obj in self._request_bardata_objects.items():
+                self.cancelHistoricalData(req_id)
+            self._request_bardata_objects.clear()
+
     async def get_most_recent_data(
         self,
         symbol_full: str,
@@ -525,13 +543,9 @@ class IBDriver(IBWrapper):
 
     async def place_order(
         self,
-        ticker: str,
+        symbol_full: str,
         primary_exchange: str = None,
-        is_option: bool = False,
-        is_call: bool = False,
-        strike: Optional[float] = None,
-        expiration: Optional[str] = None,
-        buy: bool = True,
+        action: OrderAction = OrderAction.BUY,
         quantity: int = 0,
         price: float = 0.0,
         order_type: OrderType = OrderType.MARKET,
@@ -541,13 +555,9 @@ class IBDriver(IBWrapper):
         """
         Places an order with IB. Can be for a stock/ETF or for an option.
 
-        :param ticker: e.g. "QQQ"
+        :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param primary_exchange: --
-        :param is_option: True if option, False if stock/ETF
-        :param is_call: True if call option, False if put
-        :param strike: strike price of option or None
-        :param expiration: expiration date of option or None
-        :param buy: True for going long or exiting a short position, False for going short or exiting a long position
+        :param action: whether to buy or sell. Selling can mean opening a short position, buying can mean closing it.
         :param quantity: number of shares/contracts
         :param price: desired price (for limit or stop orders)
         :param order_type: market, limit, stop, or stop limit
@@ -562,8 +572,9 @@ class IBDriver(IBWrapper):
             # Will be filled out as response comes back
             order_request = self._request_order_objects[order_id] = OrderRequest()
 
+        security_descriptor = SecurityDescriptor(symbol_full)
         contract = self._make_contract(
-            ticker, primary_exchange, is_option, is_call, strike, expiration
+            security_descriptor.ticker, primary_exchange, security_descriptor.is_option(), security_descriptor.is_call(), security_descriptor.strike, security_descriptor.expiration
         )
 
         order_type_map: Dict[OrderType, str] = {
@@ -579,9 +590,10 @@ class IBDriver(IBWrapper):
         order = Order()
         order.orderId = order_id
         if parent_order:
-            order.parentId = parent_order.order_id
+            parent_order_id = await self._find_order_request(parent_order)
+            order.parentId = parent_order_id
         order.totalQuantity = quantity
-        order.action = "BUY" if buy else "SELL"
+        order.action = "BUY" if action == OrderAction.BUY else "SELL"
         order.orderType = order_type_map[order_type]
         if order_type == OrderType.LIMIT:
             order.lmtPrice = price_float(price)
@@ -595,13 +607,13 @@ class IBDriver(IBWrapper):
 
         # Will be filled out as response comes back
         order_request.data_fetch_complete = False
-        order_request.order_info.order_id = order_id
         if parent_order:
-            order_request.order_info.parent_order_id = parent_order.order_id
+            order_request.order_info.parent_order = parent_order
         order_request.order_info.order_type = order_type
+        order_request.order_info.security_descriptor = security_descriptor
 
         self._logger.info(
-            f"Placing order with ID {order_id}. Ticker: {ticker}, order type: {order_type}, price: {price}"
+            f"Placing order with ID {order_id}. Security: {security_descriptor.to_string()}, order type: {order_type}, price: {price}"
         )
         self.placeOrder(order_id, contract, order)
 
@@ -620,6 +632,113 @@ class IBDriver(IBWrapper):
             self._logger.info("place_order() finished")
 
         return order_request.order_info, ret_error_str
+
+    async def change_order(
+        self,
+        order: OrderInfo,
+        action: OrderAction = OrderAction.BUY,
+        quantity: int = 0,
+        price: float = 0.0,
+        order_type: OrderType = OrderType.MARKET,
+        parent_order: Optional[OrderInfo] = None,
+    ) -> Tuple[OrderInfo, Optional[str]]:
+        """
+        Changes an order that's on IB's server
+
+        :param order: reference to original order
+        :param action: whether to buy or sell. Selling can mean opening a short position, buying can mean closing it.
+        :param quantity: number of shares/contracts
+        :param price: desired price (for limit or stop orders)
+        :param order_type: market, limit, stop, or stop limit
+        :param parent_order: set if there is a parent order for this one, e.g. this on is a stop loss order paired
+            to a market order.
+        :return: (OrderInfo object, error string or None)
+        """
+
+        order_id = await self._find_order_request(order)
+        if order_id is None:
+            return order, f"Could not find order {order_id} to be changed"
+
+        async with self._lock:
+            order_request = self._request_order_objects[order_id]
+
+        security_descriptor = order.security_descriptor
+        contract = self._make_contract(
+            security_descriptor.ticker, None, security_descriptor.is_option(), security_descriptor.is_call(), security_descriptor.strike, security_descriptor.expiration
+        )
+
+        order_type_map: Dict[OrderType, str] = {
+            OrderType.MARKET: "MKT",
+            OrderType.LIMIT: "LMT",
+            OrderType.STOP: "STP",
+            OrderType.STOP_LIMIT: "STP LMT",
+        }
+
+        def price_float(price_num):
+            return round(float(price_num), 2)
+
+        order = Order()
+        order.orderId = order_id
+        if parent_order:
+            parent_order_id = await self._find_order_request(parent_order)
+            order.parentId = parent_order_id
+        order.totalQuantity = quantity
+        order.action = "BUY" if action == OrderAction.BUY else "SELL"
+        order.orderType = order_type_map[order_type]
+        if order_type == OrderType.LIMIT:
+            order.lmtPrice = price_float(price)
+        elif order_type == OrderType.STOP:
+            order.auxPrice = price_float(price)
+        elif order_type == OrderType.STOP_LIMIT:
+            order.auxPrice = price_float(price)
+            order.lmtPrice = price_float(price)
+
+        order.transmit = True
+
+        # Will be filled out as response comes back
+        order_request.data_fetch_complete = False
+        if parent_order:
+            order_request.order_info.parent_order = parent_order
+        order_request.order_info.order_type = order_type
+        order_request.order_info.security_descriptor = security_descriptor
+
+        self._logger.info(
+            f"Changing order with ID {order_id}. Security: {security_descriptor.to_string()}, order type: {order_type}, price: {price}"
+        )
+        self.placeOrder(order_id, contract, order)
+
+        # Now, wait for the data to come back
+        timed_out = not await wait_for_condition(
+            lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT
+        )
+        ret_error_str = None
+        if order_request.has_error():
+            ret_error_str = f"Error changing order. Error code is {order_request.last_error_code}, error string is {order_request.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out changing order."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("change_order() finished")
+
+        return order_request.order_info, ret_error_str
+
+    async def cancel_order(self, order_info: OrderInfo):
+        """Cancels an order, given the OrderInfo object"""
+        order_id = await self._find_order_request(order_info)
+        if order_id is None:
+            self._logger.warning(f"No order request found for {order_info.security_descriptor.to_string()}")
+
+        self.cancelOrder(order_id, OrderCancel())
+
+        async with self._lock:
+            self._request_order_objects.pop(order_id, None)
+
+    async def cancel_all_orders(self):
+        """Cancels all orders, including any made within TWS itself"""
+        self.reqGlobalCancel()
+        async with self._lock:
+            self._request_order_objects.clear()
 
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
@@ -1114,3 +1233,24 @@ class IBDriver(IBWrapper):
     async def _set_market_data_type(self, live: bool = True):
         """Call before calling reqMktData() to set whether live or frozen data"""
         self.reqMarketDataType(1 if live else 2)
+
+    async def _find_bardata_request(self, historical_data: HistoricalData) -> Optional[int]:
+        """Given a HistoricalData object, return the associated request ID or None"""
+        req_id: Optional[int] = None
+        async with self._lock:
+            for id, request in self._request_bardata_objects.items():
+                if request.historical_data is historical_data:
+                    req_id = id
+                    break
+        return req_id
+
+    async def _find_order_request(self, order_info: OrderInfo) -> Optional[int]:
+        """Given an OrderInfo object, return the associated order ID or None"""
+        order_id: Optional[int] = None
+        async with self._lock:
+            for id, request in self._request_order_objects.items():
+                if request.order_info is order_info:
+                    order_id = id
+                    break
+        return order_id
+
