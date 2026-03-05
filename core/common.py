@@ -375,7 +375,13 @@ class PositionsInfo:
     def __init__(self):
         self.position_map: Dict[str, PositionDescriptor] = {}
 
-    def set_position(self, descriptor: SecurityDescriptor, quantity: int, price: float, short_position: bool):
+    def set_position(
+        self,
+        descriptor: SecurityDescriptor,
+        quantity: int,
+        price: float,
+        short_position: bool,
+    ):
         """
         Sets or updates a position with data received from broker
 
@@ -392,12 +398,12 @@ class PositionsInfo:
         position_descriptor.price = price
         position_descriptor.short_position = short_position
 
-    def get_position(self, security_descriptor: SecurityDescriptor) -> Optional[PositionDescriptor]:
+    def get_position(
+        self, security_descriptor: SecurityDescriptor
+    ) -> Optional[PositionDescriptor]:
         """Returns a PositionDescriptor, or None"""
         return self.position_map.get(security_descriptor.symbol_full)
 
     def get_positions(self) -> List[PositionDescriptor]:
         """Return all position descriptors"""
         return [desc for symbol, desc in self.position_map.items()]
-
-

@@ -6,7 +6,15 @@ from typing import List, Tuple, Dict, Optional
 from ibapi.common import BarData
 from datetime import datetime
 
-from core.common import HistoricalData, RequestedInfoType, OrderType, OrderAction, OrderInfo, OrderStatus, PositionsInfo
+from core.common import (
+    HistoricalData,
+    RequestedInfoType,
+    OrderType,
+    OrderAction,
+    OrderInfo,
+    OrderStatus,
+    PositionsInfo,
+)
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
@@ -22,7 +30,10 @@ TICKER = "SPY"
 ACTION = OrderAction.SELL
 ORDER_TYPE = OrderType.STOP
 
-async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Optional[Tuple[OrderInfo, OrderInfo]]:
+
+async def make_orders(
+    ib_driver: IBDriver, price_data: HistoricalData
+) -> Optional[Tuple[OrderInfo, OrderInfo]]:
     bar_highs = [bar.high for bar in price_data.bar_data]
     highest_recent_price = max(bar_highs)
     bar_lows = [bar.low for bar in price_data.bar_data]
@@ -41,7 +52,7 @@ async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Option
         quantity=5,
         price=entry_price,
         order_type=ORDER_TYPE,
-        transmit=False
+        transmit=False,
     )
     if error_str is not None:
         print(f"Error placing order: {error_str}")
@@ -58,14 +69,13 @@ async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Option
         price=stop_out_price,
         order_type=OrderType.STOP,
         parent_order=order_info,
-        transmit=True
+        transmit=True,
     )
     if error_str is not None:
         print(f"Error placing stop order: {error_str}")
         return None
 
     return order_info, stop_order_info
-
 
 
 async def main():
@@ -96,12 +106,19 @@ async def main():
             if _error_str:
                 print(f"Positions gotten, error is {_error_str}")
             return position_info
+
         positions_task: Optional[asyncio.Task] = None
 
         if result:
             print("Orders placed successfully.")
             order_info, stop_order_info = result
-            while order_info.order_status not in [OrderStatus.FILLED, OrderStatus.CANCELLED] or stop_order_info.order_status not in [OrderStatus.FILLED, OrderStatus.CANCELLED]:
+            while order_info.order_status not in [
+                OrderStatus.FILLED,
+                OrderStatus.CANCELLED,
+            ] or stop_order_info.order_status not in [
+                OrderStatus.FILLED,
+                OrderStatus.CANCELLED,
+            ]:
                 print(f"Main order: {order_info.get_info_str()}")
                 print(f"Stop order: {stop_order_info.get_info_str()}")
                 if positions_task is None:
@@ -113,7 +130,6 @@ async def main():
                         print(f"Position: {desc.to_string()}")
                     positions_task = None
                 await asyncio.sleep(2.0)
-
 
     except Exception as ex:
         print(f"Exception: {ex}")
