@@ -2,123 +2,70 @@ import asyncio
 from logging import basicConfig, INFO, getLogger
 import time
 from time import sleep
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from ibapi.common import BarData
 from datetime import datetime
 
-from core.common import HistoricalData, RequestedInfoType, OrderType, OrderAction
+from core.common import HistoricalData, RequestedInfoType, OrderType, OrderAction, OrderInfo, OrderStatus, PositionsInfo
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
 """
 An example of how to place an order with IB. This script should be used while the TWS desktop application
-is running, in paper-trading mode. Depending on settings, it will either:
+is running, in paper-trading mode. It will place an order with an attached stop.
 
-* place a stop order for 5 shares of SPY, with the stop (for buying) five dollars above SPY's recent high trading price.
-* place a limit order for 5 shares of SPY, five dollars below SPY's recent low trading price
-* place a stop order for shorting, five dollars below SPY's recent low trading price
-* Place a stop limit order for shorting below current price, with an attached stop
+It also collects and prints information about the orders and the position from IB.
 """
 
 CLIENT_ID = 18
 TICKER = "SPY"
+ACTION = OrderAction.SELL
+ORDER_TYPE = OrderType.STOP
 
-modes = ["long", "short", "buy limit", "stop limit"]
-MODE = 3
-
-
-async def long_order(ib_driver: IBDriver, price_data: HistoricalData):
+async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Optional[Tuple[OrderInfo, OrderInfo]]:
     bar_highs = [bar.high for bar in price_data.bar_data]
     highest_recent_price = max(bar_highs)
+    bar_lows = [bar.low for bar in price_data.bar_data]
+    lowest_recent_price = min(bar_lows)
 
-    stop_order_price = highest_recent_price + 5.0
+    if ACTION == OrderAction.BUY:
+        entry_price = highest_recent_price + 5.0
+        stop_out_price = entry_price - (highest_recent_price - lowest_recent_price)
+    else:
+        entry_price = lowest_recent_price - 5.0
+        stop_out_price = entry_price + (highest_recent_price - lowest_recent_price)
+
     order_info, error_str = await ib_driver.place_order(
         symbol_full=TICKER,
-        action=OrderAction.BUY,
+        action=ACTION,
         quantity=5,
-        price=stop_order_price,
-        order_type=OrderType.STOP,
+        price=entry_price,
+        order_type=ORDER_TYPE,
+        transmit=False
     )
     if error_str is not None:
         print(f"Error placing order: {error_str}")
-        return
+        return None
 
-    print("Long order placed!")
+    print("Main order placed!")
     print(f"Order info is: {order_info.get_info_str()}")
 
-
-async def short_order(ib_driver: IBDriver, price_data: HistoricalData):
-    bar_lows = [bar.low for bar in price_data.bar_data]
-    lowest_recent_price = max(bar_lows)
-
-    stop_order_price = lowest_recent_price - 5.0
-    order_info, error_str = await ib_driver.place_order(
+    stop_action = OrderAction.SELL if ACTION == OrderAction.BUY else OrderAction.BUY
+    stop_order_info, error_str = await ib_driver.place_order(
         symbol_full=TICKER,
-        action=OrderAction.SELL,
+        action=stop_action,
         quantity=5,
-        price=stop_order_price,
-        order_type=OrderType.STOP,
-    )
-    if error_str is not None:
-        print(f"Error placing order: {error_str}")
-        return
-
-    print("Short order placed!")
-    print(f"Order info is: {order_info.get_info_str()}")
-
-
-async def limit_order(ib_driver: IBDriver, price_data: HistoricalData):
-    bar_lows = [bar.low for bar in price_data.bar_data]
-    lowest_recent_price = max(bar_lows)
-
-    limit_order_price = lowest_recent_price - 5.0
-    order_info, error_str = await ib_driver.place_order(
-        symbol_full=TICKER,
-        action=OrderAction.BUY,
-        quantity=5,
-        price=limit_order_price,
-        order_type=OrderType.LIMIT,
-    )
-    if error_str is not None:
-        print(f"Error placing order: {error_str}")
-        return
-
-    print("Limit order placed!")
-    print(f"Order info is: {order_info.get_info_str()}")
-
-
-async def stop_limit_order(ib_driver: IBDriver, price_data: HistoricalData):
-    bar_lows = [bar.low for bar in price_data.bar_data]
-    lowest_recent_price = max(bar_lows)
-
-    limit_order_price = lowest_recent_price - 5.0
-    order_info, error_str = await ib_driver.place_order(
-        symbol_full=TICKER,
-        action=OrderAction.SELL,
-        quantity=5,
-        price=limit_order_price,
-        order_type=OrderType.STOP_LIMIT,
-    )
-    if error_str is not None:
-        print(f"Error placing order: {error_str}")
-        return
-
-    # Now, the attached stop order
-    order_info_2, error_str_2 = await ib_driver.place_order(
-        symbol_full=TICKER,
-        action=OrderAction.BUY,
-        quantity=5,
-        price=limit_order_price + 5,
+        price=stop_out_price,
         order_type=OrderType.STOP,
         parent_order=order_info,
+        transmit=True
     )
-    if error_str_2 is not None:
-        print(f"Error placing order: {error_str_2}")
-        return
+    if error_str is not None:
+        print(f"Error placing stop order: {error_str}")
+        return None
 
-    print("Stop limit order placed!")
-    print(f"Main order info is: {order_info.get_info_str()}")
-    print(f"Stop order info is: {order_info_2.get_info_str()}")
+    return order_info, stop_order_info
+
 
 
 async def main():
@@ -142,15 +89,31 @@ async def main():
             print(f"Failed to get price data for {TICKER}. Error is: {error_str}")
             return
 
-        mode_string = modes[MODE]
-        if mode_string == "long":
-            await long_order(ib_driver, price_data)
-        elif mode_string == "short":
-            await short_order(ib_driver, price_data)
-        elif mode_string == "buy limit":
-            await limit_order(ib_driver, price_data)
-        elif mode_string == "stop limit":
-            await stop_limit_order(ib_driver, price_data)
+        result = await make_orders(ib_driver, price_data)
+
+        async def _get_positions():
+            position_info, _error_str = await ib_driver.get_positions()
+            if _error_str:
+                print(f"Positions gotten, error is {_error_str}")
+            return position_info
+        positions_task: Optional[asyncio.Task] = None
+
+        if result:
+            print("Orders placed successfully.")
+            order_info, stop_order_info = result
+            while order_info.order_status not in [OrderStatus.FILLED, OrderStatus.CANCELLED] or stop_order_info.order_status not in [OrderStatus.FILLED, OrderStatus.CANCELLED]:
+                print(f"Main order: {order_info.get_info_str()}")
+                print(f"Stop order: {stop_order_info.get_info_str()}")
+                if positions_task is None:
+                    positions_task = asyncio.create_task(_get_positions())
+                if positions_task.done():
+                    info: PositionsInfo = positions_task.result()
+                    descs = info.get_positions()
+                    for desc in descs:
+                        print(f"Position: {desc.to_string()}")
+                    positions_task = None
+                await asyncio.sleep(2.0)
+
 
     except Exception as ex:
         print(f"Exception: {ex}")

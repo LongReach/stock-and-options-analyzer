@@ -10,6 +10,8 @@ from core.common import (
     OptionChainInfo,
     OptionInfo,
     OrderInfo,
+    PositionDescriptor,
+    PositionsInfo
 )
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
@@ -124,8 +126,16 @@ class OptionRequest(DataRequest):
 
 
 class OrderRequest(DataRequest):
-    """For tracking an options info request and capturing results returned so far."""
+    """For tracking an order request and capturing results returned so far."""
 
     def __init__(self):
         super().__init__()
         self.order_info = OrderInfo()
+
+
+class PositionsRequest(DataRequest):
+    """For tracking a positions info request and capturing results returned so far."""
+
+    def __init__(self):
+        super().__init__()
+        self.positions_info = PositionsInfo()

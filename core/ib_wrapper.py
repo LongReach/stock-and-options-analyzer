@@ -63,7 +63,9 @@ class CallbackID(IntEnum):
     OPEN_ORDER_END = 11
     EXEC_DETAILS = 12
     EXEC_DETAILS_END = 13
-    ERROR_CB = 14
+    POSITION = 14
+    POSITION_END = 15
+    ERROR_CB = 16
 
 
 class IBWrapper(EWrapper, EClient):
@@ -402,6 +404,20 @@ class IBWrapper(EWrapper, EClient):
         """This function is called once all executions have been sent to a client in response to reqExecutions()."""
         self._verify_callback(CallbackID.EXEC_DETAILS_END)
         self._callback_map[CallbackID.EXEC_DETAILS_END](reqId)
+
+    def position(
+        self, account: str, contract: Contract, position: Decimal, avgCost: float
+    ):
+        """This event returns real-time positions for all accounts in response to the reqPositions() method."""
+        self._verify_callback(CallbackID.POSITION)
+        self._callback_map[CallbackID.POSITION](account, contract, position, avgCost)
+
+    def positionEnd(self):
+        """
+        This is called once all position data for a given request are received and functions as an end marker
+        for the position() data."""
+        self._verify_callback(CallbackID.POSITION_END)
+        self._callback_map[CallbackID.POSITION_END]()
 
     def error(
         self,
