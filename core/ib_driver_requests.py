@@ -11,7 +11,7 @@ from core.common import (
     OptionInfo,
     OrderInfo,
     PositionDescriptor,
-    PositionsInfo
+    PositionsInfo,
 )
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 

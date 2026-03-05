@@ -32,7 +32,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
-    PositionDescriptor
+    PositionDescriptor,
 )
 from core.utils import (
     wait_for_condition,
@@ -48,7 +48,7 @@ from core.ib_driver_requests import (
     BarDataRequest,
     IBDriverException,
     OrderRequest,
-    PositionsRequest
+    PositionsRequest,
 )
 from core.ib_wrapper import IBWrapper, CallbackID
 
@@ -762,7 +762,6 @@ class IBDriver(IBWrapper):
         async with self._lock:
             self._request_order_objects.clear()
 
-
     async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
         """Gets info about positions currently held in account"""
         positions_request = self._request_positions_object
@@ -771,7 +770,8 @@ class IBDriver(IBWrapper):
         self.reqPositions()
 
         timed_out = not await wait_for_condition(
-            lambda: positions_request.data_fetch_complete, timeout=POSITIONS_DATA_TIMEOUT
+            lambda: positions_request.data_fetch_complete,
+            timeout=POSITIONS_DATA_TIMEOUT,
         )
         ret_error_str = None
         if positions_request.has_error():
@@ -784,7 +784,6 @@ class IBDriver(IBWrapper):
             self._logger.info("get_positions() finished")
 
         return positions_request.positions_info, ret_error_str
-
 
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
@@ -1242,10 +1241,17 @@ class IBDriver(IBWrapper):
         self, account: str, contract: Contract, position: Decimal, avg_cost: float
     ):
         """This event returns real-time positions for all accounts in response to the reqPositions() method."""
-        security_descriptor = SecurityDescriptor.create(contract.symbol, contract.right, contract.lastTradeDateOrContractMonth, contract.strike)
+        security_descriptor = SecurityDescriptor.create(
+            contract.symbol,
+            contract.right,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike,
+        )
         num_shares = position if position >= 0 else -position
         is_short = position < 0
-        self._request_positions_object.positions_info.set_position(security_descriptor, num_shares, avg_cost, is_short)
+        self._request_positions_object.positions_info.set_position(
+            security_descriptor, num_shares, avg_cost, is_short
+        )
 
     def position_end_cb(self):
         """
