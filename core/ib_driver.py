@@ -31,6 +31,8 @@ from core.common import (
     OrderStatus,
     OrderInfo,
     OrderAction,
+    PositionsInfo,
+    PositionDescriptor
 )
 from core.utils import (
     wait_for_condition,
@@ -46,6 +48,7 @@ from core.ib_driver_requests import (
     BarDataRequest,
     IBDriverException,
     OrderRequest,
+    PositionsRequest
 )
 from core.ib_wrapper import IBWrapper, CallbackID
 
@@ -57,6 +60,7 @@ NUM_CONNECT_TRIES = 10
 HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
+POSITIONS_DATA_TIMEOUT = 30.0
 
 
 class IBDriver(IBWrapper):
@@ -97,13 +101,14 @@ class IBDriver(IBWrapper):
         self._request_option_objects: Dict[int, OptionRequest] = {}
         # Maps order ID to OrderRequest object
         self._request_order_objects: Dict[int, OrderRequest] = {}
+        self._request_positions_object: PositionsRequest = PositionsRequest()
 
         # Maps head timestamp request ID to symbol
         self._head_timestamp_map: Dict[int, str] = {}
         # Maps symbol to head timestamp
         self._symbol_to_head_timestamp: Dict[str, str] = {}
 
-        # For synchronizing changes to self._request_objects
+        # For synchronizing changes to self._request_objects maps
         self._lock = asyncio.Lock()
 
         self._bar_size_map: Dict[BarSize:str] = {
@@ -137,6 +142,8 @@ class IBDriver(IBWrapper):
         self.set_callback(CallbackID.OPEN_ORDER_END, self.open_order_end_cb)
         self.set_callback(CallbackID.EXEC_DETAILS, self.exec_details_cb)
         self.set_callback(CallbackID.EXEC_DETAILS_END, self.exec_details_end_cb)
+        self.set_callback(CallbackID.POSITION, self.position_cb)
+        self.set_callback(CallbackID.POSITION_END, self.position_end_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
 
         self._logger = getLogger(__file__)
@@ -562,7 +569,8 @@ class IBDriver(IBWrapper):
         :param quantity: number of shares/contracts
         :param price: desired price (for limit or stop orders)
         :param order_type: market, limit, stop, or stop limit
-        :param transmit: TODO -- come back to
+        :param transmit: if True, this order will be sent to broker's server. Same with previously-placed orders
+            for which transmit was False.
         :param parent_order: set if there is a parent order for this one, e.g. this on is a stop loss order paired
             to a market order.
         :return: (OrderInfo object, error string or None)
@@ -612,7 +620,8 @@ class IBDriver(IBWrapper):
         order.transmit = transmit
 
         # Will be filled out as response comes back
-        order_request.data_fetch_complete = False
+        # No waiting for response if transmit not set.
+        order_request.data_fetch_complete = not transmit
         if parent_order:
             order_request.order_info.parent_order = parent_order
         order_request.order_info.order_type = order_type
@@ -752,6 +761,30 @@ class IBDriver(IBWrapper):
         self.reqGlobalCancel()
         async with self._lock:
             self._request_order_objects.clear()
+
+
+    async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
+        """Gets info about positions currently held in account"""
+        positions_request = self._request_positions_object
+        positions_request.data_fetch_complete = False
+
+        self.reqPositions()
+
+        timed_out = not await wait_for_condition(
+            lambda: positions_request.data_fetch_complete, timeout=POSITIONS_DATA_TIMEOUT
+        )
+        ret_error_str = None
+        if positions_request.has_error():
+            ret_error_str = f"Error getting positions. Error code is {positions_request.last_error_code}, error string is {positions_request.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed getting positions."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("get_positions() finished")
+
+        return positions_request.positions_info, ret_error_str
+
 
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
@@ -1197,9 +1230,28 @@ class IBDriver(IBWrapper):
                 req_obj = self._request_contractdetail_objects.get(req_id)
             if not req_obj:
                 req_obj = self._request_optionchain_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_option_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_order_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
+
+    def position_cb(
+        self, account: str, contract: Contract, position: Decimal, avg_cost: float
+    ):
+        """This event returns real-time positions for all accounts in response to the reqPositions() method."""
+        security_descriptor = SecurityDescriptor.create(contract.symbol, contract.right, contract.lastTradeDateOrContractMonth, contract.strike)
+        num_shares = position if position >= 0 else -position
+        is_short = position < 0
+        self._request_positions_object.positions_info.set_position(security_descriptor, num_shares, avg_cost, is_short)
+
+    def position_end_cb(self):
+        """
+        This is called once all position data for a given request are received and functions as an end marker
+        for the position() data."""
+        self._request_positions_object.data_fetch_complete = True
 
     def _make_contract(
         self,

@@ -129,6 +129,7 @@ class SecurityDescriptor:
             descriptor.expiration = expiration
         if strike is not None:
             descriptor.strike = strike
+        descriptor.symbol_full = descriptor.to_string()
         return descriptor
 
 
@@ -343,10 +344,60 @@ class OrderInfo:
         self.order_status: OrderStatus = OrderStatus.NONE
         self.shares_filled: int = 0
         self.shares_remaining: int = 0
+        # TODO: need better name
         self.avg_fill_price: Optional[float] = None
 
     def get_info_str(self) -> str:
+        """Returns string representation"""
         parent_order_str = ""
         if self.parent_order:
             parent_order_str = f"parent_order={OrderType(self.parent_order.order_type).name}/{OrderStatus(self.parent_order.order_status).name}, "
         return f"Order info: symbol={self.security_descriptor.to_string()}, {parent_order_str}order_type={OrderType(self.order_type).name}, order_status={OrderStatus(self.order_status).name}, shares_filled={self.shares_filled}, shares_remaining={self.shares_remaining}, price={self.avg_fill_price}"
+
+
+class PositionDescriptor:
+    """Info about a particular position held in the account."""
+
+    def __init__(self, descriptor: SecurityDescriptor):
+        self.security_descriptor: SecurityDescriptor = descriptor
+        self.quantity: int = 0
+        self.price: float = 0.0
+        self.short_position = False
+
+    def to_string(self):
+        """Returns string representation"""
+        return f"Position for {self.security_descriptor.to_string()}, quantity={self.quantity}, price={self.price}, short={self.short_position}"
+
+
+class PositionsInfo:
+    """Info about all positions currently held in the account"""
+
+    def __init__(self):
+        self.position_map: Dict[str, PositionDescriptor] = {}
+
+    def set_position(self, descriptor: SecurityDescriptor, quantity: int, price: float, short_position: bool):
+        """
+        Sets or updates a position with data received from broker
+
+        :param descriptor: describes security, whether stock/ETF or options
+        :param quantity: number of shares/contracts
+        :param price: purchase or sale price
+        :param short_position: True if short position
+        """
+        position_descriptor = self.position_map.get(descriptor.symbol_full)
+        if position_descriptor is None:
+            position_descriptor = PositionDescriptor(descriptor)
+            self.position_map[descriptor.symbol_full] = position_descriptor
+        position_descriptor.quantity = quantity
+        position_descriptor.price = price
+        position_descriptor.short_position = short_position
+
+    def get_position(self, security_descriptor: SecurityDescriptor) -> Optional[PositionDescriptor]:
+        """Returns a PositionDescriptor, or None"""
+        return self.position_map.get(security_descriptor.symbol_full)
+
+    def get_positions(self) -> List[PositionDescriptor]:
+        """Return all position descriptors"""
+        return [desc for symbol, desc in self.position_map.items()]
+
+
