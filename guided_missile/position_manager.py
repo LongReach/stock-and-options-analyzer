@@ -9,7 +9,6 @@ from guided_missile.position import Position, PositionState, PositionDirection
 
 
 class PositionManager:
-
     """For managing positions in GuidedMissile application"""
 
     BAR_SIZE = BarSize.TWO_MINUTES
@@ -24,7 +23,9 @@ class PositionManager:
         # Maps symbol to historical data that's already streaming
         self._historical_data_cache: Dict[Tuple[str, BarSize], HistoricalData] = {}
 
-    def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
+    def add_position(
+        self, security_descriptor: SecurityDescriptor
+    ) -> Tuple[bool, Optional[str]]:
         """
         Adds position to tracking.
 
@@ -34,14 +35,28 @@ class PositionManager:
 
         existing_position = self._position_map.get(security_descriptor.to_string())
         if existing_position:
-            if existing_position not in [PositionState.NONE, PositionState.CLOSED, PositionState.CANCELED]:
-                return False, f"Can't add position for {security_descriptor.to_string()}"
+            if existing_position not in [
+                PositionState.NONE,
+                PositionState.CLOSED,
+                PositionState.CANCELED,
+            ]:
+                return (
+                    False,
+                    f"Can't add position for {security_descriptor.to_string()}",
+                )
 
-        self._position_map[security_descriptor.to_string()] = Position(security_descriptor)
+        self._position_map[security_descriptor.to_string()] = Position(
+            security_descriptor
+        )
 
         return True, None
 
-    async def activate(self, security_descriptor: SecurityDescriptor, direction: PositionDirection, bars_back: int) -> Tuple[bool, Optional[str]]:
+    async def activate(
+        self,
+        security_descriptor: SecurityDescriptor,
+        direction: PositionDirection,
+        bars_back: int,
+    ) -> Tuple[bool, Optional[str]]:
         """
         Activates position for entry when price triggers order. Entry point will be chosen based on recent bar data.
         Same with stop loss.
@@ -53,9 +68,14 @@ class PositionManager:
         """
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
-            return False, f"Can't activate position for {security_descriptor.to_string()}"
+            return (
+                False,
+                f"Can't activate position for {security_descriptor.to_string()}",
+            )
 
-        historical_data, error_str = await self._get_historical_data_stream(security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE)
+        historical_data, error_str = await self._get_historical_data_stream(
+            security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
+        )
         if historical_data is None:
             return False, f"activate() failed with error: {error_str}"
 
@@ -81,12 +101,19 @@ class PositionManager:
 
         return True, None
 
-    async def enter(self, security_descriptor: SecurityDescriptor, direction: PositionDirection, bars_back: int) -> Tuple[bool, Optional[str]]:
+    async def enter(
+        self,
+        security_descriptor: SecurityDescriptor,
+        direction: PositionDirection,
+        bars_back: int,
+    ) -> Tuple[bool, Optional[str]]:
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
 
-        historical_data, error_str = await self._get_historical_data_stream(security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE)
+        historical_data, error_str = await self._get_historical_data_stream(
+            security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
+        )
         if historical_data is None:
             return False, f"enter() failed with error: {error_str}"
 
@@ -111,7 +138,9 @@ class PositionManager:
 
         return True, None
 
-    async def cancel(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
+    async def cancel(
+        self, security_descriptor: SecurityDescriptor
+    ) -> Tuple[bool, Optional[str]]:
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
@@ -123,7 +152,9 @@ class PositionManager:
 
         return True, None
 
-    async def exit(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
+    async def exit(
+        self, security_descriptor: SecurityDescriptor
+    ) -> Tuple[bool, Optional[str]]:
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
@@ -135,8 +166,9 @@ class PositionManager:
 
         return True, None
 
-    async def _get_historical_data_stream(self, security_descriptor: SecurityDescriptor, bars_back: int,
-                                          bar_size: BarSize) -> Tuple[Optional[HistoricalData], Optional[str]]:
+    async def _get_historical_data_stream(
+        self, security_descriptor: SecurityDescriptor, bars_back: int, bar_size: BarSize
+    ) -> Tuple[Optional[HistoricalData], Optional[str]]:
         """
         Gets historical data stream. It might be cached already, or we might need to fetch it fresh.
 
@@ -146,7 +178,9 @@ class PositionManager:
         :return: (HistoricalData object or None, error str or None)
         """
         # Check cache first
-        historical_data = self._historical_data_cache.get((security_descriptor.to_string(), bar_size))
+        historical_data = self._historical_data_cache.get(
+            (security_descriptor.to_string(), bar_size)
+        )
         if historical_data:
             if len(historical_data.bar_data) < bars_back:
                 # We need to fetch it again
@@ -154,10 +188,12 @@ class PositionManager:
 
         if historical_data is None:
             try:
-                historical_data, error_str = await self.ib_driver.get_historical_data(security_descriptor.to_string(),
-                                                                                      num_bars=bars_back,
-                                                                                      bar_size=self.BAR_SIZE,
-                                                                                      live_data=True)
+                historical_data, error_str = await self.ib_driver.get_historical_data(
+                    security_descriptor.to_string(),
+                    num_bars=bars_back,
+                    bar_size=self.BAR_SIZE,
+                    live_data=True,
+                )
                 if error_str is not None:
                     return None, f"Error getting historical data: {error_str}"
             except Exception as e:
@@ -180,7 +216,8 @@ class PositionManager:
                         pass
                     self._historical_data_cache.pop(removal_key, None)
 
-            self._historical_data_cache[(security_descriptor.to_string(), bar_size)] = historical_data
+            self._historical_data_cache[(security_descriptor.to_string(), bar_size)] = (
+                historical_data
+            )
 
         return historical_data, None
-

@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from core.ib_driver import IBDriver
 from guided_missile.position_manager import PositionManager
 
+
 class GuidedMissile:
 
     def __init__(self, ib_driver: IBDriver):
