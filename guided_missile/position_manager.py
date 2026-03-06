@@ -98,7 +98,9 @@ class PositionManager:
             stops = [lowest_recent_price, highest_recent_price]
 
         try:
-            existing_position.activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
+            existing_position.activate(
+                direction, entries, stops, self.MAX_LOSS, self._cash_available
+            )
         except Exception as e:
             return False, f"activate() failed with exception: {e}"
 
@@ -135,7 +137,9 @@ class PositionManager:
             return False, "Dual mode not supported"
 
         try:
-            existing_position.enter(direction, entry, stop, self.MAX_LOSS,  self._cash_available)
+            existing_position.enter(
+                direction, entry, stop, self.MAX_LOSS, self._cash_available
+            )
         except Exception as e:
             return False, f"enter() failed with exception: {e}"
 
@@ -244,4 +248,3 @@ class PositionManager:
                 cash_deduction += position.price * float(position.quantity)
 
         self._cash_available = self._account_value - cash_deduction
-

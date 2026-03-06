@@ -188,7 +188,9 @@ class Position:
             f"Activating position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
 
-        activate_task = asyncio.create_task(self._do_activate(direction, entry_prices, stop_prices, max_loss, cash_left))
+        activate_task = asyncio.create_task(
+            self._do_activate(direction, entry_prices, stop_prices, max_loss, cash_left)
+        )
         self._task_stack.append(activate_task)
 
     def enter(
@@ -218,7 +220,9 @@ class Position:
         if direction == PositionDirection.DUAL:
             raise PositionException("Can't directly enter dual position")
 
-        enter_task = asyncio.create_task(self._do_enter(direction, entry_price, stop_price, max_loss, cash_left))
+        enter_task = asyncio.create_task(
+            self._do_enter(direction, entry_price, stop_price, max_loss, cash_left)
+        )
         self._task_stack.append(enter_task)
 
     def cancel(self):
