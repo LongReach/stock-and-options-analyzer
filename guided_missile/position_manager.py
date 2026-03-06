@@ -15,9 +15,12 @@ class PositionManager:
     MAX_LOSS = 100.0
     MAX_DATA_STREAMS = 30
 
-    def __init__(self, ib_driver: IBDriver):
+    def __init__(self, ib_driver: IBDriver, cash_available: float):
         self.ib_driver = ib_driver
         Position.ib_driver = ib_driver
+
+        self._account_value: float = cash_available
+        self._cash_available: float = cash_available
 
         self._position_map: Dict[str, Position] = {}
         # Maps symbol to historical data that's already streaming
@@ -95,7 +98,7 @@ class PositionManager:
             stops = [lowest_recent_price, highest_recent_price]
 
         try:
-            await existing_position.activate(direction, entries, stops, self.MAX_LOSS)
+            existing_position.activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
         except Exception as e:
             return False, f"activate() failed with exception: {e}"
 
@@ -132,7 +135,7 @@ class PositionManager:
             return False, "Dual mode not supported"
 
         try:
-            await existing_position.enter(direction, entry, stop, self.MAX_LOSS)
+            existing_position.enter(direction, entry, stop, self.MAX_LOSS,  self._cash_available)
         except Exception as e:
             return False, f"enter() failed with exception: {e}"
 
@@ -146,7 +149,7 @@ class PositionManager:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
 
         try:
-            await existing_position.cancel()
+            existing_position.cancel()
         except Exception as e:
             return False, f"cancel() failed with exception: {e}"
 
@@ -160,7 +163,7 @@ class PositionManager:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
 
         try:
-            await existing_position.exit()
+            existing_position.exit()
         except Exception as e:
             return False, f"exit() failed with exception: {e}"
 
@@ -221,3 +224,24 @@ class PositionManager:
             )
 
         return historical_data, None
+
+    async def _update_cash_amount(self):
+
+        cash_deduction: float = 0.0
+
+        # First, count the theoretical cost of positions not yet entered
+        for security_desc, position in self._position_map.items():
+            cash_deduction += position.theoretical_cost
+
+        # Now, we ask IB directly about positions we're in
+        positions_info, error_str = await self.ib_driver.get_positions()
+        if error_str:
+            # TODO: log something
+            pass
+        else:
+            positions = positions_info.get_positions()
+            for position in positions:
+                cash_deduction += position.price * float(position.quantity)
+
+        self._cash_available = self._account_value - cash_deduction
+
