@@ -141,11 +141,20 @@ class HistoricalData:
     updates to the bar in progress.
     """
 
+    next_id = 1
+
     def __init__(self):
         self.bar_data: List[BarData] = []
         self.timestamps: List[datetime] = []
         self.lock = Lock()
+
+        self._id = HistoricalData.next_id
+        HistoricalData.next_id += 1
+
         self._logger = getLogger(__file__)
+
+    def get_id(self) -> int:
+        return self._id
 
     def add_data(self, bar: BarData, bar_dt: datetime):
         """

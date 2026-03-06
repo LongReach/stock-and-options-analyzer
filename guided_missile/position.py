@@ -55,6 +55,15 @@ class PositionException(Exception):
     pass
 
 
+class InsufficientCashException(Exception):
+
+    def __init__(self, cash_needed, cash_left, message="Insufficient Cash"):
+        self.cash_needed = cash_needed
+        self.cash_left = cash_left
+        self.message = message
+        super().__init__(self.message)
+
+
 class Position:
     """
     Represents a position or prospective position in Guided Missile.
@@ -76,6 +85,8 @@ class Position:
         self.short_order_group: Optional[OrderGroup] = None
         self.position_id = Position.next_id
         Position.next_id += 1
+        # Will be non-zero for positions "armed" but not yet entered
+        self.theoretical_cost: float = 0.0
 
         self._task_stack: List[asyncio.Task] = []
 
@@ -104,6 +115,7 @@ class Position:
         entry_prices: List[float],
         stop_prices: List[float],
         max_loss: float,
+        cash_left: float
     ):
         """
         Sets up stop orders for a position entry. If going long, the position will be entered when the stop is triggered.
@@ -114,7 +126,9 @@ class Position:
         :param entry_prices: list of entry prices. List will be of length 2 if dual position.
         :param stop_prices: list of stop prices. List will be of length 2 if dual position.
         :param max_loss: max allowed loss for this position
+        :param cash_left: cash remaining in account
         :raises PositionException:
+        :raises InsufficientCashException:
         """
 
         if self.position_state != PositionState.NONE:
@@ -131,18 +145,21 @@ class Position:
         if direction == PositionDirection.LONG:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            await self._setup_long(entry, stop, max_loss)
+            shares_entered, cost = await self._setup_long(entry, stop, max_loss, cash_left)
+            self.theoretical_cost = cost
         elif direction == PositionDirection.SHORT:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            await self._setup_long(entry, stop, max_loss)
+            shares_entered, cost = await self._setup_short(entry, stop, max_loss, cash_left)
+            self.theoretical_cost = cost
         else:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            await self._setup_long(entry, stop, max_loss)
+            shares_entered_l, cost_l = await self._setup_long(entry, stop, max_loss, cash_left)
             entry = entry_prices[1]
             stop = stop_prices[1]
-            await self._setup_short(entry, stop, max_loss)
+            shares_entered_s, cost_s = await self._setup_short(entry, stop, max_loss, cash_left)
+            self.theoretical_cost = cost_l if cost_l > cost_s else cost_s
 
         self.logger.info(
             f"Activated position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
@@ -157,6 +174,7 @@ class Position:
         entry_price: float,
         stop_price: float,
         max_loss: float,
+        cash_left: float
     ):
         """
         Enters a position right now
@@ -165,7 +183,9 @@ class Position:
         :param entry_price: --
         :param stop_price: --
         :param max_loss: max allowed loss for this position
+        :param cash_left: cash left in account
         :raises PositionException:
+        :raises InsufficientCashException:
         """
 
         if self.position_state != PositionState.NONE:
@@ -181,10 +201,10 @@ class Position:
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
         if direction == PositionDirection.LONG:
-            await self._setup_long(entry_price, stop_price, max_loss, market_order=True)
+            shares_entered, cost = await self._setup_long(entry_price, stop_price, max_loss, cash_left, market_order=True)
         elif direction == PositionDirection.SHORT:
-            await self._setup_short(
-                entry_price, stop_price, max_loss, market_order=True
+            shares_entered, cost = await self._setup_short(
+                entry_price, stop_price, max_loss, cash_left, market_order=True
             )
 
         self.logger.info(
@@ -315,6 +335,8 @@ class Position:
                         )
                     )
                     self._task_stack.append(task)
+                    # Cost is no longer theoretical, but real
+                    self.theoretical_cost = 0.0
 
                 if entry_order.order_status == OrderStatus.CANCELLED:
                     # ======================================
@@ -327,6 +349,7 @@ class Position:
                         self._cancel_orders(self.position_direction)
                     )
                     self._task_stack.append(cancel_task)
+                    self.theoretical_cost = 0.0
 
         if cancel_group_idx != -1:
             cancel_direction = (
@@ -487,7 +510,6 @@ class Position:
         )
         if error_str is not None:
             self.logger.warning(f"Error while creating half-out order: {error_str}")
-            group.half_out_order = None
             return
 
         group.half_out_order = half_out_order
@@ -534,9 +556,12 @@ class Position:
             f"Have adjusted stop-loss for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
 
-    async def _setup_long(self, _entry, _stop, max_loss, market_order: bool = False):
+    async def _setup_long(self, _entry, _stop, max_loss, cash_left, market_order: bool = False) -> Tuple[int, float]:
         """Helper function for setting up long entry"""
         num_shares = int(max_loss / (_entry - _stop))
+        cost = float(num_shares) * _entry
+        if cost > cash_left:
+            raise InsufficientCashException(cost, cash_left)
         entry_order_type = OrderType.MARKET if market_order else OrderType.STOP
         entry_order, error_str = await self.ib_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
@@ -561,10 +586,14 @@ class Position:
             raise PositionException(f"Error activating order: {error_str}")
         self.long_order_group = OrderGroup(entry_order, stop_loss_order)
         self.long_order_group.set_initial_quantities(_entry, _stop, num_shares)
+        return num_shares, cost
 
-    async def _setup_short(self, _entry, _stop, max_loss, market_order: bool = False):
+    async def _setup_short(self, _entry, _stop, max_loss, cash_left, market_order: bool = False) -> Tuple[int, float]:
         """Helper function for setting up short entry"""
         num_shares = int(max_loss / (_stop - _entry))
+        cost = float(num_shares) * _entry
+        if cost > cash_left:
+            raise InsufficientCashException(cost, cash_left)
         entry_order_type = OrderType.MARKET if market_order else OrderType.STOP
         entry_order, error_str = await self.ib_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
@@ -589,3 +618,4 @@ class Position:
             raise PositionException(f"Error activating order: {error_str}")
         self.short_order_group = OrderGroup(entry_order, stop_loss_order)
         self.short_order_group.set_initial_quantities(_entry, _stop, num_shares)
+        return num_shares, cost
