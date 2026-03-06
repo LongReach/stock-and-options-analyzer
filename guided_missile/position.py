@@ -115,7 +115,7 @@ class Position:
         entry_prices: List[float],
         stop_prices: List[float],
         max_loss: float,
-        cash_left: float
+        cash_left: float,
     ):
         """
         Sets up stop orders for a position entry. If going long, the position will be entered when the stop is triggered.
@@ -145,20 +145,28 @@ class Position:
         if direction == PositionDirection.LONG:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            shares_entered, cost = await self._setup_long(entry, stop, max_loss, cash_left)
+            shares_entered, cost = await self._setup_long(
+                entry, stop, max_loss, cash_left
+            )
             self.theoretical_cost = cost
         elif direction == PositionDirection.SHORT:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            shares_entered, cost = await self._setup_short(entry, stop, max_loss, cash_left)
+            shares_entered, cost = await self._setup_short(
+                entry, stop, max_loss, cash_left
+            )
             self.theoretical_cost = cost
         else:
             entry = entry_prices[0]
             stop = stop_prices[0]
-            shares_entered_l, cost_l = await self._setup_long(entry, stop, max_loss, cash_left)
+            shares_entered_l, cost_l = await self._setup_long(
+                entry, stop, max_loss, cash_left
+            )
             entry = entry_prices[1]
             stop = stop_prices[1]
-            shares_entered_s, cost_s = await self._setup_short(entry, stop, max_loss, cash_left)
+            shares_entered_s, cost_s = await self._setup_short(
+                entry, stop, max_loss, cash_left
+            )
             self.theoretical_cost = cost_l if cost_l > cost_s else cost_s
 
         self.logger.info(
@@ -174,7 +182,7 @@ class Position:
         entry_price: float,
         stop_price: float,
         max_loss: float,
-        cash_left: float
+        cash_left: float,
     ):
         """
         Enters a position right now
@@ -201,7 +209,9 @@ class Position:
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
         if direction == PositionDirection.LONG:
-            shares_entered, cost = await self._setup_long(entry_price, stop_price, max_loss, cash_left, market_order=True)
+            shares_entered, cost = await self._setup_long(
+                entry_price, stop_price, max_loss, cash_left, market_order=True
+            )
         elif direction == PositionDirection.SHORT:
             shares_entered, cost = await self._setup_short(
                 entry_price, stop_price, max_loss, cash_left, market_order=True
@@ -556,7 +566,9 @@ class Position:
             f"Have adjusted stop-loss for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
 
-    async def _setup_long(self, _entry, _stop, max_loss, cash_left, market_order: bool = False) -> Tuple[int, float]:
+    async def _setup_long(
+        self, _entry, _stop, max_loss, cash_left, market_order: bool = False
+    ) -> Tuple[int, float]:
         """Helper function for setting up long entry"""
         num_shares = int(max_loss / (_entry - _stop))
         cost = float(num_shares) * _entry
@@ -588,7 +600,9 @@ class Position:
         self.long_order_group.set_initial_quantities(_entry, _stop, num_shares)
         return num_shares, cost
 
-    async def _setup_short(self, _entry, _stop, max_loss, cash_left, market_order: bool = False) -> Tuple[int, float]:
+    async def _setup_short(
+        self, _entry, _stop, max_loss, cash_left, market_order: bool = False
+    ) -> Tuple[int, float]:
         """Helper function for setting up short entry"""
         num_shares = int(max_loss / (_stop - _entry))
         cost = float(num_shares) * _entry
