@@ -39,6 +39,8 @@ class OrderGroup:
 
 
 class PositionState(Enum):
+    """States a position can be in"""
+
     NONE = auto()
     CREATED = auto()
     ENTERED = auto()
@@ -122,7 +124,6 @@ class Position:
 
     def get_profit(self) -> float:
         """Return profits realized"""
-        # TODO: finish
         if self.position_direction == PositionDirection.DUAL:
             return 0
         group = (
@@ -162,6 +163,7 @@ class Position:
         return True
 
     async def wait_for_tasks_complete(self) -> bool:
+        """Waits for all asynchronous tasks for Position to be done."""
         return await wait_for_condition(lambda: self.tasks_complete(), timeout=30.0)
 
     def activate(
@@ -280,6 +282,10 @@ class Position:
             pass
 
     def get_info(self) -> List[str]:
+        """
+        Gets printable info about position
+        :return: list of printable lines
+        """
         if self.position_state in [PositionState.ENTERED, PositionState.HALF_OUT]:
             num_shares = self.get_current_shares()
             shares_line = f"Shares: {num_shares}"

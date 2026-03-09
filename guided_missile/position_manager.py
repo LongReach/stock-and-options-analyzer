@@ -70,8 +70,8 @@ class PositionManager:
         Same with stop loss.
 
         :param security_descriptor: describes stock, ETF, or options contract
-        :param direction: TODO
-        :param bars_back: TODO
+        :param direction: whether long, short, or dual
+        :param bars_back: how many bars back to look to determine entry point
         :return: (True if success, error string or None)
         """
         existing_position = self._position_map.get(security_descriptor.to_string())
@@ -123,6 +123,16 @@ class PositionManager:
         direction: PositionDirection,
         bars_back: int,
     ) -> Tuple[bool, Optional[str]]:
+        """
+        Enters position immediately. Entry point will be chosen based on recent bar data.
+        Same with stop loss.
+
+        :param security_descriptor: describes stock, ETF, or options contract
+        :param direction: whether long, short, or dual
+        :param bars_back: how many bars back to look to determine entry point
+        :return: (True if success, error string or None)
+        """
+
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
@@ -162,6 +172,11 @@ class PositionManager:
     async def cancel(
         self, security_descriptor: SecurityDescriptor
     ) -> Tuple[bool, Optional[str]]:
+        """
+        Cancels position that hasn't yet been entered
+        :param security_descriptor: describes stock, ETF, or options contract
+        """
+
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
@@ -179,6 +194,11 @@ class PositionManager:
     async def exit(
         self, security_descriptor: SecurityDescriptor
     ) -> Tuple[bool, Optional[str]]:
+        """
+        Exits position that has been entered
+        :param security_descriptor: describes stock, ETF, or options contract
+        """
+
         existing_position = self._position_map.get(security_descriptor.to_string())
         if not existing_position:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
@@ -194,18 +214,28 @@ class PositionManager:
         return True, None
 
     async def update(self):
+        """Updates bookkeeping for all positions, with information that comes back from broker"""
         for pos_name, position in self._position_map.items():
             position.update()
 
         await self._update_cash_amount()
 
     def get_info(self, security_descriptor: SecurityDescriptor) -> Optional[List[str]]:
+        """
+        Gets printable information for a particular position, as list of strings.
+        :param security_descriptor: --
+        :return: list of strings or None
+        """
         position = self._position_map.get(security_descriptor.to_string())
         if position is None:
             return None
         return position.get_info()
 
     def get_all_info(self) -> Dict[str, List[str]]:
+        """
+        Gets printable information for all positions held.
+        :return: dict mapping symbol name to list of strings
+        """
         out_dict = {}
         for pos_name, position in self._position_map.items():
             out_dict[pos_name] = position.get_info()
@@ -268,6 +298,9 @@ class PositionManager:
         return historical_data, None
 
     async def _update_cash_amount(self):
+        """
+        Updates bookkeeping about cash in account
+        """
 
         cash_deduction: float = 0.0
 
