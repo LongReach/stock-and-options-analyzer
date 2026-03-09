@@ -11,10 +11,9 @@ from core.utils import get_datetime_as_str
 from guided_missile.guided_missile_app import GuidedMissile
 
 """
-An example of how to place an order with IB. This script should be used while the TWS desktop application
-is running, in paper-trading mode. It will place an order with an attached stop.
+Entry point for GuidedMissile application. Run like:
 
-It also collects and prints information about the orders and the position from IB.
+python -m scripts.missile_launcher
 """
 
 CLIENT_ID = 19

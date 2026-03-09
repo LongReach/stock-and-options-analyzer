@@ -9,6 +9,7 @@ from guided_missile.position_manager import PositionManager, PositionDirection
 
 
 class Command(Enum):
+    """Enum representing available GuidedMissile commands"""
 
     ACTIVATE_LONG = auto()
     ACTIVATE_SHORT = auto()
@@ -23,6 +24,7 @@ class Command(Enum):
 
 
 class GuidedMissile:
+    """Top-level implementation of GuidedMissile app"""
 
     STARTING_CASH = 100000.0
 
@@ -46,11 +48,13 @@ class GuidedMissile:
         self._stop_event = Event()
 
     async def run_loop(self):
+        """The main loop, which continuously updates bookkeeping for held positions"""
         while not self._stop_event.is_set():
             await self._position_manager.update()
             await asyncio.sleep(0.01)
 
     async def input_loop(self):
+        """The input loop, which implements a command console"""
         print("Welcome to Guided Missile")
         print("--------------------------------------------------------")
         print("enter 'help' for help\n")
@@ -89,6 +93,10 @@ class GuidedMissile:
             await asyncio.sleep(0.5)
 
     def parse_input(self, input_str: str) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Parses user input. If successful, returns True and a dictionary containing command data.
+        If unsuccessful, returns False and a dictionary containing error data.
+        """
         parts = input_str.split(" ")
         if len(parts) < 1:
             return False, {"error": "No command given."}
@@ -143,6 +151,7 @@ class GuidedMissile:
         return True, ret_dict
 
     def print_help(self, command: Optional[str] = None):
+        """Prints help about a particular command or all commands"""
         if command is None:
             print("Commands:")
             print("----------------------")
@@ -169,6 +178,7 @@ class GuidedMissile:
                 print(f"{command} <command>")
 
     def print_info(self, symbol: Optional[str]):
+        """Prints info about a particular position or all positions"""
         def _print_it(lines: List[str]):
             print("\n".join(lines))
 
@@ -186,6 +196,7 @@ class GuidedMissile:
                 _print_it(info_lines)
 
     async def _run_position_command(self, command_dict: Dict[str, Any]):
+        """Runs a command that modifies a position in some way"""
         direction = PositionDirection.LONG
         if command_dict["command"] in [Command.ENTER_SHORT, Command.ACTIVATE_SHORT]:
             direction = PositionDirection.SHORT
