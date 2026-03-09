@@ -7,6 +7,7 @@ from core.common import SecurityDescriptor
 from core.ib_driver import IBDriver
 from guided_missile.position_manager import PositionManager, PositionDirection
 
+
 class Command(Enum):
 
     ACTIVATE_LONG = auto()
@@ -19,6 +20,7 @@ class Command(Enum):
     INFO = auto()
     HELP = auto()
     QUIT = auto()
+
 
 class GuidedMissile:
 
@@ -38,7 +40,7 @@ class GuidedMissile:
             "exit": Command.EXIT,
             "info": Command.INFO,
             "help": Command.HELP,
-            "quit": Command.QUIT
+            "quit": Command.QUIT,
         }
 
         self._stop_event = Event()
@@ -61,7 +63,15 @@ class GuidedMissile:
                     continue
 
                 command = command_dict["command"]
-                if command in [Command.ACTIVATE_LONG, Command.ACTIVATE_SHORT, Command.ACTIVATE_DUAL, Command.ENTER_LONG, Command.ENTER_SHORT, Command.CANCEL, Command.EXIT]:
+                if command in [
+                    Command.ACTIVATE_LONG,
+                    Command.ACTIVATE_SHORT,
+                    Command.ACTIVATE_DUAL,
+                    Command.ENTER_LONG,
+                    Command.ENTER_SHORT,
+                    Command.CANCEL,
+                    Command.EXIT,
+                ]:
                     await self._run_position_command(command_dict)
                 elif command == Command.INFO:
                     self.print_info(command_dict.get("symbol"))
@@ -87,7 +97,18 @@ class GuidedMissile:
 
         command = parts[0]
         command = command.lower()
-        if command not in ["al", "as", "ad", "el", "es", "can", "exit", "info", "help", "quit"]:
+        if command not in [
+            "al",
+            "as",
+            "ad",
+            "el",
+            "es",
+            "can",
+            "exit",
+            "info",
+            "help",
+            "quit",
+        ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
 
@@ -176,17 +197,29 @@ class GuidedMissile:
         if not success:
             print(f"Command failed with error: {error_str}")
             return
-        if command_dict["command"] in [Command.ACTIVATE_LONG, Command.ACTIVATE_SHORT, Command.ACTIVATE_DUAL]:
-            success, error_str = await self._position_manager.activate(security_descriptor, direction, command_dict["bar_count"])
+        if command_dict["command"] in [
+            Command.ACTIVATE_LONG,
+            Command.ACTIVATE_SHORT,
+            Command.ACTIVATE_DUAL,
+        ]:
+            success, error_str = await self._position_manager.activate(
+                security_descriptor, direction, command_dict["bar_count"]
+            )
         elif command_dict["command"] in [Command.ENTER_SHORT, Command.ENTER_LONG]:
-            success, error_str = await self._position_manager.enter(security_descriptor, direction, command_dict["bar_count"])
+            success, error_str = await self._position_manager.enter(
+                security_descriptor, direction, command_dict["bar_count"]
+            )
         elif command_dict["command"] == Command.CANCEL:
-            success, error_str = await self._position_manager.cancel(security_descriptor)
+            success, error_str = await self._position_manager.cancel(
+                security_descriptor
+            )
         elif command_dict["command"] == Command.EXIT:
             success, error_str = await self._position_manager.exit(security_descriptor)
 
         if not success:
             print(f"Command failed with error: {error_str}")
             return
-        print(f"Successfully ran command {command_dict["command"]} for {security_descriptor.to_string()}")
+        print(
+            f"Successfully ran command {command_dict["command"]} for {security_descriptor.to_string()}"
+        )
         return

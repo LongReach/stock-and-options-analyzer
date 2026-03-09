@@ -19,6 +19,7 @@ It also collects and prints information about the orders and the position from I
 
 CLIENT_ID = 19
 
+
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="guided_missile.log", level=INFO)

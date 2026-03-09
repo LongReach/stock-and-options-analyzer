@@ -50,7 +50,9 @@ class PositionManager:
                     f"Can't add position for {security_descriptor.to_string()}",
                 )
 
-        self._logger.info(f"PositionManager: adding position for {security_descriptor.to_string()}")
+        self._logger.info(
+            f"PositionManager: adding position for {security_descriptor.to_string()}"
+        )
         self._position_map[security_descriptor.to_string()] = Position(
             security_descriptor
         )
@@ -79,7 +81,9 @@ class PositionManager:
                 f"Can't activate position for {security_descriptor.to_string()}",
             )
 
-        self._logger.info(f"PositionManager: activating position for {security_descriptor.to_string()}")
+        self._logger.info(
+            f"PositionManager: activating position for {security_descriptor.to_string()}"
+        )
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -101,7 +105,9 @@ class PositionManager:
             entries = [highest_recent_price, lowest_recent_price]
             stops = [lowest_recent_price, highest_recent_price]
 
-        self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
+        self._logger.info(
+            f"PositionManager: activate() uses entries of {entries}, stops of {stops}"
+        )
         try:
             existing_position.activate(
                 direction, entries, stops, self.MAX_LOSS, self._cash_available
@@ -121,7 +127,9 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
 
-        self._logger.info(f"PositionManager: entering position for {security_descriptor.to_string()}")
+        self._logger.info(
+            f"PositionManager: entering position for {security_descriptor.to_string()}"
+        )
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -158,7 +166,9 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
 
-        self._logger.info(f"PositionManager: canceling position for {security_descriptor.to_string()}")
+        self._logger.info(
+            f"PositionManager: canceling position for {security_descriptor.to_string()}"
+        )
         try:
             existing_position.cancel()
         except Exception as e:
@@ -173,7 +183,9 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
 
-        self._logger.info(f"PositionManager: exiting position for {security_descriptor.to_string()}")
+        self._logger.info(
+            f"PositionManager: exiting position for {security_descriptor.to_string()}"
+        )
         try:
             existing_position.exit()
         except Exception as e:

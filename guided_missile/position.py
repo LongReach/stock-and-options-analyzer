@@ -145,9 +145,13 @@ class Position:
             shares_out_2 = group.stop_loss_order.shares_filled
             price_out_2 = group.stop_loss_order.avg_fill_price
         if self.position_direction == PositionDirection.LONG:
-            return (shares_out_1 * price_out_1 + shares_out_2 * price_out_2) - shares_in * price_in
+            return (
+                shares_out_1 * price_out_1 + shares_out_2 * price_out_2
+            ) - shares_in * price_in
         else:
-            return shares_in * price_in - (shares_out_1 * price_out_1 + shares_out_2 * price_out_2)
+            return shares_in * price_in - (
+                shares_out_1 * price_out_1 + shares_out_2 * price_out_2
+            )
 
     def tasks_complete(self) -> bool:
         """Returns True if all asynchronous tasks for Position are done."""
@@ -280,7 +284,11 @@ class Position:
             num_shares = self.get_current_shares()
             shares_line = f"Shares: {num_shares}"
         elif self.position_state == PositionState.CREATED:
-            group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
+            group = (
+                self.long_order_group
+                if self.position_direction == PositionDirection.LONG
+                else self.short_order_group
+            )
             if group:
                 num_shares = group.entry_order.shares_remaining
                 shares_line = f"Shares: {num_shares} (prospective)"
@@ -296,7 +304,7 @@ class Position:
             f"Position ID: {self.position_id}",
             f"State: {PositionState(self.position_state).name}",
             f"Direction: {PositionDirection(self.position_direction).name}",
-            shares_line
+            shares_line,
         ]
         return lines
 
