@@ -628,7 +628,7 @@ class IBDriver(IBWrapper):
         order_request.order_info.security_descriptor = security_descriptor
 
         self._logger.info(
-            f"Placing order with ID {order_id}. Security: {security_descriptor.to_string()}, order type: {order_type}, price: {price}"
+            f"Placing order with ID {order_id}. Security: {security_descriptor.to_string()}, order type: {order_type}, price: {price}, quantity: {quantity}"
         )
         self.placeOrder(order_id, contract, order)
 
@@ -778,7 +778,7 @@ class IBDriver(IBWrapper):
             ret_error_str = f"Error getting positions. Error code is {positions_request.last_error_code}, error string is {positions_request.last_error_string}"
             self._logger.error(ret_error_str)
         elif timed_out:
-            ret_error_str = "Timed getting positions."
+            ret_error_str = "Timed out getting positions."
             self._logger.error(ret_error_str)
         else:
             self._logger.info("get_positions() finished")

@@ -353,6 +353,7 @@ class OrderInfo:
         self.order_status: OrderStatus = OrderStatus.NONE
         self.shares_filled: int = 0
         self.shares_remaining: int = 0
+        # Either the price that was filled at or the DESIRED price to fill at, depending on status of order.
         # TODO: need better name
         self.avg_fill_price: Optional[float] = None
 

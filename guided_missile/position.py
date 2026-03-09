@@ -24,6 +24,7 @@ class OrderGroup:
     ):
         self.entry_order: OrderInfo = entry_order
         self.stop_loss_order: OrderInfo = stop_loss_order
+        # TODO: two take-profit orders
         self.half_out_order: Optional[OrderInfo] = half_out_order
         self.initial_entry_price: float = 0.0
         self.initial_exit_price: float = 0.0
@@ -81,8 +82,6 @@ class Position:
 
     Note: The position state member variable might reflect a state that isn't fully entered yet, e.g. the
     position will be marked as "cancelled" even though the async work of cancellation is underway.
-
-    TODO: make this true
     """
 
     ib_driver: IBDriver = None
@@ -121,7 +120,7 @@ class Position:
             shares_out += group.stop_loss_order.shares_filled
         return shares_in - shares_out
 
-    def get_profit(self) -> int:
+    def get_profit(self) -> float:
         """Return profits realized"""
         # TODO: finish
         if self.position_direction == PositionDirection.DUAL:
@@ -145,7 +144,10 @@ class Position:
         if group.stop_loss_order:
             shares_out_2 = group.stop_loss_order.shares_filled
             price_out_2 = group.stop_loss_order.avg_fill_price
-        return 0.0
+        if self.position_direction == PositionDirection.LONG:
+            return (shares_out_1 * price_out_1 + shares_out_2 * price_out_2) - shares_in * price_in
+        else:
+            return shares_in * price_in - (shares_out_1 * price_out_1 + shares_out_2 * price_out_2)
 
     def tasks_complete(self) -> bool:
         """Returns True if all asynchronous tasks for Position are done."""
@@ -272,6 +274,31 @@ class Position:
             self._update_half_out_position()
         else:
             pass
+
+    def get_info(self) -> List[str]:
+        if self.position_state in [PositionState.ENTERED, PositionState.HALF_OUT]:
+            num_shares = self.get_current_shares()
+            shares_line = f"Shares: {num_shares}"
+        elif self.position_state == PositionState.CREATED:
+            group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
+            if group:
+                num_shares = group.entry_order.shares_remaining
+                shares_line = f"Shares: {num_shares} (prospective)"
+            else:
+                num_shares = 0
+                shares_line = "Shares: ???"
+        else:
+            num_shares = 0
+            shares_line = "Shares: 0"
+
+        lines = [
+            f"Symbol: {self.security_descriptor.to_string()}"
+            f"Position ID: {self.position_id}",
+            f"State: {PositionState(self.position_state).name}",
+            f"Direction: {PositionDirection(self.position_direction).name}",
+            shares_line
+        ]
+        return lines
 
     def _update_created_position(self):
         """
@@ -440,6 +467,7 @@ class Position:
         """
         See activate(). Meant to be wrapped in a task.
         """
+        self.position_state = PositionState.CREATED
 
         if direction == PositionDirection.LONG:
             entry = entry_prices[0]
@@ -472,7 +500,6 @@ class Position:
             f"Activated position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
 
-        self.position_state = PositionState.CREATED
         self.position_direction = direction
 
     async def _do_enter(
@@ -486,6 +513,7 @@ class Position:
         """
         Enters a position right now. See enter(). Meant to be wrapped in a task.
         """
+        self.position_state = PositionState.CREATED
 
         self.logger.info(
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
@@ -503,7 +531,6 @@ class Position:
             f"Entered position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
 
-        self.position_state = PositionState.CREATED
         self.position_direction = direction
 
     async def _do_exit(self):
@@ -511,8 +538,10 @@ class Position:
         self.logger.info(
             f"Exiting position {self.position_id} for {self.security_descriptor.to_string()}"
         )
-        await self._cancel_orders(self.position_direction)
         self.position_state = PositionState.CANCELED
+        await self._cancel_orders(self.position_direction)
+
+        self.position_state = PositionState.CLOSED
 
         num_shares = self.get_current_shares()
         action = (
@@ -533,7 +562,6 @@ class Position:
         self.logger.info(
             f"Exited position {self.position_id} for {self.security_descriptor.to_string()}"
         )
-        self.position_state = PositionState.CLOSED
 
     async def _cancel_orders(self, direction: PositionDirection):
         """
@@ -542,6 +570,8 @@ class Position:
 
         :param direction: long, short, or dual
         """
+        self.position_state = PositionState.CANCELED
+
         if direction == PositionDirection.LONG:
             groups = [self.long_order_group]
         elif direction == PositionDirection.SHORT:
@@ -582,8 +612,6 @@ class Position:
         self.logger.info(
             f"Cancelling orders for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
-
-        self.position_state = PositionState.CANCELED
 
     async def _create_half_out_order(
         self, direction: PositionDirection, price: float, num_shares: int

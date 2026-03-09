@@ -26,6 +26,8 @@ class PositionManager:
         # Maps symbol to historical data that's already streaming
         self._historical_data_cache: Dict[Tuple[str, BarSize], HistoricalData] = {}
 
+        self._logger = getLogger(__file__)
+
     def add_position(
         self, security_descriptor: SecurityDescriptor
     ) -> Tuple[bool, Optional[str]]:
@@ -48,6 +50,7 @@ class PositionManager:
                     f"Can't add position for {security_descriptor.to_string()}",
                 )
 
+        self._logger.info(f"PositionManager: adding position for {security_descriptor.to_string()}")
         self._position_map[security_descriptor.to_string()] = Position(
             security_descriptor
         )
@@ -76,6 +79,7 @@ class PositionManager:
                 f"Can't activate position for {security_descriptor.to_string()}",
             )
 
+        self._logger.info(f"PositionManager: activating position for {security_descriptor.to_string()}")
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -90,13 +94,14 @@ class PositionManager:
         if direction == PositionDirection.LONG:
             entries = [highest_recent_price]
             stops = [lowest_recent_price]
-        elif direction == PositionDirection.LONG:
+        elif direction == PositionDirection.SHORT:
             entries = [lowest_recent_price]
             stops = [highest_recent_price]
         else:
             entries = [highest_recent_price, lowest_recent_price]
             stops = [lowest_recent_price, highest_recent_price]
 
+        self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
         try:
             existing_position.activate(
                 direction, entries, stops, self.MAX_LOSS, self._cash_available
@@ -116,6 +121,7 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
 
+        self._logger.info(f"PositionManager: entering position for {security_descriptor.to_string()}")
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -152,6 +158,7 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
 
+        self._logger.info(f"PositionManager: canceling position for {security_descriptor.to_string()}")
         try:
             existing_position.cancel()
         except Exception as e:
@@ -166,12 +173,31 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
 
+        self._logger.info(f"PositionManager: exiting position for {security_descriptor.to_string()}")
         try:
             existing_position.exit()
         except Exception as e:
             return False, f"exit() failed with exception: {e}"
 
         return True, None
+
+    async def update(self):
+        for pos_name, position in self._position_map.items():
+            position.update()
+
+        await self._update_cash_amount()
+
+    def get_info(self, security_descriptor: SecurityDescriptor) -> Optional[List[str]]:
+        position = self._position_map.get(security_descriptor.to_string())
+        if position is None:
+            return None
+        return position.get_info()
+
+    def get_all_info(self) -> Dict[str, List[str]]:
+        out_dict = {}
+        for pos_name, position in self._position_map.items():
+            out_dict[pos_name] = position.get_info()
+        return out_dict
 
     async def _get_historical_data_stream(
         self, security_descriptor: SecurityDescriptor, bars_back: int, bar_size: BarSize
