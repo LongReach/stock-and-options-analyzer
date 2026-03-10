@@ -9,7 +9,7 @@ from core.common import (
     OrderAction,
     OrderType,
     OrderStatus,
-    HistoricalData
+    HistoricalData,
 )
 from core.utils import wait_for_condition
 from core.ib_driver import IBDriver
@@ -338,11 +338,15 @@ class Position:
         if group:
             extra_info_dict["entry_price"] = group.entry_order.avg_fill_price
             extra_info_dict["entry_shares"] = group.entry_order.shares_filled
-            extra_info_dict["entry_shares_remaining"] = group.entry_order.shares_remaining
+            extra_info_dict["entry_shares_remaining"] = (
+                group.entry_order.shares_remaining
+            )
             if group.stop_loss_order:
                 extra_info_dict["exit_price"] = group.stop_loss_order.avg_fill_price
                 extra_info_dict["exit_shares"] = group.stop_loss_order.shares_filled
-                extra_info_dict["exit_shares_remaining"] = group.stop_loss_order.shares_remaining
+                extra_info_dict["exit_shares_remaining"] = (
+                    group.stop_loss_order.shares_remaining
+                )
 
         lines = [
             f"Symbol: {self.security_descriptor.to_string()}",
@@ -428,19 +432,32 @@ class Position:
                     self._task_stack.append(cancel_task)
                     self.theoretical_cost = 0.0
 
-                if self._historical_data and self.position_direction in [PositionDirection.LONG, PositionDirection.SHORT] and not position_change_needed:
+                if (
+                    self._historical_data
+                    and self.position_direction
+                    in [PositionDirection.LONG, PositionDirection.SHORT]
+                    and not position_change_needed
+                ):
                     last_close_price = self._historical_data.bar_data[-1].close
                     need_cancel = False
                     if self.position_direction == PositionDirection.LONG:
                         if self.long_order_group:
-                            if last_close_price <= self.long_order_group.initial_exit_price:
+                            if (
+                                last_close_price
+                                <= self.long_order_group.initial_exit_price
+                            ):
                                 need_cancel = True
                     elif self.position_direction == PositionDirection.SHORT:
                         if self.short_order_group:
-                            if last_close_price >= self.short_order_group.initial_exit_price:
+                            if (
+                                last_close_price
+                                >= self.short_order_group.initial_exit_price
+                            ):
                                 need_cancel = True
                     if need_cancel:
-                        self.logger.info(f"Cancelling created position {self.position_id} due to breach of initial exit point")
+                        self.logger.info(
+                            f"Cancelling created position {self.position_id} due to breach of initial exit point"
+                        )
                         position_change_needed = True
                         cancel_task = asyncio.create_task(
                             self._cancel_orders(self.position_direction)
@@ -666,7 +683,11 @@ class Position:
         async def _do_cancel(order_info: Optional[OrderInfo]):
             if order_info is None:
                 return
-            if order_info.order_status in [OrderStatus.CANCELLED, OrderStatus.NONE, OrderStatus.FILLED]:
+            if order_info.order_status in [
+                OrderStatus.CANCELLED,
+                OrderStatus.NONE,
+                OrderStatus.FILLED,
+            ]:
                 return
 
             try:
