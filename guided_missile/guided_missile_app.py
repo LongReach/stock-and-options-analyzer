@@ -44,10 +44,12 @@ class GuidedMissile:
             "info": Command.INFO,
             "help": Command.HELP,
             "quit": Command.QUIT,
-            "reset": Command.RESET
+            "reset": Command.RESET,
         }
 
-        self._reverse_command_map: Dict[Command, str] = {v : k for k, v in self.command_map.items()}
+        self._reverse_command_map: Dict[Command, str] = {
+            v: k for k, v in self.command_map.items()
+        }
 
         self._stop_event = Event()
 
@@ -81,7 +83,7 @@ class GuidedMissile:
                     Command.ENTER_SHORT,
                     Command.CANCEL,
                     Command.EXIT,
-                    Command.RESET
+                    Command.RESET,
                 ]:
                     await self._run_position_command(command_dict)
                 elif command == Command.INFO:
@@ -123,7 +125,7 @@ class GuidedMissile:
             "info",
             "help",
             "quit",
-            "reset"
+            "reset",
         ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
@@ -191,6 +193,7 @@ class GuidedMissile:
 
     def print_info(self, symbol: Optional[str]):
         """Prints info about a particular position or all positions"""
+
         def _print_it(lines: List[str]):
             print("\n".join(lines))
 
@@ -218,7 +221,9 @@ class GuidedMissile:
 
         security_descriptor = SecurityDescriptor(command_dict["symbol"])
         if command not in [Command.CANCEL, Command.EXIT, Command.RESET]:
-            success, error_str = self._position_manager.add_position(security_descriptor)
+            success, error_str = self._position_manager.add_position(
+                security_descriptor
+            )
             if not success:
                 print(f"Command failed with error: {error_str}")
                 return

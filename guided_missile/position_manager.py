@@ -4,8 +4,21 @@ from enum import Enum, auto
 from logging import getLogger
 
 from core.ib_driver import IBDriver
-from core.common import SecurityDescriptor, BarSize, HistoricalData, OrderInfo, OrderStatus, OrderType, OrderAction
-from guided_missile.position import Position, PositionState, PositionDirection, OrderGroup
+from core.common import (
+    SecurityDescriptor,
+    BarSize,
+    HistoricalData,
+    OrderInfo,
+    OrderStatus,
+    OrderType,
+    OrderAction,
+)
+from guided_missile.position import (
+    Position,
+    PositionState,
+    PositionDirection,
+    OrderGroup,
+)
 
 
 class PositionManager:
@@ -215,8 +228,14 @@ class PositionManager:
     async def reset(self, security_descriptor: SecurityDescriptor):
         """Rebuilds a Position object for a position that we're actually in, on the brokerage side."""
         existing_position = self._position_map.get(security_descriptor.to_string())
-        if existing_position and existing_position.position_state not in [PositionState.ENTERED, PositionState.HALF_OUT]:
-            return False, "Can't rebuild position, have not entered it. Try exiting it first."
+        if existing_position and existing_position.position_state not in [
+            PositionState.ENTERED,
+            PositionState.HALF_OUT,
+        ]:
+            return (
+                False,
+                "Can't rebuild position, have not entered it. Try exiting it first.",
+            )
 
         # Get all positions from brokerage side
         position_info, error_str = await self.ib_driver.get_positions()
@@ -228,21 +247,32 @@ class PositionManager:
         is_short = False
         positions = position_info.get_positions()
         for position in positions:
-            if position.security_descriptor.to_string() == security_descriptor.to_string():
+            if (
+                position.security_descriptor.to_string()
+                == security_descriptor.to_string()
+            ):
                 price = position.price
                 quantity = position.quantity
                 is_short = position.short_position
         if quantity == 0:
-            return False, f"Could not reset position for {security_descriptor.to_string()}, no shares held"
+            return (
+                False,
+                f"Could not reset position for {security_descriptor.to_string()}, no shares held",
+            )
 
         # Try to kill existing position
         if existing_position:
             existing_position.cancel(force_cancel=True)
             success = await existing_position.wait_for_tasks_complete()
             if not success:
-                return False, f"Could not cancel existing position {existing_position.position_id}"
+                return (
+                    False,
+                    f"Could not cancel existing position {existing_position.position_id}",
+                )
 
-        self._logger.info(f"Attempting to reset position for {security_descriptor.to_string()}, actual quantity {quantity}")
+        self._logger.info(
+            f"Attempting to reset position for {security_descriptor.to_string()}, actual quantity {quantity}"
+        )
         new_position = Position(security_descriptor)
         direction = PositionDirection.SHORT if is_short else PositionDirection.LONG
         new_position.position_direction = direction
@@ -258,10 +288,22 @@ class PositionManager:
         # TODO: what if transmit is False? Can we transmit from trading tool?
         if direction == PositionDirection.LONG:
             stop_price = price - price * 0.005
-            stop_order, error_str = await self.ib_driver.place_order(security_descriptor.to_string(), action=OrderAction.SELL, order_type=OrderType.STOP, quantity=quantity, price=stop_price)
+            stop_order, error_str = await self.ib_driver.place_order(
+                security_descriptor.to_string(),
+                action=OrderAction.SELL,
+                order_type=OrderType.STOP,
+                quantity=quantity,
+                price=stop_price,
+            )
         else:
             stop_price = price + price * 0.005
-            stop_order, error_str = await self.ib_driver.place_order(security_descriptor.to_string(), action=OrderAction.BUY, order_type=OrderType.STOP, quantity=quantity, price=stop_price)
+            stop_order, error_str = await self.ib_driver.place_order(
+                security_descriptor.to_string(),
+                action=OrderAction.BUY,
+                order_type=OrderType.STOP,
+                quantity=quantity,
+                price=stop_price,
+            )
         if error_str is not None:
             return False, f"Failed to create stop order, error is: {error_str}"
 
