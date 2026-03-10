@@ -215,7 +215,7 @@ class IBDriver(IBWrapper):
         Note: incomplete historical data might be returned; check results for error string.
 
         :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
-        :param num_bars: how many bars of data to collect. If not given (0), then start_state will be used
+        :param num_bars: how many bars of data to collect. If not given (0), then start_date will be used to determine
         :param bar_size: daily, hourly, weekly, etc.
         :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
@@ -603,6 +603,7 @@ class IBDriver(IBWrapper):
 
         order = Order()
         order.orderId = order_id
+        order.tif = "DAY"
         if parent_order:
             parent_order_id = await self._find_order_request(parent_order)
             order.parentId = parent_order_id

@@ -9,6 +9,7 @@ from core.common import (
     OrderAction,
     OrderType,
     OrderStatus,
+    HistoricalData
 )
 from core.utils import wait_for_condition
 from core.ib_driver import IBDriver
@@ -91,17 +92,30 @@ class Position:
     next_id = 1
 
     def __init__(self, security_descriptor: SecurityDescriptor):
+        """
+        Constructor for Position
+        :param security_descriptor: describes stock, ETF, or options contract
+        """
         self.security_descriptor: SecurityDescriptor = security_descriptor
         self.position_state: PositionState = PositionState.NONE
         self.position_direction: PositionDirection = PositionDirection.LONG
+        # Holds the orders related to a long position, if one exists
         self.long_order_group: Optional[OrderGroup] = None
+        # Holds the orders related to a short position, if one exists
         self.short_order_group: Optional[OrderGroup] = None
+        # Unique position ID for logging purposes
         self.position_id = Position.next_id
         Position.next_id += 1
         # Will be non-zero for positions "armed" but not yet entered
         self.theoretical_cost: float = 0.0
 
         self._task_stack: List[asyncio.Task] = []
+        self._task_exception: Optional[Exception] = None
+
+        self._historical_data: Optional[HistoricalData] = None
+
+    def set_historical_data_stream(self, historical_data: Optional[HistoricalData]):
+        self._historical_data = historical_data
 
     def get_current_shares(self) -> int:
         """Return number of shares that we're currently long or short on"""
@@ -163,8 +177,16 @@ class Position:
         return True
 
     async def wait_for_tasks_complete(self) -> bool:
-        """Waits for all asynchronous tasks for Position to be done."""
+        """
+        Waits for all asynchronous tasks for Position to be done.
+
+        :return: True if success, False if timeout
+        """
         return await wait_for_condition(lambda: self.tasks_complete(), timeout=30.0)
+
+    def get_exception(self) -> Optional[Exception]:
+        """Returns exception that occured while asynchronous task was running, or None"""
+        return self._task_exception
 
     def activate(
         self,
@@ -233,9 +255,14 @@ class Position:
         )
         self._task_stack.append(enter_task)
 
-    def cancel(self):
-        """Cancel any orders that haven't been filled yet"""
-        if self.position_state != PositionState.CREATED:
+    def cancel(self, force_cancel: bool = False):
+        """
+        Cancel any orders that haven't been filled yet
+
+        :param force_cancel: if True, cancel will happen for position we're already in. That is, stop-loss and
+            take-profit orders will be canceled.
+        """
+        if not force_cancel and self.position_state != PositionState.CREATED:
             raise PositionException(
                 f"Can't cancel position, current state is {PositionState(self.position_state).name}"
             )
@@ -268,6 +295,8 @@ class Position:
                 if task.done():
                     ex = task.exception()
                     self.logger.error(f"Exception updating position: {ex}")
+                    # Save this exception so that PositionManager can find out that it occurred
+                    self._task_exception = ex
             self._task_stack = []
 
         if self.position_state == PositionState.NONE:
@@ -286,15 +315,15 @@ class Position:
         Gets printable info about position
         :return: list of printable lines
         """
+        group = (
+            self.long_order_group
+            if self.position_direction == PositionDirection.LONG
+            else self.short_order_group
+        )
         if self.position_state in [PositionState.ENTERED, PositionState.HALF_OUT]:
             num_shares = self.get_current_shares()
             shares_line = f"Shares: {num_shares}"
         elif self.position_state == PositionState.CREATED:
-            group = (
-                self.long_order_group
-                if self.position_direction == PositionDirection.LONG
-                else self.short_order_group
-            )
             if group:
                 num_shares = group.entry_order.shares_remaining
                 shares_line = f"Shares: {num_shares} (prospective)"
@@ -305,13 +334,27 @@ class Position:
             num_shares = 0
             shares_line = "Shares: 0"
 
+        extra_info_dict = {}
+        if group:
+            extra_info_dict["entry_price"] = group.entry_order.avg_fill_price
+            extra_info_dict["entry_shares"] = group.entry_order.shares_filled
+            extra_info_dict["entry_shares_remaining"] = group.entry_order.shares_remaining
+            if group.stop_loss_order:
+                extra_info_dict["exit_price"] = group.stop_loss_order.avg_fill_price
+                extra_info_dict["exit_shares"] = group.stop_loss_order.shares_filled
+                extra_info_dict["exit_shares_remaining"] = group.stop_loss_order.shares_remaining
+
         lines = [
-            f"Symbol: {self.security_descriptor.to_string()}"
+            f"Symbol: {self.security_descriptor.to_string()}",
             f"Position ID: {self.position_id}",
             f"State: {PositionState(self.position_state).name}",
             f"Direction: {PositionDirection(self.position_direction).name}",
             shares_line,
         ]
+        if len(extra_info_dict):
+            lines.append(f"Extra info: {extra_info_dict}")
+        if self._task_exception:
+            lines.append(f"Exception: {self._task_exception}")
         return lines
 
     def _update_created_position(self):
@@ -326,10 +369,12 @@ class Position:
         for idx, group in enumerate(groups):
             if group is not None:
                 entry_order = group.entry_order
+                position_change_needed = False
                 if entry_order.order_status == OrderStatus.FILLED:
                     # ======================================
                     # Position has been entered, update bookkeeping and create half-out order
                     # ======================================
+                    position_change_needed = True
 
                     self.position_state = PositionState.ENTERED
                     if self.position_direction == PositionDirection.DUAL:
@@ -373,6 +418,7 @@ class Position:
                     # ======================================
                     # Position has been canceled, mark it so
                     # ======================================
+                    position_change_needed = True
                     self.logger.info(
                         f"Position {self.position_id} for {self.security_descriptor.to_string()} has been cancelled remotely"
                     )
@@ -381,6 +427,26 @@ class Position:
                     )
                     self._task_stack.append(cancel_task)
                     self.theoretical_cost = 0.0
+
+                if self._historical_data and self.position_direction in [PositionDirection.LONG, PositionDirection.SHORT] and not position_change_needed:
+                    last_close_price = self._historical_data.bar_data[-1].close
+                    need_cancel = False
+                    if self.position_direction == PositionDirection.LONG:
+                        if self.long_order_group:
+                            if last_close_price <= self.long_order_group.initial_exit_price:
+                                need_cancel = True
+                    elif self.position_direction == PositionDirection.SHORT:
+                        if self.short_order_group:
+                            if last_close_price >= self.short_order_group.initial_exit_price:
+                                need_cancel = True
+                    if need_cancel:
+                        self.logger.info(f"Cancelling created position {self.position_id} due to breach of initial exit point")
+                        position_change_needed = True
+                        cancel_task = asyncio.create_task(
+                            self._cancel_orders(self.position_direction)
+                        )
+                        self._task_stack.append(cancel_task)
+                        self.theoretical_cost = 0.0
 
         if cancel_group_idx != -1:
             cancel_direction = (
@@ -553,11 +619,11 @@ class Position:
             f"Exiting position {self.position_id} for {self.security_descriptor.to_string()}"
         )
         self.position_state = PositionState.CANCELED
+        num_shares = self.get_current_shares()
         await self._cancel_orders(self.position_direction)
 
         self.position_state = PositionState.CLOSED
 
-        num_shares = self.get_current_shares()
         action = (
             OrderAction.SELL
             if self.position_direction == PositionDirection.LONG
@@ -600,7 +666,7 @@ class Position:
         async def _do_cancel(order_info: Optional[OrderInfo]):
             if order_info is None:
                 return
-            if order_info.order_status in [OrderStatus.CANCELLED, OrderStatus.NONE]:
+            if order_info.order_status in [OrderStatus.CANCELLED, OrderStatus.NONE, OrderStatus.FILLED]:
                 return
 
             try:
@@ -614,14 +680,6 @@ class Position:
                 await _do_cancel(group.stop_loss_order)
                 await _do_cancel(group.entry_order)
                 await _do_cancel(group.half_out_order)
-
-        if direction == PositionDirection.LONG:
-            self.long_order_group = None
-        elif direction == PositionDirection.SHORT:
-            self.short_order_group = None
-        else:
-            self.long_order_group = None
-            self.short_order_group = None
 
         self.logger.info(
             f"Cancelling orders for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"

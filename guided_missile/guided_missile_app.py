@@ -21,6 +21,7 @@ class Command(Enum):
     INFO = auto()
     HELP = auto()
     QUIT = auto()
+    RESET = auto()
 
 
 class GuidedMissile:
@@ -43,7 +44,10 @@ class GuidedMissile:
             "info": Command.INFO,
             "help": Command.HELP,
             "quit": Command.QUIT,
+            "reset": Command.RESET
         }
+
+        self._reverse_command_map: Dict[Command, str] = {v : k for k, v in self.command_map.items()}
 
         self._stop_event = Event()
 
@@ -61,6 +65,8 @@ class GuidedMissile:
         while True:
             try:
                 input_str = input("> ")
+                if input_str == "":
+                    continue
                 parse_success, command_dict = self.parse_input(input_str)
                 if not parse_success:
                     print(f"Error parsing command: {command_dict['error']}")
@@ -75,6 +81,7 @@ class GuidedMissile:
                     Command.ENTER_SHORT,
                     Command.CANCEL,
                     Command.EXIT,
+                    Command.RESET
                 ]:
                     await self._run_position_command(command_dict)
                 elif command == Command.INFO:
@@ -116,16 +123,18 @@ class GuidedMissile:
             "info",
             "help",
             "quit",
+            "reset"
         ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
 
         symbol = None
-        if command in ["al", "as", "ad", "el", "es", "can", "exit"]:
+        if command in ["al", "as", "ad", "el", "es", "can", "exit", "reset"]:
             if len(parts) < 2:
                 return False, {"error": "No symbol given."}
             else:
                 symbol = parts[1]
+                symbol = symbol.upper()
         elif command == "info":
             if len(parts) > 1:
                 symbol = parts[1]
@@ -164,18 +173,21 @@ class GuidedMissile:
             print("exit: exit position")
             print("info: info about position or all positions")
             print("help: general or about named command")
+            print("quit: quit GuidedMissile")
         else:
             print(f"{command} command:")
             print("----------------------")
 
             if command in ["al", "as", "ad", "el", "es"]:
                 print(f"{command} <symbol> <bars>")
-            elif command in ["can", "exit"]:
+            elif command in ["can", "exit", "reset"]:
                 print(f"{command} <symbol>")
             elif command in ["info"]:
                 print(f"{command} [symbol]")
             elif command in ["help"]:
                 print(f"{command} <command>")
+            elif command == "quit":
+                print(f"{command}")
 
     def print_info(self, symbol: Optional[str]):
         """Prints info about a particular position or all positions"""
@@ -198,17 +210,21 @@ class GuidedMissile:
     async def _run_position_command(self, command_dict: Dict[str, Any]):
         """Runs a command that modifies a position in some way"""
         direction = PositionDirection.LONG
-        if command_dict["command"] in [Command.ENTER_SHORT, Command.ACTIVATE_SHORT]:
+        command = command_dict["command"]
+        if command in [Command.ENTER_SHORT, Command.ACTIVATE_SHORT]:
             direction = PositionDirection.SHORT
-        elif command_dict["command"] == Command.ACTIVATE_DUAL:
+        elif command == Command.ACTIVATE_DUAL:
             direction = PositionDirection.DUAL
 
         security_descriptor = SecurityDescriptor(command_dict["symbol"])
-        success, error_str = self._position_manager.add_position(security_descriptor)
-        if not success:
-            print(f"Command failed with error: {error_str}")
-            return
-        if command_dict["command"] in [
+        if command not in [Command.CANCEL, Command.EXIT, Command.RESET]:
+            success, error_str = self._position_manager.add_position(security_descriptor)
+            if not success:
+                print(f"Command failed with error: {error_str}")
+                return
+
+        success, error_str = True, None
+        if command in [
             Command.ACTIVATE_LONG,
             Command.ACTIVATE_SHORT,
             Command.ACTIVATE_DUAL,
@@ -216,21 +232,23 @@ class GuidedMissile:
             success, error_str = await self._position_manager.activate(
                 security_descriptor, direction, command_dict["bar_count"]
             )
-        elif command_dict["command"] in [Command.ENTER_SHORT, Command.ENTER_LONG]:
+        elif command in [Command.ENTER_SHORT, Command.ENTER_LONG]:
             success, error_str = await self._position_manager.enter(
                 security_descriptor, direction, command_dict["bar_count"]
             )
-        elif command_dict["command"] == Command.CANCEL:
+        elif command == Command.CANCEL:
             success, error_str = await self._position_manager.cancel(
                 security_descriptor
             )
-        elif command_dict["command"] == Command.EXIT:
+        elif command == Command.EXIT:
             success, error_str = await self._position_manager.exit(security_descriptor)
+        elif command == Command.RESET:
+            success, error_str = await self._position_manager.reset(security_descriptor)
 
         if not success:
             print(f"Command failed with error: {error_str}")
             return
         print(
-            f"Successfully ran command {command_dict["command"]} for {security_descriptor.to_string()}"
+            f"Successfully ran command {command} for {security_descriptor.to_string()}"
         )
         return
