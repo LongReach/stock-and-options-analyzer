@@ -518,7 +518,9 @@ class Position:
 
                     # Let's cancel all orders
                     cancel_task = asyncio.create_task(
-                        self._do_cancel(self.position_direction, next_state = PositionState.CLOSED)
+                        self._do_cancel(
+                            self.position_direction, next_state=PositionState.CLOSED
+                        )
                     )
                     self._task_stack.append(cancel_task)
                     continue
@@ -546,7 +548,9 @@ class Position:
 
                     # Let's cancel all orders
                     cancel_task = asyncio.create_task(
-                        self._do_cancel(self.position_direction, next_state=PositionState.CLOSED)
+                        self._do_cancel(
+                            self.position_direction, next_state=PositionState.CLOSED
+                        )
                     )
                     self._task_stack.append(cancel_task)
                     continue
@@ -654,7 +658,9 @@ class Position:
             f"Exited position {self.position_id} for {self.security_descriptor.to_string()}"
         )
 
-    async def _do_cancel(self, direction: PositionDirection, next_state: Optional[PositionState] = None):
+    async def _do_cancel(
+        self, direction: PositionDirection, next_state: Optional[PositionState] = None
+    ):
         """
         Cancels unfilled orders that are still active, if they need to be cancelled. Should be wrapped in a
         task by caller.
