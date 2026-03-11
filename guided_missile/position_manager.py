@@ -323,7 +323,10 @@ class PositionManager:
         for pos_name, position in self._position_map.items():
             position.update()
 
-            if position.position_state in [PositionState.CANCELED, PositionState.CLOSED]:
+            if position.position_state in [
+                PositionState.CANCELED,
+                PositionState.CLOSED,
+            ]:
                 # Cancel data streams, no longer needed
                 historical_data = position.get_historical_data_stream()
                 if historical_data:

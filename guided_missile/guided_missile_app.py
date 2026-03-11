@@ -46,7 +46,7 @@ class GuidedMissile:
             "help": Command.HELP,
             "quit": Command.QUIT,
             "reset": Command.RESET,
-            "positions": Command.POSITIONS
+            "positions": Command.POSITIONS,
         }
 
         self._reverse_command_map: Dict[Command, str] = {
@@ -130,7 +130,7 @@ class GuidedMissile:
             "help",
             "quit",
             "reset",
-            "positions"
+            "positions",
         ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
