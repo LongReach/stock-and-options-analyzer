@@ -83,8 +83,8 @@ class Position:
     Results are then checked in the update() function, which is synchronous. We don't want anything slowing
     down the main update loop.
 
-    Note: The position state member variable might reflect a state that isn't fully entered yet, e.g. the
-    position will be marked as "cancelled" even though the async work of cancellation is underway.
+    Note: The position state member variable only changes when the task related to entering that state finishes
+    successfully.
     """
 
     ib_driver: IBDriver = None
@@ -109,13 +109,18 @@ class Position:
         # Will be non-zero for positions "armed" but not yet entered
         self.theoretical_cost: float = 0.0
 
+        # Holds asynchronous tasks to be completed
         self._task_stack: List[asyncio.Task] = []
         self._task_exception: Optional[Exception] = None
 
+        # If set, will contain historical bar data
         self._historical_data: Optional[HistoricalData] = None
 
     def set_historical_data_stream(self, historical_data: Optional[HistoricalData]):
         self._historical_data = historical_data
+
+    def get_historical_data_stream(self):
+        return self._historical_data
 
     def get_current_shares(self) -> int:
         """Return number of shares that we're currently long or short on"""
@@ -267,7 +272,7 @@ class Position:
                 f"Can't cancel position, current state is {PositionState(self.position_state).name}"
             )
 
-        cancel_task = asyncio.create_task(self._cancel_orders(self.position_direction))
+        cancel_task = asyncio.create_task(self._do_cancel(self.position_direction))
         self._task_stack.append(cancel_task)
 
     def exit(self):
@@ -315,6 +320,7 @@ class Position:
         Gets printable info about position
         :return: list of printable lines
         """
+        cost = 0.0
         group = (
             self.long_order_group
             if self.position_direction == PositionDirection.LONG
@@ -380,7 +386,6 @@ class Position:
                     # ======================================
                     position_change_needed = True
 
-                    self.position_state = PositionState.ENTERED
                     if self.position_direction == PositionDirection.DUAL:
                         # We must cancel the other entry and update direction
                         cancel_group_idx = 1 - idx
@@ -410,13 +415,11 @@ class Position:
                         )
                         half_out_quantity = int(group.initial_num_shares / 2)
                     task = asyncio.create_task(
-                        self._create_half_out_order(
+                        self._handle_entry_triggered(
                             self.position_direction, half_out_price, half_out_quantity
                         )
                     )
                     self._task_stack.append(task)
-                    # Cost is no longer theoretical, but real
-                    self.theoretical_cost = 0.0
 
                 if entry_order.order_status == OrderStatus.CANCELLED:
                     # ======================================
@@ -427,10 +430,9 @@ class Position:
                         f"Position {self.position_id} for {self.security_descriptor.to_string()} has been cancelled remotely"
                     )
                     cancel_task = asyncio.create_task(
-                        self._cancel_orders(self.position_direction)
+                        self._do_cancel(self.position_direction)
                     )
                     self._task_stack.append(cancel_task)
-                    self.theoretical_cost = 0.0
 
                 if (
                     self._historical_data
@@ -460,10 +462,9 @@ class Position:
                         )
                         position_change_needed = True
                         cancel_task = asyncio.create_task(
-                            self._cancel_orders(self.position_direction)
+                            self._do_cancel(self.position_direction)
                         )
                         self._task_stack.append(cancel_task)
-                        self.theoretical_cost = 0.0
 
         if cancel_group_idx != -1:
             cancel_direction = (
@@ -474,7 +475,7 @@ class Position:
             self.logger.info(
                 f"Cancelling dual order for position {self.position_id} for {self.security_descriptor.to_string()}."
             )
-            cancel_task = asyncio.create_task(self._cancel_orders(cancel_direction))
+            cancel_task = asyncio.create_task(self._do_cancel(cancel_direction))
             self._task_stack.append(cancel_task)
 
     def _update_entered_position(self):
@@ -493,11 +494,10 @@ class Position:
                     self.logger.info(
                         f"Half-out for {self.position_id} for {self.security_descriptor.to_string()}"
                     )
-                    self.position_state = PositionState.HALF_OUT
 
                     # Time to adjust stop loss
                     adjust_task = asyncio.create_task(
-                        self._adjust_stop_loss(
+                        self._handle_take_profit_triggered(
                             PositionDirection.LONG
                             if idx == 0
                             else PositionDirection.SHORT
@@ -515,11 +515,10 @@ class Position:
                     self.logger.info(
                         f"Stopped out for {self.position_id} for {self.security_descriptor.to_string()}"
                     )
-                    self.position_state = PositionState.CLOSED
 
                     # Let's cancel all orders
                     cancel_task = asyncio.create_task(
-                        self._cancel_orders(self.position_direction)
+                        self._do_cancel(self.position_direction, next_state = PositionState.CLOSED)
                     )
                     self._task_stack.append(cancel_task)
                     continue
@@ -544,11 +543,10 @@ class Position:
                     self.logger.info(
                         f"Stopped out for {self.position_id} for {self.security_descriptor.to_string()}"
                     )
-                    self.position_state = PositionState.CLOSED
 
                     # Let's cancel all orders
                     cancel_task = asyncio.create_task(
-                        self._cancel_orders(self.position_direction)
+                        self._do_cancel(self.position_direction, next_state=PositionState.CLOSED)
                     )
                     self._task_stack.append(cancel_task)
                     continue
@@ -564,8 +562,6 @@ class Position:
         """
         See activate(). Meant to be wrapped in a task.
         """
-        self.position_state = PositionState.CREATED
-
         if direction == PositionDirection.LONG:
             entry = entry_prices[0]
             stop = stop_prices[0]
@@ -597,6 +593,7 @@ class Position:
             f"Activated position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
 
+        self.position_state = PositionState.CREATED
         self.position_direction = direction
 
     async def _do_enter(
@@ -610,8 +607,6 @@ class Position:
         """
         Enters a position right now. See enter(). Meant to be wrapped in a task.
         """
-        self.position_state = PositionState.CREATED
-
         self.logger.info(
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
@@ -628,6 +623,7 @@ class Position:
             f"Entered position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
 
+        self.position_state = PositionState.CREATED
         self.position_direction = direction
 
     async def _do_exit(self):
@@ -635,11 +631,8 @@ class Position:
         self.logger.info(
             f"Exiting position {self.position_id} for {self.security_descriptor.to_string()}"
         )
-        self.position_state = PositionState.CANCELED
         num_shares = self.get_current_shares()
-        await self._cancel_orders(self.position_direction)
-
-        self.position_state = PositionState.CLOSED
+        await self._do_cancel(self.position_direction)
 
         action = (
             OrderAction.SELL
@@ -656,11 +649,12 @@ class Position:
         if error_str is not None:
             raise PositionException(f"Error exiting order: {error_str}")
 
+        self.position_state = PositionState.CLOSED
         self.logger.info(
             f"Exited position {self.position_id} for {self.security_descriptor.to_string()}"
         )
 
-    async def _cancel_orders(self, direction: PositionDirection):
+    async def _do_cancel(self, direction: PositionDirection, next_state: Optional[PositionState] = None):
         """
         Cancels unfilled orders that are still active, if they need to be cancelled. Should be wrapped in a
         task by caller.
@@ -705,8 +699,11 @@ class Position:
         self.logger.info(
             f"Cancelling orders for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
+        if next_state is not None:
+            self.position_state = next_state
+        self.theoretical_cost = 0.0
 
-    async def _create_half_out_order(
+    async def _handle_entry_triggered(
         self, direction: PositionDirection, price: float, num_shares: int
     ):
         """Creates a profit-taking order. Meant to be wrapped in a task."""
@@ -742,8 +739,11 @@ class Position:
         )
 
         group.half_out_order = half_out_order
+        self.position_state = PositionState.ENTERED
+        # Cost is no longer theoretical, but real
+        self.theoretical_cost = 0.0
 
-    async def _adjust_stop_loss(
+    async def _handle_take_profit_triggered(
         self, direction: PositionDirection, price: Optional[float] = None
     ):
         """Adjusts stop-loss to match diminished position. Meant to be wrapped in a task."""
@@ -786,6 +786,8 @@ class Position:
         self.logger.info(
             f"Have adjusted stop-loss for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
+
+        self.position_state = PositionState.HALF_OUT
 
     async def _setup_long(
         self, _entry, _stop, max_loss, cash_left, market_order: bool = False

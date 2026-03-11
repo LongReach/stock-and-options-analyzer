@@ -22,6 +22,7 @@ class Command(Enum):
     HELP = auto()
     QUIT = auto()
     RESET = auto()
+    POSITIONS = auto()
 
 
 class GuidedMissile:
@@ -45,6 +46,7 @@ class GuidedMissile:
             "help": Command.HELP,
             "quit": Command.QUIT,
             "reset": Command.RESET,
+            "positions": Command.POSITIONS
         }
 
         self._reverse_command_map: Dict[Command, str] = {
@@ -90,6 +92,8 @@ class GuidedMissile:
                     self.print_info(command_dict.get("symbol"))
                 elif command == Command.HELP:
                     self.print_help(command_dict.get("command_name"))
+                elif command == Command.POSITIONS:
+                    await self.print_positions()
                 elif command == Command.QUIT:
                     print("Quitting...")
                     self._stop_event.set()
@@ -126,6 +130,7 @@ class GuidedMissile:
             "help",
             "quit",
             "reset",
+            "positions"
         ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
@@ -175,6 +180,7 @@ class GuidedMissile:
             print("exit: exit position")
             print("info: info about position or all positions")
             print("help: general or about named command")
+            print("positions: show positions, as reported directly by broker")
             print("quit: quit GuidedMissile")
         else:
             print(f"{command} command:")
@@ -189,6 +195,8 @@ class GuidedMissile:
             elif command in ["help"]:
                 print(f"{command} <command>")
             elif command == "quit":
+                print(f"{command}")
+            elif command == "positions":
                 print(f"{command}")
 
     def print_info(self, symbol: Optional[str]):
@@ -205,10 +213,21 @@ class GuidedMissile:
             print("--------------------------------------------------")
         else:
             info_lines = self._position_manager.get_info(SecurityDescriptor(symbol))
+            print("--------------------------------------------------")
             if info_lines is None:
                 print(f"No info available for: {symbol}")
             else:
                 _print_it(info_lines)
+            print("--------------------------------------------------")
+        account_value, cash_amount = self._position_manager.get_cash_status()
+        print(f"Account value: {account_value}")
+        print(f"Cash available: {cash_amount}")
+
+    async def print_positions(self):
+        lines = await self._position_manager.get_position_info()
+        print("Positions (as reported by broker):")
+        print("--------------------------------------------------")
+        print("\n".join(lines))
 
     async def _run_position_command(self, command_dict: Dict[str, Any]):
         """Runs a command that modifies a position in some way"""

@@ -323,6 +323,13 @@ class PositionManager:
         for pos_name, position in self._position_map.items():
             position.update()
 
+            if position.position_state in [PositionState.CANCELED, PositionState.CLOSED]:
+                # Cancel data streams, no longer needed
+                historical_data = position.get_historical_data_stream()
+                if historical_data:
+                    await self.ib_driver.cancel_historical_data(historical_data)
+                    position.set_historical_data_stream(None)
+
         await self._update_cash_amount()
 
     def get_info(self, security_descriptor: SecurityDescriptor) -> Optional[List[str]]:
@@ -345,6 +352,19 @@ class PositionManager:
         for pos_name, position in self._position_map.items():
             out_dict[pos_name] = position.get_info()
         return out_dict
+
+    async def get_position_info(self) -> List[str]:
+        positions_info, error_str = await self.ib_driver.get_positions()
+        if error_str is not None:
+            return []
+        out_lines = []
+        for position in positions_info.get_positions():
+            line = f"Symbol={position.security_descriptor.to_string()}, shares={position.quantity}, price={position.price}, short={position.short_position}"
+            out_lines.append(line)
+        return out_lines
+
+    def get_cash_status(self) -> Tuple[float, float]:
+        return self._account_value, self._cash_available
 
     async def _get_historical_data_stream(
         self, security_descriptor: SecurityDescriptor, bars_back: int, bar_size: BarSize
