@@ -304,9 +304,7 @@ class OptionInfo:
         """Returns True when this object has been filled out with all desired info."""
         # TODO: why does volume often not get defined in live mode? Why does refer happen when not live?
         # print(f"is_defined(), greeks_defined={self._greeks_defined}, interest_defined={self._interest_defined}, volume_defined={self._volume_defined}, live={self._live}")
-        return self._greeks_defined and (
-            self._interest_defined and self._live or not self._live
-        )
+        return self._greeks_defined and (self._interest_defined and self._live or not self._live)
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns data as a dict"""
@@ -412,9 +410,7 @@ class PositionsInfo:
         position_descriptor.price = price
         position_descriptor.short_position = short_position
 
-    def get_position(
-        self, security_descriptor: SecurityDescriptor
-    ) -> Optional[PositionDescriptor]:
+    def get_position(self, security_descriptor: SecurityDescriptor) -> Optional[PositionDescriptor]:
         """Returns a PositionDescriptor, or None"""
         return self.position_map.get(security_descriptor.symbol_full)
 

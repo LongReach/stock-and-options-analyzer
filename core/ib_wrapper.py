@@ -375,9 +375,7 @@ class IBWrapper(EWrapper, EClient):
             mktCapPrice,
         )
 
-    def openOrder(
-        self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState
-    ):
+    def openOrder(self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState):
         """
         This function is called to feed in open orders.
 
@@ -405,9 +403,7 @@ class IBWrapper(EWrapper, EClient):
         self._verify_callback(CallbackID.EXEC_DETAILS_END)
         self._callback_map[CallbackID.EXEC_DETAILS_END](reqId)
 
-    def position(
-        self, account: str, contract: Contract, position: Decimal, avgCost: float
-    ):
+    def position(self, account: str, contract: Contract, position: Decimal, avgCost: float):
         """This event returns real-time positions for all accounts in response to the reqPositions() method."""
         self._verify_callback(CallbackID.POSITION)
         self._callback_map[CallbackID.POSITION](account, contract, position, avgCost)
@@ -429,9 +425,7 @@ class IBWrapper(EWrapper, EClient):
         """Called by TWS when there's an error with a request."""
         super().error(req_id, error_code, error_string, advanced_order_reject_json)
         self._verify_callback(CallbackID.ERROR_CB)
-        self._callback_map[CallbackID.ERROR_CB](
-            req_id, error_code, error_string, advanced_order_reject_json
-        )
+        self._callback_map[CallbackID.ERROR_CB](req_id, error_code, error_string, advanced_order_reject_json)
 
     def set_callback(self, cb_id: CallbackID, callback: Callable[..., Any]):
         self._callback_map[cb_id] = callback

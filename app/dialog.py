@@ -16,9 +16,7 @@ class Dialog:
         self._fields_and_outputs: Dict[Union[TradeColumn, PositionColumn], Any] = {}
         self._other_fields: Dict[str, Any] = {}
 
-    def set_fields_and_defaults(
-        self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]
-    ):
+    def set_fields_and_defaults(self, fields_and_defs: Dict[Union[TradeColumn, PositionColumn], Any]):
         """Sets which fields user must input, as well as their default values"""
         self._fields_and_defaults = fields_and_defs
 
@@ -57,9 +55,7 @@ class Dialog:
         return self._other_fields
 
     @staticmethod
-    def _validate_field(
-        val: str, field: Union[PositionColumn, TradeColumn], field_type: type
-    ) -> Tuple[bool, str]:
+    def _validate_field(val: str, field: Union[PositionColumn, TradeColumn], field_type: type) -> Tuple[bool, str]:
         """
         Confirms that user input for a particular field is valid
         :param val: value the user has inputted
@@ -87,10 +83,7 @@ class Dialog:
                 return False, f"Bad position number {val}"
         elif (
             position_fields
-            and (
-                field == PositionColumn.DATE_OPENED
-                or field == PositionColumn.DATE_CLOSED
-            )
+            and (field == PositionColumn.DATE_OPENED or field == PositionColumn.DATE_CLOSED)
             or not position_fields
             and (field == TradeColumn.DATE_OPENED or field == TradeColumn.DATE_CLOSED)
         ):
@@ -124,9 +117,7 @@ class MainDialog(Dialog):
         choice_made = False
         while not choice_made:
             print("\nMake choice:")
-            print(
-                "1) New position, 2) Modify position, 3) Show positions, 4) Show single position, 5) Exit"
-            )
+            print("1) New position, 2) Modify position, 3) Show positions, 4) Show single position, 5) Exit")
             # TODO: add close position, add trades, close trades
             choice = input(": ")
             if choice == "1":

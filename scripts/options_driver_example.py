@@ -36,9 +36,7 @@ async def main():
 
         print(f"Got {contract_details.contract}")
         # contract_id = contract_details.contract.conId
-        option_info, error_str = await ib_driver.get_options_chain_info(
-            contract_details
-        )
+        option_info, error_str = await ib_driver.get_options_chain_info(contract_details)
         print(f"Get options info from exchange {option_info.exchange}")
         exp_list = sorted(option_info.expirations)
         print(f"Expirations are {exp_list}")
@@ -63,9 +61,7 @@ async def main():
             "SPY", is_option=True, is_call=True, expiration="20250620"
         )
         for contract_details in contract_details_list:
-            print(
-                f"Contract Details are {ib_driver.get_full_symbol_from_contract_details(contract_details)}"
-            )
+            print(f"Contract Details are {ib_driver.get_full_symbol_from_contract_details(contract_details)}")
 
     except Exception as ex:
         print(f"Exception: {ex}")

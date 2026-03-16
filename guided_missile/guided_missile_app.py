@@ -49,9 +49,7 @@ class GuidedMissile:
             "positions": Command.POSITIONS,
         }
 
-        self._reverse_command_map: Dict[Command, str] = {
-            v: k for k, v in self.command_map.items()
-        }
+        self._reverse_command_map: Dict[Command, str] = {v: k for k, v in self.command_map.items()}
 
         self._stop_event = Event()
 
@@ -240,9 +238,7 @@ class GuidedMissile:
 
         security_descriptor = SecurityDescriptor(command_dict["symbol"])
         if command not in [Command.CANCEL, Command.EXIT, Command.RESET]:
-            success, error_str = self._position_manager.add_position(
-                security_descriptor
-            )
+            success, error_str = self._position_manager.add_position(security_descriptor)
             if not success:
                 print(f"Command failed with error: {error_str}")
                 return
@@ -261,9 +257,7 @@ class GuidedMissile:
                 security_descriptor, direction, command_dict["bar_count"]
             )
         elif command == Command.CANCEL:
-            success, error_str = await self._position_manager.cancel(
-                security_descriptor
-            )
+            success, error_str = await self._position_manager.cancel(security_descriptor)
         elif command == Command.EXIT:
             success, error_str = await self._position_manager.exit(security_descriptor)
         elif command == Command.RESET:
@@ -272,7 +266,5 @@ class GuidedMissile:
         if not success:
             print(f"Command failed with error: {error_str}")
             return
-        print(
-            f"Successfully ran command {command} for {security_descriptor.to_string()}"
-        )
+        print(f"Successfully ran command {command} for {security_descriptor.to_string()}")
         return

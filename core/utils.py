@@ -111,9 +111,7 @@ def get_datetime(ib_date: str) -> datetime:
         raise TypeError(f"Bad second value of {second} in IB date {ib_date}")
 
     try:
-        dt = datetime(
-            year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE)
-        )
+        dt = datetime(year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE))
     except:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt

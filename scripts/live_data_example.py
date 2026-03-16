@@ -45,9 +45,7 @@ async def wait_for_keypress(stop_event: asyncio.Event):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="live_data_test.log", level=INFO)
-    ib_driver = IBDriver(
-        sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY
-    )
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY)
     try:
         ib_driver.connect()
 
@@ -68,9 +66,7 @@ async def main():
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
         )
-        print(
-            f"One day bars for {TICKER} (implied volatility) are\n------------------------"
-        )
+        print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
         print_historical_data(iv_data)
 
         hv_data, error_str = await ib_driver.get_historical_data(
@@ -80,9 +76,7 @@ async def main():
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY,
         )
-        print(
-            f"One day bars for {TICKER} (historical volatility) are\n------------------------"
-        )
+        print(f"One day bars for {TICKER} (historical volatility) are\n------------------------")
         print_historical_data(hv_data)
 
         price_data_two, error_str = await ib_driver.get_historical_data(

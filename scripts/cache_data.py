@@ -56,9 +56,7 @@ async def main(
     info_type = StockData.get_info_type(info_type_str)
 
     if info_only:
-        print(
-            f"Displaying data for {symbol}, {bar_size_str}\n======================================"
-        )
+        print(f"Displaying data for {symbol}, {bar_size_str}\n======================================")
     else:
         action_str = "Updating" if update else "Scraping"
         print(
@@ -110,12 +108,8 @@ parser.add_argument(
     default="tr",
     type=str,
 )
-parser.add_argument(
-    "--info-only", help="don't do any scraping, just show info", action="store_true"
-)
-parser.add_argument(
-    "--update", help="add more recent data to file", action="store_true"
-)
+parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
+parser.add_argument("--update", help="add more recent data to file", action="store_true")
 parser.add_argument("--fresh", help="re-scrape all data", action="store_true")
 args = parser.parse_args()
 

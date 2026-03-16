@@ -39,9 +39,7 @@ class PositionManager:
         self._position_map: Dict[str, Position] = {}
         self._logger = getLogger(__file__)
 
-    def add_position(
-        self, security_descriptor: SecurityDescriptor
-    ) -> Tuple[bool, Optional[str]]:
+    def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
         Adds position to tracking.
 
@@ -62,9 +60,7 @@ class PositionManager:
                 )
             existing_position.stop_all_states()
 
-        self._logger.info(
-            f"PositionManager: adding position for {security_descriptor.to_string()}"
-        )
+        self._logger.info(f"PositionManager: adding position for {security_descriptor.to_string()}")
         new_position = Position(security_descriptor)
         self._position_map[security_descriptor.to_string()] = new_position
 
@@ -94,9 +90,7 @@ class PositionManager:
                 f"Can't activate position for {security_descriptor.to_string()}",
             )
 
-        self._logger.info(
-            f"PositionManager: activating position for {security_descriptor.to_string()}"
-        )
+        self._logger.info(f"PositionManager: activating position for {security_descriptor.to_string()}")
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -119,13 +113,9 @@ class PositionManager:
             entries = [highest_recent_price, lowest_recent_price]
             stops = [lowest_recent_price, highest_recent_price]
 
-        self._logger.info(
-            f"PositionManager: activate() uses entries of {entries}, stops of {stops}"
-        )
+        self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
         try:
-            existing_position.activate(
-                direction, entries, stops, self.MAX_LOSS, self._cash_available
-            )
+            existing_position.activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
         except Exception as e:
             return False, f"activate() failed with exception: {e}"
 
@@ -151,9 +141,7 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
 
-        self._logger.info(
-            f"PositionManager: entering position for {security_descriptor.to_string()}"
-        )
+        self._logger.info(f"PositionManager: entering position for {security_descriptor.to_string()}")
         historical_data, error_str = await self._get_historical_data_stream(
             security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
         )
@@ -176,17 +164,13 @@ class PositionManager:
             return False, "Dual mode not supported"
 
         try:
-            existing_position.enter(
-                direction, entry, stop, self.MAX_LOSS, self._cash_available
-            )
+            existing_position.enter(direction, entry, stop, self.MAX_LOSS, self._cash_available)
         except Exception as e:
             return False, f"enter() failed with exception: {e}"
 
         return True, None
 
-    async def cancel(
-        self, security_descriptor: SecurityDescriptor
-    ) -> Tuple[bool, Optional[str]]:
+    async def cancel(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
         Cancels position that hasn't yet been entered
         :param security_descriptor: describes stock, ETF, or options contract
@@ -196,9 +180,7 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't cancel position for {security_descriptor.to_string()}"
 
-        self._logger.info(
-            f"PositionManager: canceling position for {security_descriptor.to_string()}"
-        )
+        self._logger.info(f"PositionManager: canceling position for {security_descriptor.to_string()}")
         try:
             existing_position.cancel()
         except Exception as e:
@@ -206,9 +188,7 @@ class PositionManager:
 
         return True, None
 
-    async def exit(
-        self, security_descriptor: SecurityDescriptor
-    ) -> Tuple[bool, Optional[str]]:
+    async def exit(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
         Exits position that has been entered
         :param security_descriptor: describes stock, ETF, or options contract
@@ -218,9 +198,7 @@ class PositionManager:
         if not existing_position:
             return False, f"Can't exit position for {security_descriptor.to_string()}"
 
-        self._logger.info(
-            f"PositionManager: exiting position for {security_descriptor.to_string()}"
-        )
+        self._logger.info(f"PositionManager: exiting position for {security_descriptor.to_string()}")
         try:
             existing_position.exit()
         except Exception as e:
@@ -231,7 +209,12 @@ class PositionManager:
     async def reset(self, security_descriptor: SecurityDescriptor):
         """Rebuilds a Position object for a position that we're actually in, on the brokerage side."""
         existing_position = self._position_map.get(security_descriptor.to_string())
-        if existing_position and existing_position.position_state not in [PositionState.ENTERED, PositionState.CLOSED, PositionState.CANCELED, PositionState.NONE]:
+        if existing_position and existing_position.position_state not in [
+            PositionState.ENTERED,
+            PositionState.CLOSED,
+            PositionState.CANCELED,
+            PositionState.NONE,
+        ]:
             return (
                 False,
                 "Can't rebuild position, have not entered it. Try cancelling or exiting it first.",
@@ -247,10 +230,7 @@ class PositionManager:
         is_short = False
         positions = position_info.get_positions()
         for position in positions:
-            if (
-                position.security_descriptor.to_string()
-                == security_descriptor.to_string()
-            ):
+            if position.security_descriptor.to_string() == security_descriptor.to_string():
                 price = position.price
                 quantity = position.quantity
                 is_short = position.short_position
@@ -263,9 +243,15 @@ class PositionManager:
         # Try to kill existing position
         if existing_position:
             existing_position.cancel(force_cancel=True)
-            success = await wait_for_condition(lambda: existing_position.position_state == PositionState.CANCELED, timeout=30.0)
+            success = await wait_for_condition(
+                lambda: existing_position.position_state == PositionState.CANCELED,
+                timeout=30.0,
+            )
             if not success:
-                return False, f"Could not cancel position for position {existing_position.position_id}"
+                return (
+                    False,
+                    f"Could not cancel position for position {existing_position.position_id}",
+                )
 
         self._logger.info(
             f"Attempting to reset position for {security_descriptor.to_string()}, actual quantity {quantity}"

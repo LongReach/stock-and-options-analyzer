@@ -31,9 +31,7 @@ ACTION = OrderAction.SELL
 ORDER_TYPE = OrderType.STOP
 
 
-async def make_orders(
-    ib_driver: IBDriver, price_data: HistoricalData
-) -> Optional[Tuple[OrderInfo, OrderInfo]]:
+async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Optional[Tuple[OrderInfo, OrderInfo]]:
     bar_highs = [bar.high for bar in price_data.bar_data]
     highest_recent_price = max(bar_highs)
     bar_lows = [bar.low for bar in price_data.bar_data]
@@ -81,9 +79,7 @@ async def make_orders(
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="place_order_example.log", level=INFO)
-    ib_driver = IBDriver(
-        sim_account=True, client_id=CLIENT_ID, gateway_connection=False
-    )
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
     try:
         ib_driver.connect()
 

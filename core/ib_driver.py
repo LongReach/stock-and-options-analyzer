@@ -77,9 +77,7 @@ class IBDriver(IBWrapper):
     * Request objects: these hold data that comes back from IB, in response to specific requests
     """
 
-    def __init__(
-        self, sim_account: bool, client_id: int = 0, gateway_connection: bool = True
-    ):
+    def __init__(self, sim_account: bool, client_id: int = 0, gateway_connection: bool = True):
         """
         Constructor.
 
@@ -123,19 +121,13 @@ class IBDriver(IBWrapper):
         }
 
         self.set_callback(CallbackID.HISTORICAL_DATA_CB, self._historical_data_cb)
-        self.set_callback(
-            CallbackID.HISTORICAL_DATA_END_CB, self._historical_data_end_cb
-        )
+        self.set_callback(CallbackID.HISTORICAL_DATA_END_CB, self._historical_data_end_cb)
         self.set_callback(CallbackID.HEAD_TIMESTAMP_CB, self._head_timestamp_cb)
         self.set_callback(CallbackID.CONTRACT_DETAILS_CB, self._contract_details_cb)
-        self.set_callback(
-            CallbackID.CONTRACT_DETAILS_END_CB, self._contract_details_end_cb
-        )
+        self.set_callback(CallbackID.CONTRACT_DETAILS_END_CB, self._contract_details_end_cb)
         self.set_callback(CallbackID.OPTION_CHAIN_CB, self._option_chain_cb)
         self.set_callback(CallbackID.OPTION_CHAIN_END_CB, self._option_chain_end_cb)
-        self.set_callback(
-            CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb
-        )
+        self.set_callback(CallbackID.TICK_OPTION_COMPUTATION_CB, self._tick_option_computation_cb)
         self.set_callback(CallbackID.TICK_SIZE_CB, self._tick_size_cb)
         self.set_callback(CallbackID.ORDER_STATUS, self.order_status_cb)
         self.set_callback(CallbackID.OPEN_ORDER, self.open_order_cb)
@@ -228,37 +220,21 @@ class IBDriver(IBWrapper):
         async with self._lock:
             req_id = self.next_id()
             ticker_desc = SecurityDescriptor(symbol_full)
-            req_obj = self._request_bardata_objects[req_id] = BarDataRequest(
-                ticker_desc
-            )
+            req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker_desc)
 
-        self._logger.info(
-            f"get_historical_data(), ticker={symbol_full}, num_bars={num_bars}, bar_size={bar_size.name}"
-        )
+        self._logger.info(f"get_historical_data(), ticker={symbol_full}, num_bars={num_bars}, bar_size={bar_size.name}")
 
         # This field becomes true when all data has come in
         req_obj.data_fetch_complete = False
 
         if start_date is not None:
-            req_obj.earliest_permitted_dt = (
-                start_date
-                if isinstance(start_date, datetime)
-                else get_datetime(start_date)
-            )
-            start_date = (
-                get_datetime_as_str(start_date)
-                if isinstance(start_date, datetime)
-                else start_date
-            )
+            req_obj.earliest_permitted_dt = start_date if isinstance(start_date, datetime) else get_datetime(start_date)
+            start_date = get_datetime_as_str(start_date) if isinstance(start_date, datetime) else start_date
         else:
             start_date = ""
 
         if end_date is not None:
-            end_date = (
-                get_datetime_as_str(end_date)
-                if isinstance(end_date, datetime)
-                else end_date
-            )
+            end_date = get_datetime_as_str(end_date) if isinstance(end_date, datetime) else end_date
         else:
             end_date = ""
 
@@ -275,14 +251,10 @@ class IBDriver(IBWrapper):
                 regular_trading_hours_only,
             )
         except Exception as e:
-            raise IBDriverException(
-                f"Failure with historical data request, exception was {e}"
-            )
+            raise IBDriverException(f"Failure with historical data request, exception was {e}")
 
         # Now, wait for all the data to come back
-        timed_out = not await wait_for_condition(
-            lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
             ret_error_str = f"Error getting historical data. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
@@ -359,16 +331,12 @@ class IBDriver(IBWrapper):
         try:
             self._request_head_timestamp(req_id_for_head_timestamp, new_contract)
         except Exception as e:
-            raise IBDriverException(
-                f"Failure with head timestamp request, exception was {e}"
-            )
+            raise IBDriverException(f"Failure with head timestamp request, exception was {e}")
 
         def _head_timestamp_available():
             return self._symbol_to_head_timestamp.get(ticker) is not None
 
-        timed_out = not await wait_for_condition(
-            _head_timestamp_available, timeout=HISTORICAL_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(_head_timestamp_available, timeout=HISTORICAL_DATA_TIMEOUT)
         result = None
         if not timed_out:
             result = get_datetime(self._symbol_to_head_timestamp[ticker])
@@ -401,19 +369,13 @@ class IBDriver(IBWrapper):
         """
         async with self._lock:
             req_id = self.next_id()
-            req_obj = self._request_contractdetail_objects[req_id] = (
-                ContractDetailsRequest(ticker)
-            )
+            req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest(ticker)
 
-        contract = self._make_contract(
-            ticker, primary_exchange, is_option, is_call, strike, expiration
-        )
+        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
         req_obj.data_fetch_complete = False
         self.reqContractDetails(req_id, contract)
 
-        timed_out = not await wait_for_condition(
-            lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
             ret_error_str = f"Error getting contract details. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
@@ -463,17 +425,13 @@ class IBDriver(IBWrapper):
 
         async with self._lock:
             req_id = self.next_id()
-            req_obj = self._request_optionchain_objects[req_id] = (
-                OptionChainInfoRequest(ticker)
-            )
+            req_obj = self._request_optionchain_objects[req_id] = OptionChainInfoRequest(ticker)
 
         underlying_contract_id = contract_details.contract.conId
         req_obj.data_fetch_complete = False
         self.reqSecDefOptParams(req_id, ticker, "", "STK", underlying_contract_id)
 
-        timed_out = not await wait_for_condition(
-            lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
             ret_error_str = f"Error getting option chain info. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
@@ -491,9 +449,7 @@ class IBDriver(IBWrapper):
 
         return option_info, ret_error_str
 
-    async def get_greeks(
-        self, contract_details: ContractDetails
-    ) -> Tuple[Optional[OptionInfo], Optional[str]]:
+    async def get_greeks(self, contract_details: ContractDetails) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
         Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
         interest, etc.)
@@ -516,9 +472,7 @@ class IBDriver(IBWrapper):
         req_obj.option_info.full_name = full_ticker
         req_obj.option_info.is_call = contract_details.contract.right == "C"
         req_obj.option_info.strike = contract_details.contract.strike
-        req_obj.option_info.expiration = (
-            contract_details.contract.lastTradeDateOrContractMonth
-        )
+        req_obj.option_info.expiration = contract_details.contract.lastTradeDateOrContractMonth
         req_obj.option_info.set_live(is_trading_hours())
         req_obj.data_fetch_complete = False
 
@@ -528,9 +482,7 @@ class IBDriver(IBWrapper):
         # 100 and 101 are for volume and open interest, respectively
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
-        timed_out = not await wait_for_condition(
-            lambda: req_obj.option_info.is_defined(), timeout=OPTIONS_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: req_obj.option_info.is_defined(), timeout=OPTIONS_DATA_TIMEOUT)
         ret_error_str = None
         if req_obj.has_error():
             ret_error_str = f"Error getting option. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
@@ -634,9 +586,7 @@ class IBDriver(IBWrapper):
         self.placeOrder(order_id, contract, order)
 
         # Now, wait for the data to come back
-        timed_out = not await wait_for_condition(
-            lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT)
         ret_error_str = None
         if order_request.has_error():
             ret_error_str = f"Error fulfilling order. Error code is {order_request.last_error_code}, error string is {order_request.last_error_string}"
@@ -729,9 +679,7 @@ class IBDriver(IBWrapper):
         self.placeOrder(order_id, contract, order)
 
         # Now, wait for the data to come back
-        timed_out = not await wait_for_condition(
-            lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT
-        )
+        timed_out = not await wait_for_condition(lambda: order_request.data_fetch_complete, timeout=ORDER_DATA_TIMEOUT)
         ret_error_str = None
         if order_request.has_error():
             ret_error_str = f"Error changing order. Error code is {order_request.last_error_code}, error string is {order_request.last_error_string}"
@@ -750,9 +698,7 @@ class IBDriver(IBWrapper):
 
         order_id = await self._find_order_request(order_info)
         if order_id is None and not dead_order:
-            self._logger.warning(
-                f"No order request found for {order_info.security_descriptor.to_string()}"
-            )
+            self._logger.warning(f"No order request found for {order_info.security_descriptor.to_string()}")
 
         if dead_order:
             # We can remove this order from tracking
@@ -860,11 +806,7 @@ class IBDriver(IBWrapper):
                 duration_str = str(num_bars) + " D"
         else:
             # Figure out duration from start and end date
-            end_dt = (
-                current_datetime()
-                if end_date_time == ""
-                else get_datetime(end_date_time)
-            )
+            end_dt = current_datetime() if end_date_time == "" else get_datetime(end_date_time)
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt
             if diff.days > 0:
@@ -916,10 +858,7 @@ class IBDriver(IBWrapper):
         req_obj = self._request_bardata_objects.get(req_id)
         if req_obj:
             dt = get_datetime(in_bar.date)
-            if (
-                req_obj.earliest_permitted_dt is None
-                or dt >= req_obj.earliest_permitted_dt
-            ):
+            if req_obj.earliest_permitted_dt is None or dt >= req_obj.earliest_permitted_dt:
                 req_obj.add_or_update_bar(in_bar, allow_update=real_time)
 
     def _historical_data_end_cb(self, req_id: int, start: str, end: str):
@@ -929,9 +868,7 @@ class IBDriver(IBWrapper):
         :param start: --
         :param end: --
         """
-        self._logger.info(
-            f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}"
-        )
+        self._logger.info(f"Historical Data Ended for {req_id}. Started at {start}, ending at {end}")
         req_obj = self._request_bardata_objects.get(req_id)
         if req_obj:
             req_obj.data_fetch_complete = True
@@ -1054,9 +991,7 @@ class IBDriver(IBWrapper):
             if int(tick_type) == 30:
                 req_obj.option_info.set_volume(int(size), for_call=False)
             if int(tick_type) == 8:
-                req_obj.option_info.set_volume(
-                    int(size), for_call=req_obj.option_info.is_call
-                )
+                req_obj.option_info.set_volume(int(size), for_call=req_obj.option_info.is_call)
 
     def order_status_cb(
         self,
@@ -1117,7 +1052,12 @@ class IBDriver(IBWrapper):
         elif status == "Filled":
             order_status = OrderStatus.FILLED
         self._receive_order_data(
-            order_id, order_status, int(filled), int(remaining), avg_fill_price if int(filled) > 0 else None, "order_status_cb"
+            order_id,
+            order_status,
+            int(filled),
+            int(remaining),
+            avg_fill_price if int(filled) > 0 else None,
+            "order_status_cb",
         )
 
     def open_order_cb(
@@ -1153,7 +1093,7 @@ class IBDriver(IBWrapper):
             int(num_shares),
             int(remaining_shares),
             order.auxPrice,
-            "open_order_cb"
+            "open_order_cb",
         )
 
     def open_order_end_cb(self):
@@ -1163,7 +1103,12 @@ class IBDriver(IBWrapper):
     def exec_details_cb(self, req_id: int, contract: Contract, execution: Execution):
         """This event is fired when the reqExecutions() functions is invoked, or when an order is filled."""
         self._receive_order_data(
-            execution.orderId, OrderStatus.FILLED, execution.shares, None, None, "exec_details_cb"
+            execution.orderId,
+            OrderStatus.FILLED,
+            execution.shares,
+            None,
+            None,
+            "exec_details_cb",
         )
 
     def exec_details_end_cb(self, req_id: int):
@@ -1177,7 +1122,7 @@ class IBDriver(IBWrapper):
         filled_shares: int,
         remaining_shares: Optional[int],
         price: Optional[float],
-        source_func: str
+        source_func: str,
     ):
         """Receive information about the new state of an order, as sent back from TWS."""
         # TODO: when are these removed?
@@ -1221,17 +1166,10 @@ class IBDriver(IBWrapper):
             # canceled order, we can ignore
             pass
         elif error_code in info_errors:
-            err_out = (
-                "Error (ignorable): code is "
-                + str(error_code)
-                + ", string is "
-                + error_string
-            )
+            err_out = "Error (ignorable): code is " + str(error_code) + ", string is " + error_string
             self._logger.info(err_out)
         else:
-            err_out = (
-                "Error: code is " + str(error_code) + ", string is " + error_string
-            )
+            err_out = "Error: code is " + str(error_code) + ", string is " + error_string
             self._logger.warning(err_out)
             req_obj = self._request_bardata_objects.get(req_id)
             if not req_obj:
@@ -1246,9 +1184,7 @@ class IBDriver(IBWrapper):
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
 
-    def position_cb(
-        self, account: str, contract: Contract, position: Decimal, avg_cost: float
-    ):
+    def position_cb(self, account: str, contract: Contract, position: Decimal, avg_cost: float):
         """This event returns real-time positions for all accounts in response to the reqPositions() method."""
         security_descriptor = SecurityDescriptor.create(
             contract.symbol,
@@ -1258,9 +1194,7 @@ class IBDriver(IBWrapper):
         )
         num_shares = position if position >= 0 else -position
         is_short = position < 0
-        self._request_positions_object.positions_info.set_position(
-            security_descriptor, num_shares, avg_cost, is_short
-        )
+        self._request_positions_object.positions_info.set_position(security_descriptor, num_shares, avg_cost, is_short)
 
     def position_end_cb(self):
         """
@@ -1314,9 +1248,7 @@ class IBDriver(IBWrapper):
         """Call before calling reqMktData() to set whether live or frozen data"""
         self.reqMarketDataType(1 if live else 2)
 
-    async def _find_bardata_request(
-        self, historical_data: HistoricalData
-    ) -> Optional[int]:
+    async def _find_bardata_request(self, historical_data: HistoricalData) -> Optional[int]:
         """Given a HistoricalData object, return the associated request ID or None"""
         req_id: Optional[int] = None
         async with self._lock:
