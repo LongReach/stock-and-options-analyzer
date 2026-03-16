@@ -746,16 +746,20 @@ class IBDriver(IBWrapper):
 
     async def cancel_order(self, order_info: OrderInfo):
         """Cancels an order, given the OrderInfo object"""
+        dead_order = order_info.order_status == OrderStatus.CANCELLED or order_info.totally_filled()
+
         order_id = await self._find_order_request(order_info)
-        if order_id is None:
+        if order_id is None and not dead_order:
             self._logger.warning(
                 f"No order request found for {order_info.security_descriptor.to_string()}"
             )
 
-        self.cancelOrder(order_id, OrderCancel())
-
-        async with self._lock:
-            self._request_order_objects.pop(order_id, None)
+        if dead_order:
+            # We can remove this order from tracking
+            async with self._lock:
+                self._request_order_objects.pop(order_id, None)
+        else:
+            self.cancelOrder(order_id, OrderCancel())
 
     async def cancel_all_orders(self):
         """Cancels all orders, including any made within TWS itself"""
@@ -1113,7 +1117,7 @@ class IBDriver(IBWrapper):
         elif status == "Filled":
             order_status = OrderStatus.FILLED
         self._receive_order_data(
-            order_id, order_status, int(filled), int(remaining), None
+            order_id, order_status, int(filled), int(remaining), avg_fill_price if int(filled) > 0 else None, "order_status_cb"
         )
 
     def open_order_cb(
@@ -1124,7 +1128,7 @@ class IBDriver(IBWrapper):
         order_state: OrderState,
     ):
         """
-        This function is called to feed in open orders.
+        This function is called to feed in open orders, once they're opened on the broker side.
 
         :param order_id: The order ID assigned by TWS. Use to cancel or update TWS order.
         :param contract: The Contract class attributes describe the contract.
@@ -1149,6 +1153,7 @@ class IBDriver(IBWrapper):
             int(num_shares),
             int(remaining_shares),
             order.auxPrice,
+            "open_order_cb"
         )
 
     def open_order_end_cb(self):
@@ -1158,7 +1163,7 @@ class IBDriver(IBWrapper):
     def exec_details_cb(self, req_id: int, contract: Contract, execution: Execution):
         """This event is fired when the reqExecutions() functions is invoked, or when an order is filled."""
         self._receive_order_data(
-            execution.orderId, OrderStatus.FILLED, execution.shares, 0, None
+            execution.orderId, OrderStatus.FILLED, execution.shares, None, None, "exec_details_cb"
         )
 
     def exec_details_end_cb(self, req_id: int):
@@ -1170,21 +1175,24 @@ class IBDriver(IBWrapper):
         order_id: OrderId,
         order_status: OrderStatus,
         filled_shares: int,
-        remaining_shares: int,
+        remaining_shares: Optional[int],
         price: Optional[float],
+        source_func: str
     ):
         """Receive information about the new state of an order, as sent back from TWS."""
+        # TODO: when are these removed?
         order_obj = self._request_order_objects.get(order_id)
         if not order_obj:
             self._logger.warning(f"Couldn't find order data for order {order_id}")
             return
 
         self._logger.info(
-            f"Received order data for order {order_id}. Status: {order_status}, filled shares: {filled_shares}, remaining shares: {remaining_shares}, average price: {price}"
+            f"Received order data for order {order_id}. Status: {order_status}, filled shares: {filled_shares}, remaining shares: {remaining_shares}, average price: {price}, source function: {source_func}"
         )
         order_obj.order_info.order_status = order_status
         order_obj.order_info.shares_filled = filled_shares
-        order_obj.order_info.shares_remaining = remaining_shares
+        if remaining_shares is not None:
+            order_obj.order_info.shares_remaining = remaining_shares
         if price is not None:
             order_obj.order_info.avg_fill_price = price
         order_obj.data_fetch_complete = True
