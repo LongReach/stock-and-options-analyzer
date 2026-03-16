@@ -22,9 +22,7 @@ CLIENT_ID = 19
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="guided_missile.log", level=INFO)
-    ib_driver = IBDriver(
-        sim_account=True, client_id=CLIENT_ID, gateway_connection=False
-    )
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
 
     try:
         ib_driver.connect()

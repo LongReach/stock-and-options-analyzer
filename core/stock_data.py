@@ -69,13 +69,9 @@ class StockData:
         """
         if filename:
             try:
-                self._symbol, self._bar_size, self._info_type = (
-                    self._infer_characteristics_from_file_name(filename)
-                )
+                self._symbol, self._bar_size, self._info_type = self._infer_characteristics_from_file_name(filename)
             except:
-                _logger.warning(
-                    f"Couldn't infer symbol and bar size from filename {filename}"
-                )
+                _logger.warning(f"Couldn't infer symbol and bar size from filename {filename}")
                 pass
         else:
             filename = self._get_file_name()
@@ -91,9 +87,7 @@ class StockData:
         # Go through date, make sure timezone is right for date
         for idx in range(len(self._price_and_vol_df)):
             # TODO: 0 is index of "date" column, make a constant for it
-            self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(
-                self._price_and_vol_df.iloc[idx]["date"]
-            )
+            self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
 
         return True
 
@@ -114,9 +108,7 @@ class StockData:
 
     def clear(self):
         """Make new, empty dataframe"""
-        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(
-            columns=["date", "open", "close", "low", "high", "volume"]
-        )
+        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
 
     @property
     def symbol(self) -> str:
@@ -155,9 +147,7 @@ class StockData:
         }
         result = _map.get(info_type_str)
         if not result:
-            raise StockDataException(
-                f"Couldn't convert string {info_type_str} to RequestedInfoType"
-            )
+            raise StockDataException(f"Couldn't convert string {info_type_str} to RequestedInfoType")
         return result
 
     def _get_readable_date(self, dt: datetime):
@@ -171,9 +161,7 @@ class StockData:
         """Assigns a filename based on symbol, bar size, and info type, returns in a string"""
         return f"{self._symbol}-{bar_size_to_str(self._bar_size)}-{StockData.get_info_type_str(self._info_type)}.zip"
 
-    def _infer_characteristics_from_file_name(
-        self, filename: str
-    ) -> Tuple[str, BarSize, RequestedInfoType]:
+    def _infer_characteristics_from_file_name(self, filename: str) -> Tuple[str, BarSize, RequestedInfoType]:
         """Attempts to infer symbol, bar size, and info type from a filename"""
         try:
             # Get part of filename before extension
@@ -184,6 +172,4 @@ class StockData:
             info_type = StockData.get_info_type(characteristics_str[2])
             return symbol_str, bar_size, info_type
         except:
-            raise StockDataException(
-                f"Couldn't infer symbol/bar size/info y from {filename}"
-            )
+            raise StockDataException(f"Couldn't infer symbol/bar size/info y from {filename}")

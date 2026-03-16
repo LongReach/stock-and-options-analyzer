@@ -38,14 +38,10 @@ async def main():
         results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10)
         print("Daily bars for SPY are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
-            "AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR
-        )
+        results, error_str = await ib_driver.get_historical_data("AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR)
         print("Hourly bars for AAPL are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
-            "DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS
-        )
+        results, error_str = await ib_driver.get_historical_data("DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS)
         print("Four-hour bars for DIA are\n------------------------")
         print_historical_data(results)
         results, error_str = await ib_driver.get_historical_data(

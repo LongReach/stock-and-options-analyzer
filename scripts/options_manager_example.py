@@ -45,12 +45,8 @@ async def main():
         options_manager.add_driver(ib_driver)
 
         print(f"Getting expirations for {TICKER}...")
-        expirations = await options_manager.get_expirations(
-            TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY
-        )
-        print(
-            f"Expirations for {TICKER} between {MIN_DAYS_AWAY} and {MAX_DAYS_AWAY} days away are {expirations}"
-        )
+        expirations = await options_manager.get_expirations(TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY)
+        print(f"Expirations for {TICKER} between {MIN_DAYS_AWAY} and {MAX_DAYS_AWAY} days away are {expirations}")
 
         print(f"Getting strikes for {TICKER}, {expirations[-1]}...")
         strikes, idx = await options_manager.get_strikes(

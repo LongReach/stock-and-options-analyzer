@@ -18,18 +18,10 @@ class OptionPositionTracker:
 
     def __init__(self, set_name: str):
         self._set_name = set_name
-        self._trade_column_name_map: Dict[str, int] = {
-            column_enum_to_str(col): col.value for col in TradeColumn
-        }
-        self._position_column_name_map: Dict[str, int] = {
-            column_enum_to_str(col): col.value for col in PositionColumn
-        }
-        self._trades_df = pandas.DataFrame(
-            columns=[key for key in self._trade_column_name_map.keys()]
-        )
-        self._positions_df = pandas.DataFrame(
-            columns=[key for key in self._position_column_name_map.keys()]
-        )
+        self._trade_column_name_map: Dict[str, int] = {column_enum_to_str(col): col.value for col in TradeColumn}
+        self._position_column_name_map: Dict[str, int] = {column_enum_to_str(col): col.value for col in PositionColumn}
+        self._trades_df = pandas.DataFrame(columns=[key for key in self._trade_column_name_map.keys()])
+        self._positions_df = pandas.DataFrame(columns=[key for key in self._position_column_name_map.keys()])
         self._new_position_number = 0
 
     def load(self):
@@ -84,9 +76,7 @@ class OptionPositionTracker:
         :param fields_dict: dictionary representing the row
         """
         # Copy with fields enumerations replaced by strings
-        row_copy = {
-            column_enum_to_str(field): val for field, val in fields_dict.items()
-        }
+        row_copy = {column_enum_to_str(field): val for field, val in fields_dict.items()}
         self._positions_df.loc[len(self._positions_df)] = row_copy
 
     def add_trade_row(self, fields_dict: Dict[TradeColumn, Any]):
@@ -106,14 +96,10 @@ class OptionPositionTracker:
         for field in auto_fields:
             fields_dict[field] = 0.0
         # Copy with fields enumerations replaced by strings
-        row_copy = {
-            column_enum_to_str(field): val for field, val in fields_dict.items()
-        }
+        row_copy = {column_enum_to_str(field): val for field, val in fields_dict.items()}
         self._trades_df.loc[len(self._trades_df)] = row_copy
 
-    def get_position_rows(
-        self, position_num: int = -1, is_open: Optional[bool] = None
-    ) -> pd.DataFrame:
+    def get_position_rows(self, position_num: int = -1, is_open: Optional[bool] = None) -> pd.DataFrame:
         """
         Gets pandas Dataframe containing a set of selected position rows
         :param position_num: if given, filter for rows with this pos num
@@ -122,40 +108,26 @@ class OptionPositionTracker:
         """
         filtered_df = self._positions_df
         if position_num != -1:
-            filtered_df = filtered_df[
-                filtered_df[column_enum_to_str(PositionColumn.POSITION_NUMBER)]
-                == position_num
-            ]
+            filtered_df = filtered_df[filtered_df[column_enum_to_str(PositionColumn.POSITION_NUMBER)] == position_num]
         if is_open is not None:
             if is_open:
-                filtered_df = filtered_df[
-                    filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] == ""
-                ]
+                filtered_df = filtered_df[filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] == ""]
             else:
-                filtered_df = filtered_df[
-                    filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] != ""
-                ]
+                filtered_df = filtered_df[filtered_df[column_enum_to_str(PositionColumn.DATE_CLOSED)] != ""]
         return filtered_df
 
     def get_position_row(self, position_num: int = -1) -> Dict[str, Any]:
         """Gets a single position row, returns as dict"""
         df = self.get_position_rows(position_num=position_num)
         if len(df) == 0:
-            raise PositionTrackerException(
-                f"No positions with position number {position_num}"
-            )
+            raise PositionTrackerException(f"No positions with position number {position_num}")
         if len(df) > 1:
-            raise PositionTrackerException(
-                f"Multiple with position number {position_num}"
-            )
+            raise PositionTrackerException(f"Multiple with position number {position_num}")
         return df.iloc[0].to_dict()
 
     def get_trade_rows(self, position_num: int = -1):
         """Gets trade rows according to filtering params given"""
         filtered_df = self._trades_df
         if position_num != -1:
-            filtered_df = filtered_df[
-                filtered_df[column_enum_to_str(TradeColumn.POSITION_NUMBER)]
-                == position_num
-            ]
+            filtered_df = filtered_df[filtered_df[column_enum_to_str(TradeColumn.POSITION_NUMBER)] == position_num]
         return filtered_df

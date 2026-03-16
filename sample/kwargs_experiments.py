@@ -1,9 +1,11 @@
 from typing import Dict
 
+
 def test(**kwargs):
     print(f"kwargs are: {kwargs}")
     x, y = kwargs.values()
     print(f"Values are: {x}, {y}")
+
 
 def tuple_test():
     def _test_it(tup):
@@ -17,6 +19,7 @@ def tuple_test():
     _test_it(tup)
     tup = (1, 2)
     _test_it(tup)
+
 
 test_dict = {"x": 1, "y": 2}
 test(**test_dict)

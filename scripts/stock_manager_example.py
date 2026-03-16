@@ -55,9 +55,7 @@ async def main(mode: int):
         if mode == 4:
             print("Here we go with smart scrape!")
             stock_manager.load_data("DIA", BarSize.ONE_DAY, "DIA-1d-tr-test.zip")
-            success, error_str = await stock_manager.scrape_data_smart(
-                "DIA", BarSize.ONE_DAY, start_date="19700101"
-            )
+            success, error_str = await stock_manager.scrape_data_smart("DIA", BarSize.ONE_DAY, start_date="19700101")
             if not success:
                 print(f"Error: {error_str}")
             stock_manager.save_data("DIA", BarSize.ONE_DAY, "DIA-1d-tr-test.zip")
