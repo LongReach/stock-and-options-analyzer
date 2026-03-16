@@ -357,6 +357,10 @@ class OrderInfo:
         # TODO: need better name
         self.avg_fill_price: Optional[float] = None
 
+    def totally_filled(self) -> bool:
+        """Returns True if order has been completely filled, every single share"""
+        return self.order_status == OrderStatus.FILLED and self.shares_remaining == 0
+
     def get_info_str(self) -> str:
         """Returns string representation"""
         parent_order_str = ""
