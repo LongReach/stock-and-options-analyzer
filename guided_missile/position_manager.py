@@ -13,6 +13,7 @@ from core.common import (
     OrderType,
     OrderAction,
 )
+from core.utils import wait_for_condition
 from guided_missile.position import (
     Position,
     PositionState,
@@ -59,13 +60,15 @@ class PositionManager:
                     False,
                     f"Can't add position for {security_descriptor.to_string()}",
                 )
+            existing_position.stop_all_states()
 
         self._logger.info(
             f"PositionManager: adding position for {security_descriptor.to_string()}"
         )
-        self._position_map[security_descriptor.to_string()] = Position(
-            security_descriptor
-        )
+        new_position = Position(security_descriptor)
+        self._position_map[security_descriptor.to_string()] = new_position
+
+        new_position.launch()
 
         return True, None
 
@@ -228,13 +231,10 @@ class PositionManager:
     async def reset(self, security_descriptor: SecurityDescriptor):
         """Rebuilds a Position object for a position that we're actually in, on the brokerage side."""
         existing_position = self._position_map.get(security_descriptor.to_string())
-        if existing_position and existing_position.position_state not in [
-            PositionState.ENTERED,
-            PositionState.HALF_OUT,
-        ]:
+        if existing_position and existing_position.position_state not in [PositionState.ENTERED, PositionState.CLOSED, PositionState.CANCELED, PositionState.NONE]:
             return (
                 False,
-                "Can't rebuild position, have not entered it. Try exiting it first.",
+                "Can't rebuild position, have not entered it. Try cancelling or exiting it first.",
             )
 
         # Get all positions from brokerage side
@@ -263,12 +263,9 @@ class PositionManager:
         # Try to kill existing position
         if existing_position:
             existing_position.cancel(force_cancel=True)
-            success = await existing_position.wait_for_tasks_complete()
+            success = await wait_for_condition(lambda: existing_position.position_state == PositionState.CANCELED, timeout=30.0)
             if not success:
-                return (
-                    False,
-                    f"Could not cancel existing position {existing_position.position_id}",
-                )
+                return False, f"Could not cancel position for position {existing_position.position_id}"
 
         self._logger.info(
             f"Attempting to reset position for {security_descriptor.to_string()}, actual quantity {quantity}"
@@ -315,25 +312,17 @@ class PositionManager:
             new_position.short_order_group = group
 
         self._position_map[security_descriptor.to_string()] = new_position
+        new_position.launch(after_reset=True)
 
         return True, None
 
     async def update(self):
-        """Updates bookkeeping for all positions, with information that comes back from broker"""
+        # TODO: docs
         for pos_name, position in self._position_map.items():
-            position.update()
-
-            if position.position_state in [
-                PositionState.CANCELED,
-                PositionState.CLOSED,
-            ]:
-                # Cancel data streams, no longer needed
-                historical_data = position.get_historical_data_stream()
-                if historical_data:
-                    await self.ib_driver.cancel_historical_data(historical_data)
-                    position.set_historical_data_stream(None)
-
-        await self._update_cash_amount()
+            task_done, exception = position.get_state_task_done()
+            if task_done and exception is not None:
+                self._logger.error(f"Exception for position {position.position_id}: {exception}")
+                position.stop_all_states()
 
     def get_info(self, security_descriptor: SecurityDescriptor) -> Optional[List[str]]:
         """

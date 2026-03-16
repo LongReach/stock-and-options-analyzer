@@ -28,7 +28,7 @@ class Command(Enum):
 class GuidedMissile:
     """Top-level implementation of GuidedMissile app"""
 
-    STARTING_CASH = 100000.0
+    STARTING_CASH = 500000.0
 
     def __init__(self, ib_driver: IBDriver):
         self._ib_driver = ib_driver
