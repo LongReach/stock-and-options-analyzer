@@ -123,6 +123,43 @@ class Position:
         """Returns historical data stream associated with this position or None"""
         return self._historical_data
 
+    def get_info(self) -> List[str]:
+        """
+        Gets printable info about position
+        :return: list of printable lines
+        """
+        cost = 0.0
+        group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
+        if self.position_state in [PositionState.ENTERED]:
+            num_shares = self.get_current_shares()
+            shares_line = f"Shares: {num_shares}"
+        elif self.position_state == PositionState.CREATED:
+            if group:
+                num_shares = group.entry_order.shares_remaining
+                shares_line = f"Shares: {num_shares} (prospective)"
+            else:
+                num_shares = 0
+                shares_line = "Shares: ???"
+        else:
+            num_shares = 0
+            shares_line = "Shares: 0"
+
+        lines = [
+            f"Symbol: {self.security_descriptor.to_string()}",
+            f"Position ID: {self.position_id}",
+            f"State: {PositionState(self.position_state).name}",
+            f"Direction: {PositionDirection(self.position_direction).name}",
+            shares_line,
+        ]
+        if group:
+            lines.append(f"Entry: shares filled = {group.entry_order.shares_filled}, shares remaining = {group.entry_order.shares_remaining}, price = {group.entry_order.avg_fill_price}")
+            if group.stop_loss_order:
+                lines.append(f"Stop loss: shares filled = {group.stop_loss_order.shares_filled}, shares remaining = {group.stop_loss_order.shares_remaining}, price = {group.stop_loss_order.avg_fill_price}")
+            if group.take_profit_order:
+                lines.append(
+                    f"Take profit: shares filled = {group.take_profit_order.shares_filled}, shares remaining = {group.take_profit_order.shares_remaining}, price = {group.take_profit_order.avg_fill_price}")
+        return lines
+
     def get_current_shares(self) -> int:
         """Return number of shares that we're currently long or short on"""
         if self.position_direction == PositionDirection.DUAL:
@@ -185,33 +222,6 @@ class Position:
     def is_stopped(self) -> bool:
         return self._stop_event.is_set()
 
-    def _get_target_hit(self, target_type: str) -> Optional[Tuple[PositionDirection, OrderInfo]]:
-        """
-        If an order has been filled, return info about order
-        :param target_type: "entry", "stop", "profit"
-        :return: (direction, order info) or None
-        """
-        # TODO: move this and func below
-        groups = [self.long_order_group, self.short_order_group]
-        for idx, group in enumerate(groups):
-            if group:
-                if target_type == "entry" and group.entry_order.totally_filled():
-                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.entry_order
-                if target_type == "stop" and group.stop_loss_order and group.stop_loss_order.totally_filled():
-                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.stop_loss_order
-                if target_type == "profit" and group.take_profit_order and group.take_profit_order.totally_filled():
-                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.take_profit_order
-        return None
-
-    def _get_cancel_triggered(self) -> Optional[Tuple[PositionDirection, OrderInfo]]:
-        """If entry order has been canceled on broker side, return (direction, order info) or None"""
-        groups = [self.long_order_group, self.short_order_group]
-        for idx, group in enumerate(groups):
-            if group:
-                if group.entry_order.order_status == OrderStatus.CANCELLED:
-                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.entry_order
-        return None
-
     def launch(self, after_reset: bool = False):
         # TODO: docs
         if after_reset:
@@ -245,7 +255,6 @@ class Position:
                     self.logger.info(
                         f"Position: {self.position_id} for {self.security_descriptor.to_string()} activated from start_state"
                     )
-                    self.logger.info(f"**** butt {self._trigger_data}")
                     direction, entry_prices, stop_prices, max_loss, cash_left = self._trigger_data.values()
                     await self._to_state_created(direction, entry_prices, stop_prices, max_loss, cash_left)
                     break
@@ -320,6 +329,7 @@ class Position:
                     PositionDirection.SHORT if fill_direction == PositionDirection.LONG else PositionDirection.LONG
                 )
                 await self._do_cancel(cancel_direction)
+                self.position_direction = fill_direction
 
             await self.entered_state(fill_direction, True)
 
@@ -369,7 +379,7 @@ class Position:
                 # Adjust stop-loss
                 await self._adjust_stop_loss(self.position_direction)
 
-                tp_num_shares = int(group.entry_order.shares_filled) - int(group.take_profit_order.shares_filled)
+                tp_num_shares = self.get_current_shares()
                 # We want a new take-profit that's half a percent away from last take-profit
                 if direction == PositionDirection.LONG:
                     tp_price = group.take_profit_order.avg_fill_price * 1.005
@@ -387,10 +397,10 @@ class Position:
             order_type=OrderType.LIMIT,
         )
         if error_str is not None:
-            error_message = f"Error while creating take_profit order: {error_str}"
-            self.logger.warning(error_message)
+            error_msg = f"Error while creating take_profit order: {error_str}"
+            self.logger.warning(error_msg)
             # Seems unnecessary to raise error
-            # raise PositionException(error_message)
+            # raise PositionException(error_msg)
 
         self.logger.info(f"Made take-profit order for {self.position_id} for {self.security_descriptor.to_string()}")
 
@@ -548,47 +558,31 @@ class Position:
 
         self.trigger_event(event="exit")
 
-    def get_info(self) -> List[str]:
+    def _get_target_hit(self, target_type: str) -> Optional[Tuple[PositionDirection, OrderInfo]]:
         """
-        Gets printable info about position
-        :return: list of printable lines
+        If an order has been filled, return info about order
+        :param target_type: "entry", "stop", "profit"
+        :return: (direction, order info) or None
         """
-        cost = 0.0
-        group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
-        if self.position_state in [PositionState.ENTERED]:
-            num_shares = self.get_current_shares()
-            shares_line = f"Shares: {num_shares}"
-        elif self.position_state == PositionState.CREATED:
+        groups = [self.long_order_group, self.short_order_group]
+        for idx, group in enumerate(groups):
             if group:
-                num_shares = group.entry_order.shares_remaining
-                shares_line = f"Shares: {num_shares} (prospective)"
-            else:
-                num_shares = 0
-                shares_line = "Shares: ???"
-        else:
-            num_shares = 0
-            shares_line = "Shares: 0"
+                if target_type == "entry" and group.entry_order.totally_filled():
+                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.entry_order
+                if target_type == "stop" and group.stop_loss_order and group.stop_loss_order.totally_filled():
+                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.stop_loss_order
+                if target_type == "profit" and group.take_profit_order and group.take_profit_order.totally_filled():
+                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.take_profit_order
+        return None
 
-        extra_info_dict = {}
-        if group:
-            extra_info_dict["entry_price"] = group.entry_order.avg_fill_price
-            extra_info_dict["entry_shares"] = group.entry_order.shares_filled
-            extra_info_dict["entry_shares_remaining"] = group.entry_order.shares_remaining
-            if group.stop_loss_order:
-                extra_info_dict["exit_price"] = group.stop_loss_order.avg_fill_price
-                extra_info_dict["exit_shares"] = group.stop_loss_order.shares_filled
-                extra_info_dict["exit_shares_remaining"] = group.stop_loss_order.shares_remaining
-
-        lines = [
-            f"Symbol: {self.security_descriptor.to_string()}",
-            f"Position ID: {self.position_id}",
-            f"State: {PositionState(self.position_state).name}",
-            f"Direction: {PositionDirection(self.position_direction).name}",
-            shares_line,
-        ]
-        if len(extra_info_dict):
-            lines.append(f"Extra info: {extra_info_dict}")
-        return lines
+    def _get_cancel_triggered(self) -> Optional[Tuple[PositionDirection, OrderInfo]]:
+        """If entry order has been canceled on broker side, return (direction, order info) or None"""
+        groups = [self.long_order_group, self.short_order_group]
+        for idx, group in enumerate(groups):
+            if group:
+                if group.entry_order.order_status == OrderStatus.CANCELLED:
+                    return (PositionDirection.LONG if idx == 0 else PositionDirection.SHORT), group.entry_order
+        return None
 
     async def _to_state_created(
         self,
@@ -599,7 +593,7 @@ class Position:
         cash_left: float,
     ):
         """
-        See activate(). Meant to be wrapped in a task.
+        Transitions to created_state() from start_state().
         """
         if direction == PositionDirection.LONG:
             entry = entry_prices[0]
@@ -636,8 +630,7 @@ class Position:
         cash_left: float,
     ):
         """
-        Enters a position right now.
-        TODO: more docs
+        Transitions to entered_state() from start_state()
         """
         self.logger.info(
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
@@ -670,9 +663,14 @@ class Position:
         await self.entered_state(direction, fresh_entry=True)
 
     async def _do_exit(self):
-        """Exit the position we're in, then go to exited_state."""
+        """Exit the position we're in, then go to exited_state()."""
+
         self.logger.info(f"Exiting position {self.position_id} for {self.security_descriptor.to_string()}")
         num_shares = self.get_current_shares()
+        if num_shares == 0:
+            error_msg = f"Can't exit position {self.position_id}, couldn't calculate share number"
+            self.logger.error(error_msg)
+            raise PositionException(error_msg)
         await self._do_cancel(self.position_direction)
 
         action = OrderAction.SELL if self.position_direction == PositionDirection.LONG else OrderAction.BUY
@@ -697,10 +695,10 @@ class Position:
 
     async def _do_cancel(self, direction: PositionDirection, go_to_cancelled_state: bool = False):
         """
-        Cancels unfilled orders that are still active, if they need to be cancelled. Should be wrapped in a
-        task by caller.
+        Cancels unfilled orders that are still active, if they need to be cancelled.
 
         :param direction: long, short, or dual
+        :param go_to_cancelled_state: if set, transition to cancelled_state()
         """
         self.position_state = PositionState.CANCELED
 
@@ -759,7 +757,7 @@ class Position:
             self.logger.error(error_msg)
             raise PositionException(error_msg)
 
-        shares_left = group.entry_order.shares_filled - group.take_profit_order.shares_filled
+        shares_left = self.get_current_shares()
         if shares_left == 0:
             await self._do_cancel(direction, go_to_cancelled_state=False)
             await self.closed_state()
@@ -788,8 +786,10 @@ class Position:
             f"Adjusting stop-loss for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
 
-        # TODO: fix this in case multiple take-profits
-        shares_left = group.take_profit_order.shares_filled - group.take_profit_order.shares_filled
+        shares_left = self.get_current_shares()
+        if shares_left == 0:
+            self.logger.warning(f"Can't adjust stop-loss for position {self.position_id}, no shares left")
+            return
         stop_loss_order = group.stop_loss_order
         if price is None:
             price = stop_loss_order.avg_fill_price
@@ -874,3 +874,4 @@ class Position:
         self.short_order_group = OrderGroup(entry_order, stop_loss_order)
         self.short_order_group.set_initial_quantities(_entry, _stop, num_shares)
         return num_shares, cost
+
