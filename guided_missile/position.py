@@ -1,6 +1,6 @@
 import asyncio
 from tokenize import group
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Callable, Any
 from enum import Enum, auto
 from logging import getLogger
 
@@ -113,7 +113,9 @@ class Position:
         self._trigger_data: Dict = {}
         self._stop_event: asyncio.Event = asyncio.Event()
 
-        self._state_task: Optional[asyncio.Task] = None
+        self._pm_callback: Optional[Callable[[int, int, float], Any]] = None
+
+        self._state_machine_task: Optional[asyncio.Task] = None
 
     def set_historical_data_stream(self, historical_data: Optional[HistoricalData]):
         """Sets a historical data stream to be associated with this position, or None"""
@@ -150,6 +152,8 @@ class Position:
             f"State: {PositionState(self.position_state).name}",
             f"Direction: {PositionDirection(self.position_direction).name}",
             shares_line,
+            f"Theoretical cost: {self.theoretical_cost}",
+            f"Profits realized: {self.get_profit()}"
         ]
         if group:
             lines.append(
@@ -214,33 +218,47 @@ class Position:
             return total_cost - total_revenue
 
     def trigger_event(self, **kwargs):
-        """Triggers an action requested from console."""
-        # TODO: better docs
+        """Triggers an action requested from command console, e.g. activate or cancel."""
         self._trigger_data = kwargs
         self._trigger_event.set()
 
     def stop_all_states(self):
-        """TODO: docs"""
+        """Brings the position's state machine to a halt."""
         self._stop_event.set()
-        self._state_task = None
+        self._state_machine_task = None
 
-    def is_stopped(self) -> bool:
+    def are_states_stopped(self) -> bool:
         return self._stop_event.is_set()
 
     def launch(self, after_reset: bool = False):
-        # TODO: docs
+        """
+        Launches the state machine, going to the start state or the enter state.
+        :param after_reset: if True, position is being reset, so go to enter state
+        """
         if after_reset:
-            self._state_task = asyncio.create_task(self.entered_state(self.position_direction, fresh_entry=False))
+            self._state_machine_task = asyncio.create_task(self.entered_state(self.position_direction, fresh_entry=False))
         else:
-            self._state_task = asyncio.create_task(self.start_state())
+            self._state_machine_task = asyncio.create_task(self.start_state())
 
-    def get_state_task_done(self) -> Tuple[bool, Optional[Exception]]:
-        # TODO: docs
-        if self._state_task is None:
+    def is_state_machine_done(self) -> Tuple[bool, Optional[Exception]]:
+        """
+        Lets caller know whether state machine is done running.
+        :return: (True if done, exception, if any occured, or None)
+        """
+        if self._state_machine_task is None:
             return True, None
-        if self._state_task.done():
-            return True, self._state_task.exception()
+        if self._state_machine_task.done():
+            return True, self._state_machine_task.exception()
         return False, None
+
+    def set_pm_callback(self, callback: Callable[[int, int, float], Any]):
+        """
+        Sets callback to inform PositionManager of when a position has changed, in terms of shares held.
+        The num shares param will be negative if shares are sold.
+
+        :param callback: function that takes params (position ID, num shares, price)
+        """
+        self._pm_callback = callback
 
     async def start_state(self):
         """
@@ -321,6 +339,9 @@ class Position:
                 )
                 _dir, _info = fill_results
                 fill_direction = _dir
+                # Inform position manager of change
+                dir_multiplier = -1 if self.position_direction == PositionDirection.LONG else 1
+                self._pm_callback(self.position_id, _info.shares_filled * dir_multiplier, _info.avg_fill_price)
                 break
 
             await asyncio.sleep(0.1)
@@ -436,12 +457,18 @@ class Position:
             if stop_loss_tup:
                 _dir, _order = stop_loss_tup
                 stop_loss_direction = _dir
+                # Inform position manager of change
+                dir_multiplier = -1 if self.position_direction == PositionDirection.LONG else 1
+                self._pm_callback(self.position_id, _order.shares_filled * dir_multiplier, _order.avg_fill_price)
                 break
 
             profit_tup = self._get_target_hit("profit")
             if profit_tup:
                 _dir, _order = profit_tup
                 take_profit_direction = _dir
+                # Inform position manager of change
+                dir_multiplier = -1 if self.position_direction == PositionDirection.LONG else 1
+                self._pm_callback(self.position_id, _order.shares_filled * dir_multiplier, _order.avg_fill_price)
                 break
 
             await asyncio.sleep(0.1)
@@ -688,6 +715,14 @@ class Position:
         )
         if error_str is not None:
             raise PositionException(f"Error exiting order: {error_str}")
+
+        # Wait for closing order to be filled
+        while not self._stop_event.is_set() and not exit_order.totally_filled():
+            await asyncio.sleep(0.1)
+
+        # Inform position manager of change
+        dir_multiplier = -1 if self.position_direction == PositionDirection.LONG else 1
+        self._pm_callback(self.position_id, exit_order.shares_filled * dir_multiplier, exit_order.avg_fill_price)
 
         group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
         if group:

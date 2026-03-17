@@ -143,6 +143,7 @@ class GuidedMissile:
         elif command == "info":
             if len(parts) > 1:
                 symbol = parts[1]
+                symbol = symbol.upper()
         if symbol:
             ret_dict["symbol"] = symbol
 

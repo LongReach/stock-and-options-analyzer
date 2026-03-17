@@ -39,6 +39,8 @@ class PositionManager:
         self._position_map: Dict[str, Position] = {}
         self._logger = getLogger(__file__)
 
+        self._need_update_account_values: bool = False
+
     def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
         Adds position to tracking.
@@ -62,6 +64,7 @@ class PositionManager:
 
         self._logger.info(f"PositionManager: adding position for {security_descriptor.to_string()}")
         new_position = Position(security_descriptor)
+        new_position.set_pm_callback(self.position_changed_cb)
         self._position_map[security_descriptor.to_string()] = new_position
 
         new_position.launch()
@@ -261,6 +264,7 @@ class PositionManager:
             f"Attempting to reset position for {security_descriptor.to_string()}, actual quantity {quantity}"
         )
         new_position = Position(security_descriptor)
+        new_position.set_pm_callback(self.position_changed_cb)
         direction = PositionDirection.SHORT if is_short else PositionDirection.LONG
         new_position.position_direction = direction
         new_position.position_state = PositionState.ENTERED
@@ -308,8 +312,12 @@ class PositionManager:
 
     async def update(self):
         # TODO: docs
+        if self._need_update_account_values:
+            await self._update_cash_amount()
+            self._need_update_account_values = False
+
         for pos_name, position in self._position_map.items():
-            task_done, exception = position.get_state_task_done()
+            task_done, exception = position.is_state_machine_done()
             if task_done and exception is not None:
                 self._logger.error(f"Exception for position {position.position_id}: {exception}")
                 position.stop_all_states()
@@ -347,6 +355,10 @@ class PositionManager:
 
     def get_cash_status(self) -> Tuple[float, float]:
         return self._account_value, self._cash_available
+
+    def position_changed_cb(self, position_id: int, shares: int, price: float):
+        """Called whenever a position changes"""
+        self._need_update_account_values = True
 
     async def _get_historical_data_stream(
         self, security_descriptor: SecurityDescriptor, bars_back: int, bar_size: BarSize
@@ -387,8 +399,7 @@ class PositionManager:
         # Now, we ask IB directly about positions we're in
         positions_info, error_str = await self.ib_driver.get_positions()
         if error_str:
-            # TODO: log something
-            pass
+            self._logger.error(f"Could not update cash amount. Error is: {error_str}")
         else:
             positions = positions_info.get_positions()
             for position in positions:
