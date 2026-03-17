@@ -100,18 +100,20 @@ class PositionManager:
 
         bar_highs = [bar.high for bar in historical_data.bar_data]
         highest_recent_price = max(bar_highs)
+        top_price_buffer = self._get_entry_exit_buffer(highest_recent_price)
         bar_lows = [bar.low for bar in historical_data.bar_data]
         lowest_recent_price = min(bar_lows)
+        bottom_price_buffer = self._get_entry_exit_buffer(lowest_recent_price)
 
         if direction == PositionDirection.LONG:
-            entries = [highest_recent_price]
-            stops = [lowest_recent_price]
+            entries = [highest_recent_price + top_price_buffer]
+            stops = [lowest_recent_price - bottom_price_buffer]
         elif direction == PositionDirection.SHORT:
-            entries = [lowest_recent_price]
-            stops = [highest_recent_price]
+            entries = [lowest_recent_price - bottom_price_buffer]
+            stops = [highest_recent_price + top_price_buffer]
         else:
-            entries = [highest_recent_price, lowest_recent_price]
-            stops = [lowest_recent_price, highest_recent_price]
+            entries = [highest_recent_price + top_price_buffer, lowest_recent_price - bottom_price_buffer]
+            stops = [lowest_recent_price - bottom_price_buffer, highest_recent_price + top_price_buffer]
 
         self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
         try:
@@ -151,15 +153,17 @@ class PositionManager:
 
         bar_highs = [bar.high for bar in historical_data.bar_data]
         highest_recent_price = max(bar_highs)
+        top_price_buffer = self._get_entry_exit_buffer(highest_recent_price)
         bar_lows = [bar.low for bar in historical_data.bar_data]
         lowest_recent_price = min(bar_lows)
+        bottom_price_buffer = self._get_entry_exit_buffer(lowest_recent_price)
 
         if direction == PositionDirection.LONG:
-            entry = highest_recent_price
-            stop = lowest_recent_price
+            entry = highest_recent_price + top_price_buffer
+            stop = lowest_recent_price - bottom_price_buffer
         elif direction == PositionDirection.SHORT:
-            entry = lowest_recent_price
-            stop = highest_recent_price
+            entry = lowest_recent_price - bottom_price_buffer
+            stop = highest_recent_price + top_price_buffer
         else:
             return False, "Dual mode not supported"
 
@@ -391,3 +395,18 @@ class PositionManager:
                 cash_deduction += position.price * float(position.quantity)
 
         self._cash_available = self._account_value - cash_deduction
+
+    @staticmethod
+    def _get_entry_exit_buffer(price: float) -> float:
+        buffer_value_map: Dict[float, float] = {
+            20.0: 0.01,
+            50.0: 0.02,
+            100.0: 0.03,
+            500.0: 0.05,
+            1000.0: 0.10,
+            1000000.0: 0.50
+        }
+        for price_entry, buffer_val in buffer_value_map.items():
+            if price < price_entry:
+                return buffer_val
+        return 0.0
