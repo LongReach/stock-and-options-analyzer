@@ -20,6 +20,7 @@ Run like:
 python -m scripts.options_manager_example
 """
 
+CLIENT_ID = 16
 TICKER = "AAPL"
 MIN_DAYS_AWAY = 5
 MAX_DAYS_AWAY = 70
@@ -36,7 +37,7 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=2112)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
         await asyncio.sleep(1.0)
@@ -44,12 +45,8 @@ async def main():
         options_manager.add_driver(ib_driver)
 
         print(f"Getting expirations for {TICKER}...")
-        expirations = await options_manager.get_expirations(
-            TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY
-        )
-        print(
-            f"Expirations for {TICKER} between {MIN_DAYS_AWAY} and {MAX_DAYS_AWAY} days away are {expirations}"
-        )
+        expirations = await options_manager.get_expirations(TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY)
+        print(f"Expirations for {TICKER} between {MIN_DAYS_AWAY} and {MAX_DAYS_AWAY} days away are {expirations}")
 
         print(f"Getting strikes for {TICKER}, {expirations[-1]}...")
         strikes, idx = await options_manager.get_strikes(

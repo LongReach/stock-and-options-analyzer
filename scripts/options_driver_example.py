@@ -19,11 +19,13 @@ Run like:
 python -m scripts.options_driver_example
 """
 
+CLIENT_ID = 15
+
 
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_driver_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=17)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
         contract_details_list, error_str = await ib_driver.get_contract_details("SPY")
@@ -34,9 +36,7 @@ async def main():
 
         print(f"Got {contract_details.contract}")
         # contract_id = contract_details.contract.conId
-        option_info, error_str = await ib_driver.get_options_chain_info(
-            contract_details
-        )
+        option_info, error_str = await ib_driver.get_options_chain_info(contract_details)
         print(f"Get options info from exchange {option_info.exchange}")
         exp_list = sorted(option_info.expirations)
         print(f"Expirations are {exp_list}")
@@ -61,9 +61,7 @@ async def main():
             "SPY", is_option=True, is_call=True, expiration="20250620"
         )
         for contract_details in contract_details_list:
-            print(
-                f"Contract Details are {ib_driver.get_full_symbol_from_contract_details(contract_details)}"
-            )
+            print(f"Contract Details are {ib_driver.get_full_symbol_from_contract_details(contract_details)}")
 
     except Exception as ex:
         print(f"Exception: {ex}")

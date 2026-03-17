@@ -9,6 +9,12 @@ from core.common import HistoricalData
 from core.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
+"""
+Very basic example of collecting bars of market data via IB Gateway. Notice the different bar sizes.
+"""
+
+CLIENT_ID = 12
+
 
 def print_historical_data(bars: HistoricalData):
     for bar in bars.bar_data:
@@ -19,7 +25,7 @@ def print_historical_data(bars: HistoricalData):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=12)
+    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
 
@@ -32,14 +38,10 @@ async def main():
         results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10)
         print("Daily bars for SPY are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
-            "AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR
-        )
+        results, error_str = await ib_driver.get_historical_data("AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR)
         print("Hourly bars for AAPL are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
-            "DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS
-        )
+        results, error_str = await ib_driver.get_historical_data("DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS)
         print("Four-hour bars for DIA are\n------------------------")
         print_historical_data(results)
         results, error_str = await ib_driver.get_historical_data(
