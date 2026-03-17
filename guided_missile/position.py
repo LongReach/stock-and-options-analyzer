@@ -152,12 +152,17 @@ class Position:
             shares_line,
         ]
         if group:
-            lines.append(f"Entry: shares filled = {group.entry_order.shares_filled}, shares remaining = {group.entry_order.shares_remaining}, price = {group.entry_order.avg_fill_price}")
+            lines.append(
+                f"Entry: shares filled = {group.entry_order.shares_filled}, shares remaining = {group.entry_order.shares_remaining}, price = {group.entry_order.avg_fill_price}"
+            )
             if group.stop_loss_order:
-                lines.append(f"Stop loss: shares filled = {group.stop_loss_order.shares_filled}, shares remaining = {group.stop_loss_order.shares_remaining}, price = {group.stop_loss_order.avg_fill_price}")
+                lines.append(
+                    f"Stop loss: shares filled = {group.stop_loss_order.shares_filled}, shares remaining = {group.stop_loss_order.shares_remaining}, price = {group.stop_loss_order.avg_fill_price}"
+                )
             if group.take_profit_order:
                 lines.append(
-                    f"Take profit: shares filled = {group.take_profit_order.shares_filled}, shares remaining = {group.take_profit_order.shares_remaining}, price = {group.take_profit_order.avg_fill_price}")
+                    f"Take profit: shares filled = {group.take_profit_order.shares_filled}, shares remaining = {group.take_profit_order.shares_remaining}, price = {group.take_profit_order.avg_fill_price}"
+                )
         return lines
 
     def get_current_shares(self) -> int:
@@ -874,4 +879,3 @@ class Position:
         self.short_order_group = OrderGroup(entry_order, stop_loss_order)
         self.short_order_group.set_initial_quantities(_entry, _stop, num_shares)
         return num_shares, cost
-
