@@ -62,9 +62,7 @@ class StockDataManager:
         """
         file_str = f" from file {filename}" if filename else ""
         self._log(f"Loading data for {symbol}, {bar_size.name}{file_str}")
-        stock_data = self._get_stock_data(
-            symbol, bar_size, info_type, add_if_missing=True
-        )
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         return stock_data.load(filename)
 
     def save_data(
@@ -95,9 +93,7 @@ class StockDataManager:
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ):
         """Clear out any data already loaded"""
-        stock_data = self._get_stock_data(
-            symbol, bar_size, info_type, add_if_missing=True
-        )
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         stock_data.clear()
 
     async def scrape_data(
@@ -124,9 +120,7 @@ class StockDataManager:
         if not self._ib_driver:
             raise StockDataException("No driver set")
 
-        stock_data = self._get_stock_data(
-            symbol, bar_size, info_type, add_if_missing=True
-        )
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         if start_date == "":
             raise StockDataException("Need start date for data scraping")
         start_dt = get_datetime(start_date)
@@ -143,9 +137,7 @@ class StockDataManager:
         ret_error_str = None
         while current_end_dt > start_dt:
             current_start_dt = (
-                start_dt
-                if (current_end_dt - interval_delta) < start_dt
-                else current_end_dt - interval_delta
+                start_dt if (current_end_dt - interval_delta) < start_dt else current_end_dt - interval_delta
             )
             self._log(
                 f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}"
@@ -194,16 +186,12 @@ class StockDataManager:
             scroped.
         :return:
         """
-        stock_data = self._get_stock_data(
-            symbol, bar_size, info_type, add_if_missing=True
-        )
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
 
         df = stock_data.get_data_frame()
         if len(df) == 0:
             # There's nothing "smart" we can do here, no data loaded at all
-            return await self.scrape_data(
-                symbol, bar_size, info_type, start_date, end_date
-            )
+            return await self.scrape_data(symbol, bar_size, info_type, start_date, end_date)
 
         # Oldest date for which there's data
         oldest_dt: datetime = df.iloc[0]["date"].to_pydatetime()

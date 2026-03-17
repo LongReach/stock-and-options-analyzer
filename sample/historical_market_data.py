@@ -23,9 +23,7 @@ class TestApp(EClient, EWrapper):
         return self.orderId
 
     def error(self, reqId, errorCode, errorString, advancedOrderReject=""):
-        print(
-            f"reqId: {reqId}, errorCode: {errorCode}, errorString: {errorString}, orderReject: {advancedOrderReject}"
-        )
+        print(f"reqId: {reqId}, errorCode: {errorCode}, errorString: {errorString}, orderReject: {advancedOrderReject}")
 
     def historicalData(self, reqId, bar):
         print(reqId, bar)

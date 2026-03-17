@@ -4,7 +4,15 @@ from typing import Optional, Dict, List, Tuple, Union, Set
 from enum import Enum, auto
 from datetime import datetime, timedelta
 
-from core.common import SecurityDescriptor, HistoricalData, OptionChainInfo, OptionInfo
+from core.common import (
+    SecurityDescriptor,
+    HistoricalData,
+    OptionChainInfo,
+    OptionInfo,
+    OrderInfo,
+    PositionDescriptor,
+    PositionsInfo,
+)
 from core.utils import wait_for_condition, get_datetime, get_datetime_as_str, BarSize
 
 
@@ -115,3 +123,19 @@ class OptionRequest(DataRequest):
     def __init__(self):
         super().__init__()
         self.option_info = OptionInfo()
+
+
+class OrderRequest(DataRequest):
+    """For tracking an order request and capturing results returned so far."""
+
+    def __init__(self):
+        super().__init__()
+        self.order_info = OrderInfo()
+
+
+class PositionsRequest(DataRequest):
+    """For tracking a positions info request and capturing results returned so far."""
+
+    def __init__(self):
+        super().__init__()
+        self.positions_info = PositionsInfo()

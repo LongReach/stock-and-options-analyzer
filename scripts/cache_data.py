@@ -18,6 +18,12 @@ from core.utils import (
     current_datetime,
 )
 
+"""
+Utility for collecting price (or other) data for a particular security, in bar form, then caching it to disk.
+"""
+
+CLIENT_ID = 13
+
 
 def print_df(df):
     if df is None:
@@ -43,16 +49,14 @@ async def main(
     stock_manager = StockDataManager()
     ib_driver = None
     if not info_only:
-        ib_driver = IBDriver(sim_account=True, client_id=14)
+        ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
         stock_manager.add_driver(ib_driver)
     stock_manager.set_log_to_stdout(True)
     bar_size = str_to_bar_size(bar_size_str)
     info_type = StockData.get_info_type(info_type_str)
 
     if info_only:
-        print(
-            f"Displaying data for {symbol}, {bar_size_str}\n======================================"
-        )
+        print(f"Displaying data for {symbol}, {bar_size_str}\n======================================")
     else:
         action_str = "Updating" if update else "Scraping"
         print(
@@ -104,12 +108,8 @@ parser.add_argument(
     default="tr",
     type=str,
 )
-parser.add_argument(
-    "--info-only", help="don't do any scraping, just show info", action="store_true"
-)
-parser.add_argument(
-    "--update", help="add more recent data to file", action="store_true"
-)
+parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
+parser.add_argument("--update", help="add more recent data to file", action="store_true")
 parser.add_argument("--fresh", help="re-scrape all data", action="store_true")
 args = parser.parse_args()
 

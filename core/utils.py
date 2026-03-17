@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Union
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -24,7 +25,7 @@ def bar_size_to_str(bar_size: BarSize) -> str:
 
 
 def str_to_bar_size(bar_size_str: str) -> BarSize:
-    """Given a string description, return a BarSize"""
+    """Given a string description, e.g. '1d', return a BarSize"""
     conversion_map = {
         "1m": BarSize.ONE_MINUTE,
         "5m": BarSize.FIVE_MINUTES,
@@ -110,9 +111,7 @@ def get_datetime(ib_date: str) -> datetime:
         raise TypeError(f"Bad second value of {second} in IB date {ib_date}")
 
     try:
-        dt = datetime(
-            year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE)
-        )
+        dt = datetime(year, month, day, hour, minute, second, tzinfo=ZoneInfo(MARKETS_TIMEZONE))
     except:
         raise TypeError(f"General failure to convert IB date {ib_date}")
     return dt
@@ -145,3 +144,32 @@ def current_datetime():
 def non_naive_datetime(dt: datetime) -> datetime:
     """Given a naive datetime (no timezone), set it to market time"""
     return dt.replace(tzinfo=ZoneInfo(MARKETS_TIMEZONE))
+
+
+@asynccontextmanager
+async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
+    """
+    Helper function for waiting for an asyncio.Lock, but with a timeout.
+
+    Use like:
+
+    async with lock_with_timeout(lock, 5) as acquired:
+        if not acquired:
+            return
+        # do something
+
+    :param lock: --
+    :param timeout: timeout in seconds
+    """
+    acquired = False
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout)
+        acquired = True
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()

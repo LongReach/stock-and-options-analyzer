@@ -70,9 +70,7 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_2[TradeColumn.DATE_CLOSED] = ""
         out_fields_2[TradeColumn.RIGHT] = out_fields_1[TradeColumn.RIGHT]
         out_fields_2[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[
-            TradeColumn.NUM_CONTRACTS
-        ]
+        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
 
         position_tracker.add_trade_row(out_fields_1)
         position_tracker.add_trade_row(out_fields_2)
@@ -103,9 +101,7 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_2[TradeColumn.DATE_CLOSED] = ""
         out_fields_2[TradeColumn.RIGHT] = "P"
         out_fields_2[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[
-            TradeColumn.NUM_CONTRACTS
-        ]
+        out_fields_2[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
 
         dialog = TradeDialog("Short bear leg")
         dialog.set_fields_and_defaults(input_fields)
@@ -116,9 +112,7 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_3[TradeColumn.DATE_CLOSED] = ""
         out_fields_3[TradeColumn.RIGHT] = "C"
         out_fields_3[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_3[TradeColumn.NUM_CONTRACTS] = out_fields_1[
-            TradeColumn.NUM_CONTRACTS
-        ]
+        out_fields_3[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
 
         dialog = TradeDialog("Long bear leg")
         dialog.set_fields_and_defaults(input_fields)
@@ -129,9 +123,7 @@ def input_trades_new(position_fields: Dict[PositionColumn, Any]):
         out_fields_4[TradeColumn.DATE_CLOSED] = ""
         out_fields_4[TradeColumn.RIGHT] = "C"
         out_fields_4[TradeColumn.EXPIRATION] = out_fields_1[TradeColumn.EXPIRATION]
-        out_fields_4[TradeColumn.NUM_CONTRACTS] = out_fields_1[
-            TradeColumn.NUM_CONTRACTS
-        ]
+        out_fields_4[TradeColumn.NUM_CONTRACTS] = out_fields_1[TradeColumn.NUM_CONTRACTS]
 
         position_tracker.add_trade_row(out_fields_1)
         position_tracker.add_trade_row(out_fields_2)
