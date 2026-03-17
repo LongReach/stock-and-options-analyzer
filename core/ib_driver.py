@@ -1056,7 +1056,7 @@ class IBDriver(IBWrapper):
             order_status,
             int(filled),
             int(remaining),
-            avg_fill_price if int(filled) > 0 else None,
+            float(avg_fill_price) if int(filled) > 0 else None,
             "order_status_cb",
         )
 
@@ -1092,7 +1092,7 @@ class IBDriver(IBWrapper):
             order_status,
             int(num_shares),
             int(remaining_shares),
-            order.auxPrice,
+            float(order.auxPrice),
             "open_order_cb",
         )
 
@@ -1105,7 +1105,7 @@ class IBDriver(IBWrapper):
         self._receive_order_data(
             execution.orderId,
             OrderStatus.FILLED,
-            execution.shares,
+            int(execution.shares),
             None,
             None,
             "exec_details_cb",
