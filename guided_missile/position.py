@@ -153,7 +153,7 @@ class Position:
             f"Direction: {PositionDirection(self.position_direction).name}",
             shares_line,
             f"Theoretical cost: {self.theoretical_cost}",
-            f"Profits realized: {self.get_profit()}"
+            f"Profits realized: {self.get_profit()}",
         ]
         if group:
             lines.append(
@@ -236,7 +236,9 @@ class Position:
         :param after_reset: if True, position is being reset, so go to enter state
         """
         if after_reset:
-            self._state_machine_task = asyncio.create_task(self.entered_state(self.position_direction, fresh_entry=False))
+            self._state_machine_task = asyncio.create_task(
+                self.entered_state(self.position_direction, fresh_entry=False)
+            )
         else:
             self._state_machine_task = asyncio.create_task(self.start_state())
 
