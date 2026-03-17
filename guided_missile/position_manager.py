@@ -404,7 +404,7 @@ class PositionManager:
             100.0: 0.03,
             500.0: 0.05,
             1000.0: 0.10,
-            1000000.0: 0.50
+            1000000.0: 0.50,
         }
         for price_entry, buffer_val in buffer_value_map.items():
             if price < price_entry:
