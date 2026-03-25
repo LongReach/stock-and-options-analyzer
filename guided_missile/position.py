@@ -10,7 +10,7 @@ from core.common import (
     OrderAction,
     OrderType,
     OrderStatus,
-    HistoricalData,
+    HistoricalData, OrderPurpose,
 )
 from core.utils import wait_for_condition
 from core.ib_driver import IBDriver
@@ -454,6 +454,10 @@ class Position:
                     # Exit command from control console
                     do_exit = True
                     break
+                if event_name == "adjust":
+                    # Adjust command from control console
+                    event_name, order_purpose, price, relative = self._trigger_data.values()
+                    await self._do_user_adjustment(order_purpose, price, relative)
 
             stop_loss_tup = self._get_target_hit("stop")
             if stop_loss_tup:
@@ -591,6 +595,13 @@ class Position:
             raise PositionException("Can't directly exit dual position")
 
         self.trigger_event(event="exit")
+
+    def adjust(self, order_purpose: OrderPurpose, price: float, relative: bool):
+        """TODO"""
+        if self.position_state not in [PositionState.ENTERED]:
+            raise PositionException(f"Can't adjust position, current state is {PositionState(self.position_state).name}")
+
+        self.trigger_event(event="adjust", order_purpose=order_purpose, price=price, relative=relative)
 
     def _get_target_hit(self, target_type: str) -> Optional[Tuple[PositionDirection, OrderInfo]]:
         """
@@ -851,6 +862,46 @@ class Position:
 
         self.logger.info(
             f"Have adjusted stop-loss for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
+        )
+
+    async def _do_user_adjustment(self, order_purpose, price, relative):
+        group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
+        if group is None:
+            self.logger.warning(f"Can't adjust order for position {self.position_id}, no group")
+            return
+
+        if order_purpose == OrderPurpose.ENTRY:
+            order_info = group.entry_order
+            action = OrderAction.BUY if self.position_direction == PositionDirection.LONG else OrderAction.SELL
+        elif order_purpose == OrderPurpose.STOP_LOSS:
+            order_info = group.stop_loss_order
+            action = OrderAction.SELL if self.position_direction == PositionDirection.LONG else OrderAction.BUY
+        else:
+            order_info = group.take_profit_order
+            action = OrderAction.SELL if self.position_direction == PositionDirection.LONG else OrderAction.BUY
+        if order_info is None:
+            self.logger.warning(f"Can't adjust order for position {self.position_id}, no order info")
+            return
+
+        if relative:
+            new_price = order_info.avg_fill_price + price
+        else:
+            new_price = price
+
+        adjusted_order, error_str = await self.ib_driver.change_order(
+            order_info,
+            action=action,
+            quantity=order_info.shares_remaining,
+            price=new_price,
+            order_type=order_info.order_type,
+        )
+
+        if error_str is not None:
+            self.logger.warning(f"Error while adjusting stop loss: {error_str}")
+            return
+
+        self.logger.info(
+            f"Have adjusted order for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(self.position_direction).name}"
         )
 
     async def _setup_long(self, _entry, _stop, max_loss, cash_left, market_order: bool = False) -> Tuple[int, float]:

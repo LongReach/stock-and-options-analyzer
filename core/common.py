@@ -68,6 +68,15 @@ class OrderStatus(Enum):
     FILLED = auto()
 
 
+class OrderPurpose:
+    """
+    Indicates the purpose of an order in a position, e.g. entry or stop-less.
+    """
+    ENTRY = auto()
+    STOP_LOSS = auto()
+    TAKE_PROFIT = auto()
+
+
 class SecurityDescriptor:
     """
     Describes a security, either a stock or an option. E.g.:

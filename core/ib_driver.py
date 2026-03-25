@@ -1194,7 +1194,7 @@ class IBDriver(IBWrapper):
         )
         num_shares = position if position >= 0 else -position
         is_short = position < 0
-        self._request_positions_object.positions_info.set_position(security_descriptor, num_shares, avg_cost, is_short)
+        self._request_positions_object.positions_info.set_position(security_descriptor, int(num_shares), float(avg_cost), is_short)
 
     def position_end_cb(self):
         """

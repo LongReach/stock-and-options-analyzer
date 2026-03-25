@@ -4,6 +4,7 @@ from typing import Union
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from enum import Enum, auto
+import traceback
 
 from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
@@ -173,3 +174,9 @@ async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
     finally:
         if acquired:
             lock.release()
+
+def get_exception_traceback(ex: Exception):
+    tb_obj = ex.__traceback__
+    # Format the traceback object into a list of strings and join them
+    tb_str = "".join(traceback.format_tb(tb_obj))
+    return tb_str
