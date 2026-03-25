@@ -11,7 +11,7 @@ from core.common import (
     OrderInfo,
     OrderStatus,
     OrderType,
-    OrderAction,
+    OrderAction, OrderPurpose,
 )
 from core.utils import wait_for_condition
 from guided_missile.position import (
@@ -213,7 +213,7 @@ class PositionManager:
 
         return True, None
 
-    async def reset(self, security_descriptor: SecurityDescriptor):
+    async def reset(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, str]:
         """Rebuilds a Position object for a position that we're actually in, on the brokerage side."""
         existing_position = self._position_map.get(security_descriptor.to_string())
         if existing_position and existing_position.position_state not in [
@@ -310,6 +310,24 @@ class PositionManager:
 
         return True, None
 
+    async def adjust(self, security_descriptor: SecurityDescriptor, price: float, relative: bool, order_purpose: OrderPurpose) -> Tuple[bool, str]:
+        position = self._position_map.get(security_descriptor.to_string())
+        if position is None:
+            return False, f"Could not adjust position for {security_descriptor}, not found"
+
+        position.adjust(order_purpose, price, relative)
+
+        return True, None
+
+    async def clear_positions(self):
+        """TODO"""
+        remove_positions: List[str] = []
+        for pos_name, pos in self._position_map.items():
+            if pos.position_state in [PositionState.NONE, PositionState.CLOSED, PositionState.CANCELED]:
+                remove_positions.append(pos_name)
+        for pos_name in remove_positions:
+            self._position_map.pop(pos_name, None)
+
     async def update(self):
         # TODO: docs
         if self._need_update_account_values:
@@ -359,6 +377,11 @@ class PositionManager:
     def position_changed_cb(self, position_id: int, shares: int, price: float):
         """Called whenever a position changes"""
         self._need_update_account_values = True
+        found_pos_name = "???"
+        for pos_name, pos in self._position_map.items():
+            if pos.position_id == position_id:
+                found_pos_name = pos_name
+        self._logger.info(f">>>> Position changed: {found_pos_name}, shares = {shares}, price = {price}")
 
     async def _get_historical_data_stream(
         self, security_descriptor: SecurityDescriptor, bars_back: int, bar_size: BarSize

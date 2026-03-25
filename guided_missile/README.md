@@ -11,3 +11,12 @@ This software supports a strategy in which stocks/ETFs/options can be expected t
 Daytrading, by its nature, moves very fast and this tool is meant to inject some "fire and forget" dependency into the process. Since the user is likely to be dealing with multiple positions or potential positions at once, it's good to be able to turn some of them over to an autopilot.
 
 ***DO NOT*** use this tool unless you have a clear idea of what you're doing, which few people viewing this README are likely to. Please activate TWS in paper-trading mode and use that for a while, as opposed to trading real money.
+
+# Running
+
+Run scripts here from root folder like:
+```powershell
+# Or whatever your environment is
+conda activate options_2025_1
+python -m scripts.missile_launcher
+```
