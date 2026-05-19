@@ -28,7 +28,8 @@ async def main():
     ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     try:
         ib_driver.connect()
-        contract_details_list, error_str = await ib_driver.get_contract_details("SPY")
+        # FIXME 5-19
+        contract_details_list, error_str = await ib_driver._get_contract_details("SPY")
         if error_str or len(contract_details_list) == 0:
             print(f"Error: {error_str}")
             return
@@ -45,19 +46,20 @@ async def main():
 
         await asyncio.sleep(1.0)
 
-        contract_details_list, error_str = await ib_driver.get_contract_details(
+        contract_details_list, error_str = await ib_driver._get_contract_details(
             "SPY", is_option=True, is_call=True, strike=600.0, expiration="20250620"
         )
         if error_str or len(contract_details_list) == 0:
             print(f"Error: {error_str}")
             return
         contract_details = contract_details_list[0]
+        # FIXME 5-19
         option_info, error_str = await ib_driver.get_greeks(contract_details)
         print(f"Option info is: {option_info.to_dict()}")
 
         # Extra experimental
         print("\nExtra experimental part")
-        contract_details_list, error_str = await ib_driver.get_contract_details(
+        contract_details_list, error_str = await ib_driver._get_contract_details(
             "SPY", is_option=True, is_call=True, expiration="20250620"
         )
         for contract_details in contract_details_list:

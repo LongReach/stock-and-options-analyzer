@@ -42,6 +42,14 @@ class RequestedInfoType(Enum):
     ADJUSTED_LAST = "ADJUSTED_LAST"
 
 
+class OptionsStructureType(Enum):
+    """TODO"""
+
+    UNDEFINED = auto()
+    VERTICAL_SPREAD = auto()
+    IRON_CONDOR = auto()
+
+
 class OrderAction(Enum):
     BUY = auto()
     SELL = auto()
@@ -281,6 +289,14 @@ class OptionInfo:
         self._interest_defined: bool = False
         self._volume_defined: bool = False
 
+    def get_underlying_name(self) -> Optional[str]:
+        """Return symbol for underlying stock, e.g. AAPL"""
+        if self.full_name == "":
+            return None
+
+        parts = self.full_name.split("-")
+        return parts[0]
+
     def set_open_interest(self, amount: int, for_call: bool = False):
         """
         Sets open interest.
@@ -346,6 +362,26 @@ class OptionInfo:
         option_info.expiration = parts[2]
         option_info.strike = float(parts[3])
         return option_info
+
+class OptionsStructure:
+
+    """
+    For describing a collection of options legs, such as a vertical spread or iron condor.
+    Each leg is an OptionInfo object.
+    """
+
+    def __init__(self, structure_type: OptionsStructureType):
+        self._structure_type = structure_type
+        self._legs: List[OptionInfo] = []
+
+    def get_type(self) -> OptionsStructureType:
+        return self._structure_type
+
+    def add_leg(self, leg: OptionInfo):
+        self._legs.append(leg)
+
+    def get_legs(self) -> List[OptionInfo]:
+        return self._legs
 
 
 class OrderInfo:
