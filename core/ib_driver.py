@@ -65,12 +65,15 @@ POSITIONS_DATA_TIMEOUT = 30.0
 
 class IBDriver(IBWrapper):
     """
-    This class abstracts away communication with Interactive Brokers. It provides an async interface, meant to
-    hide the threaded-ness of EClient and the need for callers to think about IB's callback-based communication
+    This class wraps the Interactive Brokers API, providing an async interface that's more intuitive and easier
+    to use. It hides the threaded-ness of EClient and the need for callers to think about IB's callback-based communication
     framework. Notice how the function get_historical_data() waits for all data to arrive before returning a result.
 
     Under the hood, commands go out via functions in EClient (a parent of this class) and responses come back to the
     callbacks in IBWrapper, which passes the information on to functions in this class.
+
+    All data returned is in a form not specific to IB Brokers. Classes from the IB API itself should only be used within
+    this class.
 
     Important concepts:
     * Request IDs: each request sent to IB has its own unique ID
@@ -182,11 +185,6 @@ class IBDriver(IBWrapper):
         """Returns True if a connection with TWS has been achieved"""
         return self.request_id is not None
 
-    def next_id(self):
-        """Returns next request ID, advancing the counter."""
-        self.request_id += 1
-        return self.request_id
-
     async def get_historical_data(
         self,
         symbol_full: str,
@@ -218,7 +216,7 @@ class IBDriver(IBWrapper):
         :raises IBDriverException: if data request can't be fulfilled
         """
         async with self._lock:
-            req_id = self.next_id()
+            req_id = self._next_id()
             ticker_desc = SecurityDescriptor(symbol_full)
             req_obj = self._request_bardata_objects[req_id] = BarDataRequest(ticker_desc)
 
@@ -267,12 +265,13 @@ class IBDriver(IBWrapper):
 
         async with self._lock:
             if not live_data:
+                # We can discard the request object from tracks
                 self._request_bardata_objects.pop(req_id, None)
 
         return req_obj.historical_data, ret_error_str
 
     async def cancel_historical_data(self, historical_data: HistoricalData):
-        """Cancels a historical data request, which one might eventually do with streaming data"""
+        """Cancels a historical data request, which one might eventually do with streaming/live data"""
         req_id = await self._find_bardata_request(historical_data)
         if req_id is None:
             self._logger.warning(f"No historical data request found")
@@ -324,7 +323,7 @@ class IBDriver(IBWrapper):
         IB has data.
         """
         async with self._lock:
-            req_id_for_head_timestamp = self.next_id()
+            req_id_for_head_timestamp = self._next_id()
             self._head_timestamp_map[req_id_for_head_timestamp] = ticker
 
         new_contract = self._make_contract(ticker, primary_exchange="NYSE")
@@ -346,7 +345,7 @@ class IBDriver(IBWrapper):
 
         return result
 
-    async def get_contract_details(
+    async def get_option_info(
         self,
         ticker: str,
         primary_exchange: str = None,
@@ -354,77 +353,42 @@ class IBDriver(IBWrapper):
         is_call: bool = False,
         strike: Optional[float] = None,
         expiration: Optional[str] = None,
-    ) -> Tuple[List[ContractDetails], Optional[str]]:
-        """
-        Returns an IB ContractDetails object for given ticker. A CD might be for stock/ETF data, or for
-        a put/call option.
+    ) -> Tuple[List[OptionInfo], Optional[str]]:
 
-        :param ticker: ticker for stock, or underlying, if option
-        :param primary_exchange: --
-        :param is_option: True if option
-        :param is_call: True if option is a call, False if put
-        :param strike: strike price of option
-        :param expiration: expiration date, in IB format
-        :return: (list of ContractDetails, error string or None)
-        """
-        async with self._lock:
-            req_id = self.next_id()
-            req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest(ticker)
+        contract_details_list, error_message = await self._get_contract_details(ticker, primary_exchange, is_option, is_call, strike, expiration)
+        if error_message:
+            return [], f"Unable to get contract details, error is: {error_message}"
 
-        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
-        req_obj.data_fetch_complete = False
-        self.reqContractDetails(req_id, contract)
+        out_list: List[OptionInfo] = []
+        for contract_details in contract_details_list:
+            option_info = OptionInfo()
+            full_ticker = self.get_full_symbol_from_contract_details(contract_details)
+            option_info.full_name = full_ticker
+            option_info.is_call = contract_details.contract.right == "C"
+            option_info.strike = contract_details.contract.strike
+            option_info.expiration = contract_details.contract.lastTradeDateOrContractMonth
+            option_info.set_live(is_trading_hours())
+            out_list.append(option_info)
 
-        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
-        ret_error_str = None
-        if req_obj.has_error():
-            ret_error_str = f"Error getting contract details. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
-            self._logger.error(ret_error_str)
-        elif timed_out:
-            ret_error_str = "Timed out getting contract details."
-            self._logger.error(ret_error_str)
-        else:
-            self._logger.info("get_contract_details() finished")
-        ret_list = req_obj.get_best_list()
-
-        async with self._lock:
-            self._request_contractdetail_objects.pop(req_id, None)
-
-        return ret_list, ret_error_str
-
-    async def get_contract_details_single(
-        self,
-        ticker: str,
-        primary_exchange: str = None,
-    ) -> Tuple[Optional[ContractDetails], Optional[str]]:
-        """
-        Gets a single ContractDetails object. Useful only for CDs on stocks, not options.
-        :param ticker:
-        :param primary_exchange:
-        :return:
-        """
-        cd_list, error_str = await self.get_contract_details(ticker, primary_exchange)
-        if len(cd_list) == 0:
-            return (
-                None,
-                f"Couldn't find contract details for ticker {ticker}, primary exchange {primary_exchange}. Error was {error_str}",
-            )
-        return cd_list[0], error_str
+        return out_list, None
 
     async def get_options_chain_info(
-        self, contract_details: ContractDetails
+        self, ticker: str, primary_exchange: Optional[str]
     ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
         """
         Gets basic information about the option chain for a stock. Strikes and expiration dates
         are the most useful data returned.
 
-        :param contract_details: ContractDetails for a stock
+        :param ticker: ticker of underlying stock
+        :param primary_exchange: primary exchange to use or None
         :return: (OptionChainInfo or None, error string or None)
         """
-        ticker = contract_details.contract.symbol
+        contract_details, error_msg = await self._get_contract_details_single(ticker, primary_exchange=primary_exchange)
+        if error_msg is not None:
+            return None, f"Couldn't get options chain for {ticker}, error is {error_msg}"
 
         async with self._lock:
-            req_id = self.next_id()
+            req_id = self._next_id()
             req_obj = self._request_optionchain_objects[req_id] = OptionChainInfoRequest(ticker)
 
         underlying_contract_id = contract_details.contract.conId
@@ -449,16 +413,27 @@ class IBDriver(IBWrapper):
 
         return option_info, ret_error_str
 
-    async def get_greeks(self, contract_details: ContractDetails) -> Tuple[Optional[OptionInfo], Optional[str]]:
+    async def get_greeks(self, option_info: OptionInfo) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
         Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
         interest, etc.)
 
         For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
 
-        :param contract_details: CD of option for which Greeks are wanted
+        :param option_info: info about option for which Greeks are wanted
         :return: (OptionInfo or None, error string or None)
         """
+        if not option_info.is_defined():
+            return None, "Underlying not defined"
+
+        underlying_name = option_info.get_underlying_name()
+        contract_details_list, error_msg = await self._get_contract_details(ticker=underlying_name, primary_exchange=None, is_option=True, is_call=option_info.is_call, strike=option_info.strike, expiration=option_info.expiration)
+        if error_msg:
+            return None, f"Could not fetch Greeks for {option_info.full_name}, error is: {error_msg}"
+        if len(contract_details_list) == 0:
+            return None, f"Could not fetch Greeks, no contract details found for {option_info.full_name}"
+
+        contract_details = contract_details_list[0]
         if contract_details.contract.secType != "OPT":
             return None, "Contract not for an option"
 
@@ -466,7 +441,7 @@ class IBDriver(IBWrapper):
         self._logger.info(f"Getting Greeks and other info for option {full_ticker}")
 
         async with self._lock:
-            req_id = self.next_id()
+            req_id = self._next_id()
             req_obj = self._request_option_objects[req_id] = OptionRequest()
 
         req_obj.option_info.full_name = full_ticker
@@ -529,7 +504,7 @@ class IBDriver(IBWrapper):
         """
 
         async with self._lock:
-            order_id = self.next_id()
+            order_id = self._next_id()
             # Will be filled out as response comes back
             order_request = self._request_order_objects[order_id] = OrderRequest()
 
@@ -751,6 +726,11 @@ class IBDriver(IBWrapper):
     # Private methods
     # ---------------------------------------------------
 
+    def _next_id(self):
+        """Returns next request ID, advancing the counter."""
+        self.request_id += 1
+        return self.request_id
+
     def _request_historical_data(
         self,
         req_id: int,
@@ -845,6 +825,71 @@ class IBDriver(IBWrapper):
             [],
         )
         self._logger.info(f"Completed request {req_id}.")
+
+    async def _get_contract_details(
+        self,
+        ticker: str,
+        primary_exchange: str = None,
+        is_option: bool = False,
+        is_call: bool = False,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
+    ) -> Tuple[List[ContractDetails], Optional[str]]:
+        """
+        Returns a list of IB ContractDetails object for given ticker. A CD might be for stock/ETF data, or for
+        a put/call option.
+
+        :param ticker: ticker for stock, or underlying, if option
+        :param primary_exchange: --
+        :param is_option: True if option
+        :param is_call: True if option is a call, False if put
+        :param strike: strike price of option
+        :param expiration: expiration date, in IB format
+        :return: (list of ContractDetails, error string or None)
+        """
+        async with self._lock:
+            req_id = self._next_id()
+            req_obj = self._request_contractdetail_objects[req_id] = ContractDetailsRequest(ticker)
+
+        contract = self._make_contract(ticker, primary_exchange, is_option, is_call, strike, expiration)
+        req_obj.data_fetch_complete = False
+        self.reqContractDetails(req_id, contract)
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=HISTORICAL_DATA_TIMEOUT)
+        ret_error_str = None
+        if req_obj.has_error():
+            ret_error_str = f"Error getting contract details. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = "Timed out getting contract details."
+            self._logger.error(ret_error_str)
+        else:
+            self._logger.info("get_contract_details() finished")
+        ret_list = req_obj.get_best_list()
+
+        async with self._lock:
+            self._request_contractdetail_objects.pop(req_id, None)
+
+        return ret_list, ret_error_str
+
+    async def _get_contract_details_single(
+        self,
+        ticker: str,
+        primary_exchange: str = None,
+    ) -> Tuple[Optional[ContractDetails], Optional[str]]:
+        """
+        Gets a single ContractDetails object. Useful only for CDs on stocks, not options.
+        :param ticker:
+        :param primary_exchange:
+        :return:
+        """
+        cd_list, error_str = await self._get_contract_details(ticker, primary_exchange)
+        if len(cd_list) == 0:
+            return (
+                None,
+                f"Couldn't find contract details for ticker {ticker}, primary exchange {primary_exchange}. Error was {error_str}",
+            )
+        return cd_list[0], error_str
 
     def _historical_data_cb(self, req_id: int, in_bar: BarData, real_time: bool):
         """

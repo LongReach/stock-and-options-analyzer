@@ -74,7 +74,8 @@ class IBWrapper(EWrapper, EClient):
     via functions in EClient and responses come back to the callbacks inherited from EWrapper.
 
     This class is meant to do little except implement the callbacks that receive data from TWS.
-    Most of the work is done by this class's child, IBDriver.
+    Most of the work is done by this class's child, IBDriver. Users of IBDriver need not concerns themselves
+    with this class.
     """
 
     def __init__(self):

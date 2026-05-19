@@ -28,8 +28,13 @@ _logger = logging.getLogger(__name__)
 
 class OptionDataManager:
 
+    """
+    Wraps IBDriver, providing functions that simplify collecting options data or placing options orders.
+    """
+
     def __init__(self):
         self._logger = logging.getLogger(__name__)
+        self._ib_driver: Optional[IBDriver] = None
 
     def add_driver(self, ib_driver: IBDriver):
         self._ib_driver = ib_driver
@@ -48,8 +53,7 @@ class OptionDataManager:
             f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
         )
         # This is the CD for the stock, not any option
-        contract_details, error_str = await self._ib_driver.get_contract_details_single(ticker, primary_exchange="NYSE")
-        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(contract_details)
+        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(ticker, primary_exchange="NYSE")
         if error_str:
             raise OptionDataException(error_str)
 
@@ -81,7 +85,7 @@ class OptionDataManager:
             f"Getting strikes for {ticker}, expiration={expiration}, right={right}, num_below={num_below}, num_above={num_above}"
         )
 
-        contract_details_list, error_str = await self._ib_driver.get_contract_details(
+        option_info_list, error_str = await self._ib_driver.get_option_info(
             ticker,
             is_option=True,
             is_call=(right == "C"),
@@ -91,7 +95,7 @@ class OptionDataManager:
         if error_str:
             raise OptionDataException(error_str)
 
-        strikes = [cd.contract.strike for cd in contract_details_list]
+        strikes = [opt_info.strike for opt_info in option_info_list]
         strikes.sort()
 
         underlying_price = await self._get_underlying_price(ticker)
@@ -146,10 +150,10 @@ class OptionDataManager:
             else:
                 raise OptionDataException(f"Wrong data for strike data, is type {type(strike)}")
 
-        contract_details_list: List[ContractDetails] = []
+        option_info_list: List[OptionInfo] = []
 
         for single_strike in strike_list:
-            temp_list, error_str = await self._ib_driver.get_contract_details(
+            temp_list, error_str = await self._ib_driver.get_option_info(
                 ticker,
                 is_option=True,
                 is_call=(right == "C"),
@@ -158,19 +162,19 @@ class OptionDataManager:
             )
             if error_str:
                 raise OptionDataException(error_str)
-            contract_details_list.extend(temp_list)
+            option_info_list.extend(temp_list)
 
         option_data = OptionData(ticker, current_datetime())
-        if len(contract_details_list) == 0:
+        if len(option_info_list) == 0:
             return option_data
 
         underlying_price = await self._get_underlying_price(ticker)
 
-        # Create a list in which contract details with strike price closest to underlying are at the top of the list
-        sortable_cd_list = [(cd, math.fabs(cd.contract.strike - underlying_price)) for cd in contract_details_list]
-        sortable_cd_list.sort(key=lambda x: x[1])
+        # Create a list in which OptionInfo objects with strike price closest to underlying are at the top of the list
+        sortable_oi_list = [(oi, math.fabs(oi.strike - underlying_price)) for oi in option_info_list]
+        sortable_oi_list.sort(key=lambda x: x[1])
 
-        new_list = [item[0] for item in sortable_cd_list]
+        new_list = [item[0] for item in sortable_oi_list]
         await self._batch_collect_options_data(
             new_list,
             option_data,
@@ -195,7 +199,7 @@ class OptionDataManager:
 
     async def _batch_collect_options_data(
         self,
-        contract_details_list: List[ContractDetails],
+        option_info_list: List[OptionInfo],
         option_data: OptionData,
         underlying_price: float,
         right: str = "C",
@@ -207,7 +211,7 @@ class OptionDataManager:
         very slow). Effectively, multiple requests go out to IB at the same time. asyncio.Tasks are used to wait
         for results.
 
-        :param contract_details_list: one ContractDetails for each option
+        :param option_info_list: one OptionInfo for each option
         :param option_data: this will receive the results
         :param underlying_price: price of underlying security
         :param right: "C" for call, "P" for put
@@ -242,20 +246,20 @@ class OptionDataManager:
                 if _strike >= underlying_price and _option_info.delta > max_delta:
                     ignore_strikes_above = _strike
 
-        def _test_for_ignorable(_contract_details: ContractDetails):
+        def _test_for_ignorable(_option_info: OptionInfo):
             """Returns True if we don't need info for a particular options contract due to strike being too high or low"""
-            return not (ignore_strikes_below <= _contract_details.contract.strike <= ignore_strikes_above)
+            return not (ignore_strikes_below <= _option_info.strike <= ignore_strikes_above)
 
         # Loop until we've processed all ContractDetails and task queue is empty
-        while current_idx < len(contract_details_list) or len(task_queue) > 0:
+        while current_idx < len(option_info_list) or len(task_queue) > 0:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible
-            while len(task_queue) < MAX_TO_RETRIEVE_AT_ONCE and current_idx < len(contract_details_list):
-                contract_details = contract_details_list[current_idx]
-                if not _test_for_ignorable(contract_details):
-                    task_name = self._ib_driver.get_full_symbol_from_contract_details(contract_details)
+            while len(task_queue) < MAX_TO_RETRIEVE_AT_ONCE and current_idx < len(option_info_list):
+                option_info = option_info_list[current_idx]
+                if not _test_for_ignorable(option_info):
+                    task_name = option_info.full_name
                     self._logger.debug(f"Creating retrieval task for {task_name}")
-                    task = asyncio.create_task(self._ib_driver.get_greeks(contract_details), name=task_name)
+                    task = asyncio.create_task(self._ib_driver.get_greeks(option_info), name=task_name)
                     task_queue.append(task)
                 current_idx += 1
 
