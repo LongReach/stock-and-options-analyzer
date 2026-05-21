@@ -10,7 +10,8 @@ from core.common import (
     OrderAction,
     OrderType,
     OrderStatus,
-    HistoricalData, OrderPurpose,
+    HistoricalData,
+    OrderPurpose,
 )
 from core.utils import wait_for_condition
 from core.ib_driver import IBDriver
@@ -599,7 +600,9 @@ class Position:
     def adjust(self, order_purpose: OrderPurpose, price: float, relative: bool):
         """TODO"""
         if self.position_state not in [PositionState.ENTERED]:
-            raise PositionException(f"Can't adjust position, current state is {PositionState(self.position_state).name}")
+            raise PositionException(
+                f"Can't adjust position, current state is {PositionState(self.position_state).name}"
+            )
 
         self.trigger_event(event="adjust", order_purpose=order_purpose, price=price, relative=relative)
 

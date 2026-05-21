@@ -80,6 +80,7 @@ class OrderPurpose:
     """
     Indicates the purpose of an order in a position, e.g. entry or stop-less.
     """
+
     ENTRY = auto()
     STOP_LOSS = auto()
     TAKE_PROFIT = auto()
@@ -363,8 +364,8 @@ class OptionInfo:
         option_info.strike = float(parts[3])
         return option_info
 
-class OptionsStructure:
 
+class OptionsStructure:
     """
     For describing a collection of options legs, such as a vertical spread or iron condor.
     Each leg is an OptionInfo object.

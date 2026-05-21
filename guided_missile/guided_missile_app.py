@@ -27,12 +27,14 @@ class Command(Enum):
     CLEAR = auto()
     ADJUST = auto()
 
+
 async def get_input(prompt="> "):
     """
     Needed because input() used the normal way blocks EVERYTHING in the process, including coroutines.
     This way, it runs in its own thread.
     """
     return await asyncio.to_thread(input, prompt)
+
 
 class GuidedMissile:
     """Top-level implementation of GuidedMissile app"""
@@ -58,7 +60,7 @@ class GuidedMissile:
             "reset": Command.RESET,
             "positions": Command.POSITIONS,
             "clear": Command.CLEAR,
-            "adjust": Command.ADJUST
+            "adjust": Command.ADJUST,
         }
 
         self._reverse_command_map: Dict[Command, str] = {v: k for k, v in self.command_map.items()}
@@ -97,7 +99,7 @@ class GuidedMissile:
                     Command.CANCEL,
                     Command.EXIT,
                     Command.RESET,
-                    Command.ADJUST
+                    Command.ADJUST,
                 ]:
                     await self._run_position_command(command_dict)
                 elif command == Command.INFO:
@@ -149,7 +151,7 @@ class GuidedMissile:
             "reset",
             "positions",
             "clear",
-            "adjust"
+            "adjust",
         ]:
             return False, {"error": f"Command {command} not supported."}
         ret_dict["command"] = self.command_map[command]
@@ -306,7 +308,9 @@ class GuidedMissile:
             price = command_dict["price"]
             relative = command_dict["relative"]
             order_purpose = command_dict["purpose"]
-            success, error_str = await self._position_manager.adjust(security_descriptor, price, relative, order_purpose)
+            success, error_str = await self._position_manager.adjust(
+                security_descriptor, price, relative, order_purpose
+            )
 
         if not success:
             print(f"Command failed with error: {error_str}")
@@ -323,7 +327,7 @@ class GuidedMissile:
         order_purpose_lookup: Dict[str, OrderPurpose] = {
             "stp": OrderPurpose.STOP_LOSS,
             "ent": OrderPurpose.ENTRY,
-            "tgt": OrderPurpose.TAKE_PROFIT
+            "tgt": OrderPurpose.TAKE_PROFIT,
         }
         order_purpose = order_purpose_lookup.get(parts[2])
 
@@ -340,4 +344,3 @@ class GuidedMissile:
             return {"error": f"Error processing price parameter: {e}"}
 
         return {"price": price * direction_multiplier, "relative": relative_adjust, "purpose": order_purpose}
-

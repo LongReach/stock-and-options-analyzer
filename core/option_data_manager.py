@@ -20,7 +20,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
-    get_full_symbol_name
+    get_full_symbol_name,
 )
 from core.options_data import OptionData, OptionDataException
 from core.ib_driver import IBDriver
@@ -29,7 +29,6 @@ _logger = logging.getLogger(__name__)
 
 
 class OptionDataManager:
-
     """
     Wraps IBDriver, providing functions that simplify collecting options data or placing options orders.
     """
@@ -207,12 +206,16 @@ class OptionDataManager:
         """
 
         # Check the cache first
-        full_symbol = get_full_symbol_name(ticker, is_option=True, is_call=(right == "C"), expiration=expiration, strike=strike)
+        full_symbol = get_full_symbol_name(
+            ticker, is_option=True, is_call=(right == "C"), expiration=expiration, strike=strike
+        )
         cached_oi = self._opt_info_cache.get(full_symbol)
         if cached_oi is not None:
             return cached_oi
 
-        option_info, error_msg = await self._ib_driver.get_option_info_single(ticker=ticker, expiration=expiration, strike=strike, is_call=(right == "C"))
+        option_info, error_msg = await self._ib_driver.get_option_info_single(
+            ticker=ticker, expiration=expiration, strike=strike, is_call=(right == "C")
+        )
         if error_msg is not None:
             raise OptionDataException(f"Could not get option info: {error_msg}")
 

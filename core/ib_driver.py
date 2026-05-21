@@ -40,7 +40,7 @@ from core.utils import (
     get_datetime_as_str,
     BarSize,
     is_trading_hours,
-    get_full_symbol_name
+    get_full_symbol_name,
 )
 from core.ib_driver_requests import (
     ContractDetailsRequest,
@@ -365,7 +365,9 @@ class IBDriver(IBWrapper):
         :return: (list of OptionInfo objects, error message or None)
         """
 
-        contract_details_list, error_message = await self._get_contract_details(ticker, primary_exchange, True, is_call, strike, expiration)
+        contract_details_list, error_message = await self._get_contract_details(
+            ticker, primary_exchange, True, is_call, strike, expiration
+        )
         if error_message:
             return [], f"Unable to get contract details, error is: {error_message}"
 
@@ -400,7 +402,9 @@ class IBDriver(IBWrapper):
         :param primary_exchange:  --
         :return: (OptionInfo object or None, error message or None)
         """
-        option_info_list, error_message = await self.get_option_info(ticker=ticker, primary_exchange=primary_exchange, is_call=is_call, strike=strike, expiration=expiration)
+        option_info_list, error_message = await self.get_option_info(
+            ticker=ticker, primary_exchange=primary_exchange, is_call=is_call, strike=strike, expiration=expiration
+        )
         if error_message:
             return None, f"Unable to get option info, error is: {error_message}"
         if len(option_info_list) == 0:
@@ -463,7 +467,14 @@ class IBDriver(IBWrapper):
         if underlying_name is None:
             return None, "Underlying not defined"
 
-        contract_details_list, error_msg = await self._get_contract_details(ticker=underlying_name, primary_exchange=None, is_option=True, is_call=option_info.is_call, strike=option_info.strike, expiration=option_info.expiration)
+        contract_details_list, error_msg = await self._get_contract_details(
+            ticker=underlying_name,
+            primary_exchange=None,
+            is_option=True,
+            is_call=option_info.is_call,
+            strike=option_info.strike,
+            expiration=option_info.expiration,
+        )
         if error_msg:
             return None, f"Could not fetch Greeks for {option_info.full_name}, error is: {error_msg}"
         if len(contract_details_list) == 0:
@@ -1275,7 +1286,9 @@ class IBDriver(IBWrapper):
         )
         num_shares = position if position >= 0 else -position
         is_short = position < 0
-        self._request_positions_object.positions_info.set_position(security_descriptor, int(num_shares), float(avg_cost), is_short)
+        self._request_positions_object.positions_info.set_position(
+            security_descriptor, int(num_shares), float(avg_cost), is_short
+        )
 
     def position_end_cb(self):
         """
