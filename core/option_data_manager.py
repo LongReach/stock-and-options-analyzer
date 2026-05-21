@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pandas.core.resample import maybe_warn_args_and_kwargs
 
 from core.common import HistoricalData, OptionInfo
+from core.cache import TTLCache
 from core.utils import (
     BarSize,
     bar_size_to_str,
@@ -19,6 +20,7 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
+    get_full_symbol_name
 )
 from core.options_data import OptionData, OptionDataException
 from core.ib_driver import IBDriver
@@ -35,6 +37,7 @@ class OptionDataManager:
     def __init__(self):
         self._logger = logging.getLogger(__name__)
         self._ib_driver: Optional[IBDriver] = None
+        self._opt_info_cache: TTLCache[OptionInfo] = TTLCache(maxsize=100, ttl=120.0)
 
     def add_driver(self, ib_driver: IBDriver):
         self._ib_driver = ib_driver
@@ -87,7 +90,6 @@ class OptionDataManager:
 
         option_info_list, error_str = await self._ib_driver.get_option_info(
             ticker,
-            is_option=True,
             is_call=(right == "C"),
             expiration=expiration,
             primary_exchange=None,
@@ -155,7 +157,6 @@ class OptionDataManager:
         for single_strike in strike_list:
             temp_list, error_str = await self._ib_driver.get_option_info(
                 ticker,
-                is_option=True,
                 is_call=(right == "C"),
                 expiration=expiration,
                 strike=single_strike,
@@ -186,6 +187,43 @@ class OptionDataManager:
 
         option_data.sort("strike")
         return option_data
+
+    async def get_option_info(
+        self,
+        ticker: str,
+        expiration: str,
+        right: str,
+        strike: float,
+    ) -> Optional[OptionInfo]:
+        """
+        Get OptionInfo for a particular option contract, including current trade price and the Greeks. Will pull data
+        from cache if present, unless cache data isn't fresh enough.
+
+        :param ticker: ticker of underlying
+        :param expiration: expiration date, IB style
+        :param right: "C" for call, "P" for put
+        :param strike: strike price (for a single option contract)
+        :return: OptionInfo or None
+        """
+
+        # Check the cache first
+        full_symbol = get_full_symbol_name(ticker, is_option=True, is_call=(right == "C"), expiration=expiration, strike=strike)
+        cached_oi = self._opt_info_cache.get(full_symbol)
+        if cached_oi is not None:
+            return cached_oi
+
+        option_info, error_msg = await self._ib_driver.get_option_info_single(ticker=ticker, expiration=expiration, strike=strike, is_call=(right == "C"))
+        if error_msg is not None:
+            raise OptionDataException(f"Could not get option info: {error_msg}")
+
+        option_info, error_msg = await self._ib_driver.get_greeks(option_info)
+        if error_msg is not None:
+            raise OptionDataException(f"Could not get Greeks: {error_msg}")
+
+        if option_info is not None:
+            self._opt_info_cache.put(full_symbol, option_info)
+
+        return option_info
 
     async def _get_underlying_price(self, ticker: str):
         """Get the latest trading price (within a minute) for ticker"""

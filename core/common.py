@@ -373,15 +373,29 @@ class OptionsStructure:
     def __init__(self, structure_type: OptionsStructureType):
         self._structure_type = structure_type
         self._legs: List[OptionInfo] = []
+        self._leg_actions: List[int] = []
 
     def get_type(self) -> OptionsStructureType:
+        """Returns type of structure, e.g. VERTICAL_SPREAD or IRON_CONDOR"""
         return self._structure_type
 
-    def add_leg(self, leg: OptionInfo):
+    def add_leg(self, leg: OptionInfo, action: int):
+        """
+        Adds a leg to the structure
+
+        :param leg: info about the leg -- strike, expiration, etc.
+        :param action: 1 if leg is to be bought (long), -1 if to be sold (short)
+        """
         self._legs.append(leg)
+        self._leg_actions.append(action)
 
     def get_legs(self) -> List[OptionInfo]:
+        """Returns list of OptionInfos, one for each leg"""
         return self._legs
+
+    def get_leg_actions(self) -> List[int]:
+        """Return list of leg actions. For each leg, it's 1 if leg is long, -1 if leg is short"""
+        return self._leg_actions
 
 
 class OrderInfo:

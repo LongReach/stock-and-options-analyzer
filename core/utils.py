@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Union
+from typing import Union, Optional
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from enum import Enum, auto
@@ -180,3 +180,14 @@ def get_exception_traceback(ex: Exception):
     # Format the traceback object into a list of strings and join them
     tb_str = "".join(traceback.format_tb(tb_obj))
     return tb_str
+
+def get_full_symbol_name(ticker: str, is_option: bool, is_call: bool = True, expiration: Optional[str] = None, strike: Optional[float] = None):
+    """Return a full IB-style symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)"""
+    if not is_option:
+        return ticker
+    if expiration is None and strike is None:
+        return f"{ticker}-{'C' if is_call else 'P'}"
+    if strike is None:
+        return f"{ticker}-{'C' if is_call else 'P'}-{expiration}"
+
+    return f"{ticker}-{'C' if is_call else 'P'}-{expiration}-{strike}"
