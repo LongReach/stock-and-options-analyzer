@@ -11,7 +11,8 @@ from core.common import (
     OrderInfo,
     OrderStatus,
     OrderType,
-    OrderAction, OrderPurpose,
+    OrderAction,
+    OrderPurpose,
 )
 from core.utils import wait_for_condition
 from guided_missile.position import (
@@ -310,7 +311,9 @@ class PositionManager:
 
         return True, None
 
-    async def adjust(self, security_descriptor: SecurityDescriptor, price: float, relative: bool, order_purpose: OrderPurpose) -> Tuple[bool, str]:
+    async def adjust(
+        self, security_descriptor: SecurityDescriptor, price: float, relative: bool, order_purpose: OrderPurpose
+    ) -> Tuple[bool, str]:
         position = self._position_map.get(security_descriptor.to_string())
         if position is None:
             return False, f"Could not adjust position for {security_descriptor}, not found"

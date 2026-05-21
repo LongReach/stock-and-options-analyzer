@@ -27,6 +27,7 @@ TICKER = "SPY"
 STRIKE = 770.0
 EXPIRATION = "20260618"
 
+
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_driver_test.log", level=INFO)
@@ -60,9 +61,7 @@ async def main():
 
         # Extra experimental
         print(f"\nGetting option info for expiration date {EXPIRATION}")
-        options_info_list, error_str = await ib_driver.get_option_info(
-            TICKER, is_call=True, expiration=EXPIRATION
-        )
+        options_info_list, error_str = await ib_driver.get_option_info(TICKER, is_call=True, expiration=EXPIRATION)
         if error_str:
             print(f"Error: {error_str}")
             ib_driver.disconnect()

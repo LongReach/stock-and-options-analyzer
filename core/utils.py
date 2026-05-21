@@ -175,13 +175,17 @@ async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
         if acquired:
             lock.release()
 
+
 def get_exception_traceback(ex: Exception):
     tb_obj = ex.__traceback__
     # Format the traceback object into a list of strings and join them
     tb_str = "".join(traceback.format_tb(tb_obj))
     return tb_str
 
-def get_full_symbol_name(ticker: str, is_option: bool, is_call: bool = True, expiration: Optional[str] = None, strike: Optional[float] = None):
+
+def get_full_symbol_name(
+    ticker: str, is_option: bool, is_call: bool = True, expiration: Optional[str] = None, strike: Optional[float] = None
+):
     """Return a full IB-style symbol name, e.g. "SPY" or "SPY-C-20250627-600.0" (if option)"""
     if not is_option:
         return ticker
