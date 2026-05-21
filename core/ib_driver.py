@@ -40,6 +40,7 @@ from core.utils import (
     get_datetime_as_str,
     BarSize,
     is_trading_hours,
+    get_full_symbol_name
 )
 from core.ib_driver_requests import (
     ContractDetailsRequest,
@@ -349,13 +350,22 @@ class IBDriver(IBWrapper):
         self,
         ticker: str,
         primary_exchange: str = None,
-        is_option: bool = False,
         is_call: bool = False,
         strike: Optional[float] = None,
         expiration: Optional[str] = None,
     ) -> Tuple[List[OptionInfo], Optional[str]]:
+        """
+        Get information about all options that fit the given parameters
 
-        contract_details_list, error_message = await self._get_contract_details(ticker, primary_exchange, is_option, is_call, strike, expiration)
+        :param ticker: symbol of underlying
+        :param primary_exchange:  --
+        :param is_call: True if option is a call, False if put
+        :param strike: strike price
+        :param expiration: expiration date
+        :return: (list of OptionInfo objects, error message or None)
+        """
+
+        contract_details_list, error_message = await self._get_contract_details(ticker, primary_exchange, True, is_call, strike, expiration)
         if error_message:
             return [], f"Unable to get contract details, error is: {error_message}"
 
@@ -372,8 +382,34 @@ class IBDriver(IBWrapper):
 
         return out_list, None
 
+    async def get_option_info_single(
+        self,
+        ticker: str,
+        is_call: bool,
+        strike: float,
+        expiration: str,
+        primary_exchange: str = None,
+    ) -> Tuple[Optional[OptionInfo], Optional[str]]:
+        """
+        Get information about a particular option
+
+        :param ticker: symbol of underlying
+        :param is_call: True if option is a call, False if put
+        :param strike: strike price (must be defined)
+        :param expiration: expiration date (must be defined)
+        :param primary_exchange:  --
+        :return: (OptionInfo object or None, error message or None)
+        """
+        option_info_list, error_message = await self.get_option_info(ticker=ticker, primary_exchange=primary_exchange, is_call=is_call, strike=strike, expiration=expiration)
+        if error_message:
+            return None, f"Unable to get option info, error is: {error_message}"
+        if len(option_info_list) == 0:
+            return None, f"Could not find matching option for ticker {ticker}, strike {strike}, expiration {expiration}"
+
+        return option_info_list[0], None
+
     async def get_options_chain_info(
-        self, ticker: str, primary_exchange: Optional[str]
+        self, ticker: str, primary_exchange: Optional[str] = None
     ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
         """
         Gets basic information about the option chain for a stock. Strikes and expiration dates
@@ -423,10 +459,10 @@ class IBDriver(IBWrapper):
         :param option_info: info about option for which Greeks are wanted
         :return: (OptionInfo or None, error string or None)
         """
-        if not option_info.is_defined():
+        underlying_name = option_info.get_underlying_name()
+        if underlying_name is None:
             return None, "Underlying not defined"
 
-        underlying_name = option_info.get_underlying_name()
         contract_details_list, error_msg = await self._get_contract_details(ticker=underlying_name, primary_exchange=None, is_option=True, is_call=option_info.is_call, strike=option_info.strike, expiration=option_info.expiration)
         if error_msg:
             return None, f"Could not fetch Greeks for {option_info.full_name}, error is: {error_msg}"

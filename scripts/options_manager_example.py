@@ -60,7 +60,7 @@ async def main():
         print(f"Closest to ATM strike is {strikes[idx]}")
 
         print(
-            f"Getting option chain for {TICKER} at {expirations[-1]}, with strikes from {strikes[0]} to {strikes[-1]}"
+            f"\nGetting option chain for {TICKER} at {expirations[-1]}, with strikes from {strikes[0]} to {strikes[-1]}"
         )
         option_data = await options_manager.get_option_chain(
             TICKER, expiration=expirations[-1], right="C", strike=strikes
@@ -68,6 +68,14 @@ async def main():
         # option_data.sort("delta", ascending=True)
         df = option_data.get_dataframe(drop_columns=["date", "full_name"])
         print_df(df)
+
+        # Now get a single option info object
+        option_info = await options_manager.get_option_info(TICKER, expirations[-1], "P", strikes[idx])
+        print(f"\nOption info is: {option_info.to_dict()}")
+
+        # Get it again, but it should be cached this time
+        option_info = await options_manager.get_option_info(TICKER, expirations[-1], "P", strikes[idx])
+        print(f"\nCached option info is: {option_info.to_dict()}")
 
     except Exception as ex:
         print(f"Exception: {ex}")
