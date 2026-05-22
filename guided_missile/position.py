@@ -34,6 +34,14 @@ class OrderGroup:
         self.initial_num_shares: int = 0
 
     def set_initial_quantities(self, entry_price: float, exit_price: float, shares: int):
+        """
+        Sets the entry price, exit price, and number of shares, for bookkeeping purposes.
+
+        :param entry_price: price at which position will be entered
+        :param exit_price: stop loss price
+        :param shares: number of shares
+        :return:
+        """
         self.initial_entry_price = entry_price
         self.initial_exit_price = exit_price
         self.initial_num_shares = shares
@@ -77,19 +85,34 @@ class Position:
     order.
 
     Design:
+    ------
 
     A position can be in one of several states. Each is handled by an asynchronous function that performs setup
-    then waits for a command from the console, or for something to happen on the broker side (e.g. an
-    order is entered). After that, control transitions to a new state function.
+    then waits for an event to happen. Events are triggered by a command from the console, or by something happening
+    on the broker side (e.g. an order is entered). After that, control transitions to a new state function.
 
     If an unrecoverable error happens in a state, a PositionException will be raised.
+
+    Naming conventions:
+    ------
+    xyz_state(): an async function that implements a particular state. Runs continuously until a state transition
+        is triggered.
+    trigger_xyz(): passes an event to the Position. The event is picked up within a state function.
+    to_state_xyz(): transitions to xyz_state()
+
+    Keeping track of portfolio impact
+    ------
+    Each position has a cost associated with it, the amount of cash it will take to enter the position or the cash
+    tied up in it if already entered. Each position also has a profit value, either unrealized or realized. When
+    the position is exited, the cost is released and goes back into the cash reserve. Then, the profits are added
+    to the cash reserve (or subtracted, if a loss).
     """
 
     ib_driver: IBDriver = None
     logger = getLogger(__file__)
     next_id = 1
 
-    def __init__(self, security_descriptor: SecurityDescriptor):
+    def __init__(self, security_descriptor: SecurityDescriptor, historical_data: HistoricalData):
         """
         Constructor for Position
         :param security_descriptor: describes stock, ETF, or options contract
@@ -104,11 +127,9 @@ class Position:
         # Unique position ID for logging purposes
         self.position_id = Position.next_id
         Position.next_id += 1
-        # Will be non-zero for positions "armed" but not yet entered
-        self.theoretical_cost: float = 0.0
 
         # If set, will contain historical bar data
-        self._historical_data: Optional[HistoricalData] = None
+        self._historical_data: HistoricalData = historical_data
 
         self._trigger_event: asyncio.Event = asyncio.Event()
         self._trigger_data: Dict = {}
@@ -117,10 +138,6 @@ class Position:
         self._pm_callback: Optional[Callable[[int, int, float], Any]] = None
 
         self._state_machine_task: Optional[asyncio.Task] = None
-
-    def set_historical_data_stream(self, historical_data: Optional[HistoricalData]):
-        """Sets a historical data stream to be associated with this position, or None"""
-        self._historical_data = historical_data
 
     def get_historical_data_stream(self):
         """Returns historical data stream associated with this position or None"""
@@ -131,7 +148,6 @@ class Position:
         Gets printable info about position
         :return: list of printable lines
         """
-        cost = 0.0
         group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
         if self.position_state in [PositionState.ENTERED]:
             num_shares = self.get_current_shares()
@@ -141,10 +157,8 @@ class Position:
                 num_shares = group.entry_order.shares_remaining
                 shares_line = f"Shares: {num_shares} (prospective)"
             else:
-                num_shares = 0
                 shares_line = "Shares: ???"
         else:
-            num_shares = 0
             shares_line = "Shares: 0"
 
         lines = [
@@ -153,7 +167,7 @@ class Position:
             f"State: {PositionState(self.position_state).name}",
             f"Direction: {PositionDirection(self.position_direction).name}",
             shares_line,
-            f"Theoretical cost: {self.theoretical_cost}",
+            f"Cost: {self.get_cost()}",
             f"Profits realized: {self.get_profit()}",
         ]
         if group:
@@ -191,32 +205,50 @@ class Position:
             shares_out += group.stop_loss_order.shares_filled
         return shares_in - shares_out
 
+    def get_cost(self) -> float:
+        """Returns cost of entering position, if not yet in, or cash tied up in it if in."""
+        group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
+        if group is None:
+            return 0
+
+        if self.position_state == PositionState.CREATED:
+            return group.initial_num_shares * group.initial_entry_price
+
+        if self.position_state == PositionState.ENTERED:
+            shares_in = self.get_current_shares()
+            return shares_in * group.entry_order.avg_fill_price
+
+        return 0
+
     def get_profit(self) -> float:
-        """Return profits realized"""
+        """Return profits, whether realized or unrealized"""
         if self.position_direction == PositionDirection.DUAL:
             return 0
         group = self.long_order_group if self.position_direction == PositionDirection.LONG else self.short_order_group
         if group is None:
             return 0
-        shares_in = group.entry_order.shares_filled
+
+        if self.position_state == PositionState.CREATED:
+            return 0
+
+        if self.position_state == PositionState.CANCELED:
+            return 0
+
         price_in = group.entry_order.avg_fill_price
-        total_cost = shares_in * price_in
 
         take_profit_orders: List[OrderInfo] = []
         if group.take_profit_order:
             take_profit_orders.append(group.take_profit_order)
         take_profit_orders.extend(group.earlier_tp_orders)
 
-        total_revenue = 0
+        total_profit = 0
+        dir_multiplier = 1.0 if self.position_direction == PositionDirection.LONG else -1.0
         for tpo in take_profit_orders:
-            total_revenue += tpo.shares_filled * tpo.avg_fill_price
+            total_profit += tpo.shares_filled * (tpo.avg_fill_price - price_in) * dir_multiplier
         if group.stop_loss_order:
-            total_revenue += group.stop_loss_order.shares_filled * group.stop_loss_order.avg_fill_price
+            total_profit += group.stop_loss_order.shares_filled * (group.stop_loss_order.avg_fill_price - price_in) * dir_multiplier
 
-        if self.position_direction == PositionDirection.LONG:
-            return total_revenue - total_cost
-        else:
-            return total_cost - total_revenue
+        return total_profit
 
     def trigger_event(self, **kwargs):
         """Triggers an action requested from command console, e.g. activate or cancel."""
@@ -229,6 +261,7 @@ class Position:
         self._state_machine_task = None
 
     def are_states_stopped(self) -> bool:
+        """Returns True if state machine has been halted"""
         return self._stop_event.is_set()
 
     def launch(self, after_reset: bool = False):
@@ -246,7 +279,7 @@ class Position:
     def is_state_machine_done(self) -> Tuple[bool, Optional[Exception]]:
         """
         Lets caller know whether state machine is done running.
-        :return: (True if done, exception, if any occured, or None)
+        :return: (True if done, exception, if any occurred, or None)
         """
         if self._state_machine_task is None:
             return True, None
@@ -350,14 +383,14 @@ class Position:
             await asyncio.sleep(0.1)
 
         if cancel_direction is not None:
-            await self._do_cancel(cancel_direction, go_to_cancelled_state=True)
+            await self._to_state_cancel(cancel_direction, go_to_cancelled_state=True)
         elif fill_direction is not None:
             if self.position_direction == PositionDirection.DUAL:
                 # We need to cancel on one side or the other
                 cancel_direction = (
                     PositionDirection.SHORT if fill_direction == PositionDirection.LONG else PositionDirection.LONG
                 )
-                await self._do_cancel(cancel_direction)
+                await self._to_state_cancel(cancel_direction)
                 self.position_direction = fill_direction
 
             await self.entered_state(fill_direction, True)
@@ -435,8 +468,6 @@ class Position:
 
         group.take_profit_order = take_profit_order
         self.position_state = PositionState.ENTERED
-        # Cost is no longer theoretical, but real
-        self.theoretical_cost = 0.0
 
         stop_loss_direction: Optional[PositionDirection] = None
         take_profit_direction: Optional[PositionDirection] = None
@@ -482,12 +513,17 @@ class Position:
 
         if stop_loss_direction is not None:
             # Cancel other orders, then go to closed state
-            await self._do_cancel(self.position_direction)
+            await self._to_state_cancel(self.position_direction)
             await self.closed_state()
         elif take_profit_direction is not None:
-            await self._handle_take_profit(take_profit_direction)
+            shares_left = await self._handle_take_profit(take_profit_direction)
+            if shares_left == 0:
+                await self._to_state_cancel(direction, go_to_cancelled_state=False)
+                await self.closed_state()
+            else:
+                await self.entered_state(direction, fresh_entry=False)
         elif do_exit:
-            await self._do_exit()
+            await self._to_state_exit()
 
     async def closed_state(self):
         self.logger.info(f"Position: {self.position_id} for {self.security_descriptor.to_string()} enters closed_state")
@@ -501,7 +537,7 @@ class Position:
         self.position_state = PositionState.CANCELED
         pass
 
-    def activate(
+    def trigger_activate(
         self,
         direction: PositionDirection,
         entry_prices: List[float],
@@ -540,7 +576,7 @@ class Position:
             cash_left=cash_left,
         )
 
-    def enter(
+    def trigger_enter(
         self,
         direction: PositionDirection,
         entry_price: float,
@@ -574,7 +610,7 @@ class Position:
             cash_left=cash_left,
         )
 
-    def cancel(self, force_cancel: bool = False):
+    def trigger_cancel(self, force_cancel: bool = False):
         """
         Cancel any orders that haven't been filled yet
 
@@ -588,7 +624,7 @@ class Position:
 
         self.trigger_event(event="cancel")
 
-    def exit(self):
+    def trigger_exit(self):
         """Exit the position we're in"""
         if self.position_state not in [PositionState.ENTERED]:
             raise PositionException(f"Can't exit position, current state is {PositionState(self.position_state).name}")
@@ -597,7 +633,7 @@ class Position:
 
         self.trigger_event(event="exit")
 
-    def adjust(self, order_purpose: OrderPurpose, price: float, relative: bool):
+    def trigger_adjust(self, order_purpose: OrderPurpose, price: float, relative: bool):
         """TODO"""
         if self.position_state not in [PositionState.ENTERED]:
             raise PositionException(
@@ -647,12 +683,10 @@ class Position:
             entry = entry_prices[0]
             stop = stop_prices[0]
             shares_entered, cost = await self._setup_long(entry, stop, max_loss, cash_left)
-            self.theoretical_cost = cost
         elif direction == PositionDirection.SHORT:
             entry = entry_prices[0]
             stop = stop_prices[0]
             shares_entered, cost = await self._setup_short(entry, stop, max_loss, cash_left)
-            self.theoretical_cost = cost
         else:
             entry = entry_prices[0]
             stop = stop_prices[0]
@@ -660,7 +694,6 @@ class Position:
             entry = entry_prices[1]
             stop = stop_prices[1]
             shares_entered_s, cost_s = await self._setup_short(entry, stop, max_loss, cash_left)
-            self.theoretical_cost = cost_l if cost_l > cost_s else cost_s
 
         self.logger.info(
             f"Activated position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
@@ -710,7 +743,7 @@ class Position:
         self.position_direction = direction
         await self.entered_state(direction, fresh_entry=True)
 
-    async def _do_exit(self):
+    async def _to_state_exit(self):
         """Exit the position we're in, then go to exited_state()."""
 
         self.logger.info(f"Exiting position {self.position_id} for {self.security_descriptor.to_string()}")
@@ -719,7 +752,7 @@ class Position:
             error_msg = f"Can't exit position {self.position_id}, couldn't calculate share number"
             self.logger.error(error_msg)
             raise PositionException(error_msg)
-        await self._do_cancel(self.position_direction)
+        await self._to_state_cancel(self.position_direction)
 
         action = OrderAction.SELL if self.position_direction == PositionDirection.LONG else OrderAction.BUY
         exit_order, error_str = await self.ib_driver.place_order(
@@ -749,7 +782,7 @@ class Position:
 
         await self.closed_state()
 
-    async def _do_cancel(self, direction: PositionDirection, go_to_cancelled_state: bool = False):
+    async def _to_state_cancel(self, direction: PositionDirection, go_to_cancelled_state: bool = False):
         """
         Cancels unfilled orders that are still active, if they need to be cancelled.
 
@@ -794,14 +827,13 @@ class Position:
         self.logger.info(
             f"Cancelling orders for {self.position_id} for {self.security_descriptor.to_string()}, direction is {PositionDirection(direction).name}"
         )
-        self.theoretical_cost = 0.0
         if go_to_cancelled_state:
             await self.canceled_state()
 
     async def _handle_take_profit(self, direction: PositionDirection):
         """
         Called when take-profit hit. Decides whether whole position can be closed or we need to go back to the
-        entered stated.
+        entered stated. Returns shares left.
         """
         group = self.long_order_group if direction == PositionDirection.LONG else self.short_order_group
         if group is None:
@@ -814,11 +846,7 @@ class Position:
             raise PositionException(error_msg)
 
         shares_left = self.get_current_shares()
-        if shares_left == 0:
-            await self._do_cancel(direction, go_to_cancelled_state=False)
-            await self.closed_state()
-        else:
-            await self.entered_state(direction, fresh_entry=False)
+        return shares_left
 
     async def _adjust_stop_loss(self, direction: PositionDirection, price: Optional[float] = None):
         """

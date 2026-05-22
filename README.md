@@ -1,36 +1,26 @@
 # Suite of Tools for Stock/Options Market Analysis
 
-## For Potential Employers
-
 ![](./images/WIP.png)
 
-I'm sharing this repository as an example of something I worked during a period of self-employment. The code and documentation are not yet as polished as they'd be in a "finished" project, though I've tried to be responsible about PyDocs.
+## For Potential Employers
 
-The "secret sauce" elements of my stock/options trading strategy don't appear here, but are kept privately elsewhere. The focuses of this codebase include:
-* Providing a convenient `async` API for getting stock/ETF/options data
-* Being able to package this data into forms convenient for analysis and abstracted away from the peculiarities of any particular brokerage
-* Being able to analyze options data for potential and ongoing trades
-* Keeping an automatic record of options trades
-* A software application for daytrading, called GuidedMissile
-* Machine learning: as of right now, those experiments are not part of this codebase, but they will be
-
-Options are a lot more complex than stocks, with aspects like implied volatility, delta, theta, and gamma coming into play. Woe to anyone who attempts options trading without a sufficient grasp of these things. No matter how smart you are, you're playing with fire.
-
-This project is entirely my own creation, at least on the level of design, architecture, general coding choices, and documentation. Of course, I made some use of Google, ChatGPT, Stackoverflow, etc. to refresh my memory on certain Python packages or language features. 
+See [this page](./docs/ForPotentialEmployers.md)
 
 ## Description
 
-This is / will be a suite of tools and code modules for interacting with [Interactive Brokers](https://www.interactivebrokers.com/), abstracting away the challenges of dealing with its often unintuitive API. Data about specific stocks/ETFs and options contracts can be collected as "clean" representations. There is also code for placing orders, which is especially helpful in daytrading applications, since the market can move so fast that entering them manually becomes a cumbersome obstacle.
+This is a suite of tools and code modules for interacting with [Interactive Brokers](https://www.interactivebrokers.com/), abstracting away the challenges of dealing with its often unintuitive API. Data about specific stocks/ETFs and options contracts can be collected as "clean" representations. There is also code for placing stock, ETF, or options orders and keeping track of current positions held within the user's brokerage account.
 
-It wouldn't be difficult to refactor this software to support data providers other than Interactive Brokers.
+The point of this whole framework is to simplify the creation of automated and semi-automated trading systems. Data is collected in a form that can easily be fed to machine-learning applications. 
 
-## Design Thoughts
+Another design feature here is that Interactive Brokers-specific details are kept separate from other code, hidden within their own wrapper. It wouldn't be difficult to swap out the Interactive Brokers layer altogether, replacing it with one that talks to some other brokerage. Thus, the user would be able to use these tools with their own choice of broker, not having to think about the implementation details.
+
+## Design Inspirations
 
 At an earlier time, I'd created some software that pulled stock market data from Yahoo Finance, then charted it in different ways. Unfortunately, in 2025, the `yfinance` Python library became increasingly unreliable, due to Yahoo's servers throttling requests.
 
 It seemed smarter to get data from a paid source, rather than a free one. Could I use an API provided by a brokerage I already had an account with? The answer was yes and the obvious choice was [Interactive Brokers](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#api-introduction). For one thing, they offer a paper-trading account, so you can test out strategies "live", but in a simulated environment. For another, you can obtain historical data for specific options contracts, which you can't really do with Yahoo.
 
-Third, back in 2020, I had already written some daytrading software that communicated with Interactive Brokers' popular trading platform, Trader Workstation. The software both gathered market data and opened/closed actual positions. Here in 2025, I decided to do something similar again, except via the lightweight "Gateway" bridge. Interactive Brokers doesn't have the most user-friendly Python API, but it's very powerful and provides access to pretty much any market data I could possibly want. Since I have a funded account with IB, I don't have to worry about them blocking access or breaking a third party library, as was a constant concern with Yahoo.
+Third, back in 2020, I had already written some daytrading software that communicated with Interactive Brokers' popular trading platform, Trader Workstation. The software both gathered market data and opened/closed actual positions. Here in 2025/2026, I decided to do something similar again, except via the lightweight "Gateway" bridge. Interactive Brokers doesn't have the most user-friendly Python API, but it's very powerful and provides access to pretty much any market data I could possibly want. Since I have a funded account with IB, I don't have to worry about them blocking access or breaking a third party library, as was a constant concern with Yahoo.
 
 ### Repackaging as pandas dataframes
 

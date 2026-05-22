@@ -27,6 +27,7 @@ class PositionManager:
     """For managing positions in GuidedMissile application"""
 
     BAR_SIZE = BarSize.TWO_MINUTES
+    BARS_TO_GET = 50
     MAX_LOSS = 100.0
     MAX_DATA_STREAMS = 30
 
@@ -42,7 +43,7 @@ class PositionManager:
 
         self._need_update_account_values: bool = False
 
-    def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
+    async def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
         Adds position to tracking.
 
@@ -63,8 +64,14 @@ class PositionManager:
                 )
             existing_position.stop_all_states()
 
+        historical_data, error_str = await self._get_historical_data_stream(
+            security_descriptor, bars_back=self.BARS_TO_GET, bar_size=self.BAR_SIZE
+        )
+        if historical_data is None:
+            return False, f"add_position() failed with error: {error_str}"
+
         self._logger.info(f"PositionManager: adding position for {security_descriptor.to_string()}")
-        new_position = Position(security_descriptor)
+        new_position = Position(security_descriptor, historical_data)
         new_position.set_pm_callback(self.position_changed_cb)
         self._position_map[security_descriptor.to_string()] = new_position
 
@@ -95,17 +102,13 @@ class PositionManager:
             )
 
         self._logger.info(f"PositionManager: activating position for {security_descriptor.to_string()}")
-        historical_data, error_str = await self._get_historical_data_stream(
-            security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
-        )
-        if historical_data is None:
-            return False, f"activate() failed with error: {error_str}"
-        existing_position.set_historical_data_stream(historical_data)
+        historical_data = existing_position.get_historical_data_stream()
 
-        bar_highs = [bar.high for bar in historical_data.bar_data]
+        bar_data_copy = historical_data.bar_data[-bars_back:]
+        bar_highs = [bar.high for bar in bar_data_copy]
         highest_recent_price = max(bar_highs)
         top_price_buffer = self._get_entry_exit_buffer(highest_recent_price)
-        bar_lows = [bar.low for bar in historical_data.bar_data]
+        bar_lows = [bar.low for bar in bar_data_copy]
         lowest_recent_price = min(bar_lows)
         bottom_price_buffer = self._get_entry_exit_buffer(lowest_recent_price)
 
@@ -121,7 +124,7 @@ class PositionManager:
 
         self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
         try:
-            existing_position.activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
+            existing_position.trigger_activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
         except Exception as e:
             return False, f"activate() failed with exception: {e}"
 
@@ -148,17 +151,13 @@ class PositionManager:
             return False, f"Can't enter position for {security_descriptor.to_string()}"
 
         self._logger.info(f"PositionManager: entering position for {security_descriptor.to_string()}")
-        historical_data, error_str = await self._get_historical_data_stream(
-            security_descriptor, bars_back=bars_back, bar_size=self.BAR_SIZE
-        )
-        if historical_data is None:
-            return False, f"enter() failed with error: {error_str}"
-        existing_position.set_historical_data_stream(historical_data)
+        historical_data = existing_position.get_historical_data_stream()
 
-        bar_highs = [bar.high for bar in historical_data.bar_data]
+        bar_data_copy = historical_data.bar_data[-bars_back:]
+        bar_highs = [bar.high for bar in bar_data_copy]
         highest_recent_price = max(bar_highs)
         top_price_buffer = self._get_entry_exit_buffer(highest_recent_price)
-        bar_lows = [bar.low for bar in historical_data.bar_data]
+        bar_lows = [bar.low for bar in bar_data_copy]
         lowest_recent_price = min(bar_lows)
         bottom_price_buffer = self._get_entry_exit_buffer(lowest_recent_price)
 
@@ -172,7 +171,7 @@ class PositionManager:
             return False, "Dual mode not supported"
 
         try:
-            existing_position.enter(direction, entry, stop, self.MAX_LOSS, self._cash_available)
+            existing_position.trigger_enter(direction, entry, stop, self.MAX_LOSS, self._cash_available)
         except Exception as e:
             return False, f"enter() failed with exception: {e}"
 
@@ -190,7 +189,7 @@ class PositionManager:
 
         self._logger.info(f"PositionManager: canceling position for {security_descriptor.to_string()}")
         try:
-            existing_position.cancel()
+            existing_position.trigger_cancel()
         except Exception as e:
             return False, f"cancel() failed with exception: {e}"
 
@@ -208,7 +207,7 @@ class PositionManager:
 
         self._logger.info(f"PositionManager: exiting position for {security_descriptor.to_string()}")
         try:
-            existing_position.exit()
+            existing_position.trigger_exit()
         except Exception as e:
             return False, f"exit() failed with exception: {e}"
 
@@ -250,7 +249,7 @@ class PositionManager:
 
         # Try to kill existing position
         if existing_position:
-            existing_position.cancel(force_cancel=True)
+            existing_position.trigger_cancel(force_cancel=True)
             success = await wait_for_condition(
                 lambda: existing_position.position_state == PositionState.CANCELED,
                 timeout=30.0,
@@ -318,7 +317,7 @@ class PositionManager:
         if position is None:
             return False, f"Could not adjust position for {security_descriptor}, not found"
 
-        position.adjust(order_purpose, price, relative)
+        position.trigger_adjust(order_purpose, price, relative)
 
         return True, None
 
