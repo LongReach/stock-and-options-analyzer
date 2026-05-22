@@ -280,7 +280,7 @@ class GuidedMissile:
 
         security_descriptor = SecurityDescriptor(command_dict["symbol"])
         if command not in [Command.CANCEL, Command.EXIT, Command.RESET, Command.ADJUST]:
-            success, error_str = self._position_manager.add_position(security_descriptor)
+            success, error_str = await self._position_manager.add_position(security_descriptor)
             if not success:
                 print(f"Command failed with error: {error_str}")
                 return
