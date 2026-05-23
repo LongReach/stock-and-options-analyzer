@@ -557,11 +557,7 @@ class Position:
         )
 
         self.trigger_event(
-            event="activate",
-            direction=direction,
-            entry_prices=entry_prices,
-            stop_prices=stop_prices,
-            max_loss=max_loss
+            event="activate", direction=direction, entry_prices=entry_prices, stop_prices=stop_prices, max_loss=max_loss
         )
 
     def trigger_enter(
@@ -700,13 +696,9 @@ class Position:
             f"Entering position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
         )
         if direction == PositionDirection.LONG:
-            shares_entered, cost = await self._setup_long(
-                entry_price, stop_price, max_loss, market_order=True
-            )
+            shares_entered, cost = await self._setup_long(entry_price, stop_price, max_loss, market_order=True)
         elif direction == PositionDirection.SHORT:
-            shares_entered, cost = await self._setup_short(
-                entry_price, stop_price, max_loss, market_order=True
-            )
+            shares_entered, cost = await self._setup_short(entry_price, stop_price, max_loss, market_order=True)
 
         self.logger.info(
             f"Placed market order for position {self.position_id} in direction {PositionDirection(direction).name} for {self.security_descriptor.to_string()}"
