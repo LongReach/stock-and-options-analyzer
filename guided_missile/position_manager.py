@@ -35,17 +35,18 @@ class PositionManager:
         self.ib_driver = ib_driver
         Position.ib_driver = ib_driver
 
+        # Total value of account
         self._account_value: float = cash_available
+        # Cash available to deploy, at any given moment
         self._cash_available: float = cash_available
 
         self._position_map: Dict[str, Position] = {}
         self._logger = getLogger(__file__)
 
-        self._need_update_account_values: bool = False
-
     async def add_position(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
-        Adds position to tracking.
+        Adds position to tracking. This fires of an async task that launches the position's state
+        machine, putting it in its initial non-active state.
 
         :param security_descriptor: describes stock, ETF, or options contract
         :return: (True if success, error string or None)
@@ -87,7 +88,7 @@ class PositionManager:
     ) -> Tuple[bool, Optional[str]]:
         """
         Activates position for entry when price triggers order. Entry point will be chosen based on recent bar data.
-        Same with stop loss.
+        Same with stop loss. Will fail if not enough cash available.
 
         :param security_descriptor: describes stock, ETF, or options contract
         :param direction: whether long, short, or dual
@@ -122,9 +123,14 @@ class PositionManager:
             entries = [highest_recent_price + top_price_buffer, lowest_recent_price - bottom_price_buffer]
             stops = [lowest_recent_price - bottom_price_buffer, highest_recent_price + top_price_buffer]
 
+        cash_available = self._get_cash_available()
+        cash_needed = self._get_cash_needed_for_position(entries[0], stops[0], self.MAX_LOSS)
+        if cash_needed > cash_available:
+            return False, f"Not enough cash to enter position: have {cash_available}, need {cash_available}"
+
         self._logger.info(f"PositionManager: activate() uses entries of {entries}, stops of {stops}")
         try:
-            existing_position.trigger_activate(direction, entries, stops, self.MAX_LOSS, self._cash_available)
+            existing_position.trigger_activate(direction, entries, stops, self.MAX_LOSS)
         except Exception as e:
             return False, f"activate() failed with exception: {e}"
 
@@ -138,7 +144,7 @@ class PositionManager:
     ) -> Tuple[bool, Optional[str]]:
         """
         Enters position immediately. Entry point will be chosen based on recent bar data.
-        Same with stop loss.
+        Same with stop loss. Will fail if not enough cash available.
 
         :param security_descriptor: describes stock, ETF, or options contract
         :param direction: whether long, short, or dual
@@ -170,8 +176,13 @@ class PositionManager:
         else:
             return False, "Dual mode not supported"
 
+        cash_available = self._get_cash_available()
+        cash_needed = self._get_cash_needed_for_position(entry, stop, self.MAX_LOSS)
+        if cash_needed > cash_available:
+            return False, f"Not enough cash to enter position: have {cash_available}, need {cash_available}"
+
         try:
-            existing_position.trigger_enter(direction, entry, stop, self.MAX_LOSS, self._cash_available)
+            existing_position.trigger_enter(direction, entry, stop, self.MAX_LOSS)
         except Exception as e:
             return False, f"enter() failed with exception: {e}"
 
@@ -197,7 +208,8 @@ class PositionManager:
 
     async def exit(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
         """
-        Exits position that has been entered
+        Exits position that has been entered, closing out of it and canceling all associated orders.
+
         :param security_descriptor: describes stock, ETF, or options contract
         """
 
@@ -213,8 +225,12 @@ class PositionManager:
 
         return True, None
 
-    async def reset(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, str]:
-        """Rebuilds a Position object for a position that we're actually in, on the brokerage side."""
+    async def reset(self, security_descriptor: SecurityDescriptor) -> Tuple[bool, Optional[str]]:
+        """
+        Rebuilds a Position object for a position that we're actually in, on the brokerage side. This is useful
+        when the application has an error or crashes.
+        """
+
         existing_position = self._position_map.get(security_descriptor.to_string())
         if existing_position and existing_position.position_state not in [
             PositionState.ENTERED,
@@ -312,7 +328,19 @@ class PositionManager:
 
     async def adjust(
         self, security_descriptor: SecurityDescriptor, price: float, relative: bool, order_purpose: OrderPurpose
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Adjusts an order for a position, either the entry order, the stop loss, or the take profit. This feature
+        exists because TraderWorkstation can be unresponsive about recognizing mouse drags on the graphical
+        line that represents the order.
+
+        :param security_descriptor: describes stock, ETF, or options contract
+        :param price: the new price, if relative is False, or the delta by which to adjust price
+        :param relative: if True, price will be a delta rather than an absolute value
+        :param order_purpose: indicates whether operation applies to entry order, stop loss, or take profit
+        :return: (success, error message or None)
+        """
+
         position = self._position_map.get(security_descriptor.to_string())
         if position is None:
             return False, f"Could not adjust position for {security_descriptor}, not found"
@@ -322,19 +350,21 @@ class PositionManager:
         return True, None
 
     async def clear_positions(self):
-        """TODO"""
+        """
+        Clear out Position objects for positions that are closed, canceled, or never entered.
+
+        TODO: capture profits
+        """
         remove_positions: List[str] = []
         for pos_name, pos in self._position_map.items():
             if pos.position_state in [PositionState.NONE, PositionState.CLOSED, PositionState.CANCELED]:
                 remove_positions.append(pos_name)
+
         for pos_name in remove_positions:
             self._position_map.pop(pos_name, None)
 
     async def update(self):
-        # TODO: docs
-        if self._need_update_account_values:
-            await self._update_cash_amount()
-            self._need_update_account_values = False
+        """Main update function. Halts async state machines on any positions that have had exceptions."""
 
         for pos_name, position in self._position_map.items():
             task_done, exception = position.is_state_machine_done()
@@ -364,6 +394,7 @@ class PositionManager:
         return out_dict
 
     async def get_position_info(self) -> List[str]:
+        """Gets position info directly from the brokerage, as list of printable strings"""
         positions_info, error_str = await self.ib_driver.get_positions()
         if error_str is not None:
             return []
@@ -378,7 +409,6 @@ class PositionManager:
 
     def position_changed_cb(self, position_id: int, shares: int, price: float):
         """Called whenever a position changes"""
-        self._need_update_account_values = True
         found_pos_name = "???"
         for pos_name, pos in self._position_map.items():
             if pos.position_id == position_id:
@@ -410,27 +440,19 @@ class PositionManager:
 
         return historical_data, None
 
-    async def _update_cash_amount(self):
-        """
-        Updates bookkeeping about cash in account
-        """
+    def _get_cash_available(self) -> float:
+        """Returns cash available, not tied up in any position"""
+        cash_available = self._account_value
+        for pos_name, position in self._position_map.items():
+            cash_available -= position.get_cost()
+        return cash_available
 
-        cash_deduction: float = 0.0
-
-        # First, count the theoretical cost of positions not yet entered
-        for security_desc, position in self._position_map.items():
-            cash_deduction += position.theoretical_cost
-
-        # Now, we ask IB directly about positions we're in
-        positions_info, error_str = await self.ib_driver.get_positions()
-        if error_str:
-            self._logger.error(f"Could not update cash amount. Error is: {error_str}")
-        else:
-            positions = positions_info.get_positions()
-            for position in positions:
-                cash_deduction += position.price * float(position.quantity)
-
-        self._cash_available = self._account_value - cash_deduction
+    @staticmethod
+    def _get_cash_needed_for_position(entry_price: float, stop_price: float, max_loss: float):
+        delta = abs(stop_price - entry_price)
+        shares_needed = int(max_loss / delta)
+        total_cost = shares_needed * entry_price
+        return total_cost
 
     @staticmethod
     def _get_entry_exit_buffer(price: float) -> float:
