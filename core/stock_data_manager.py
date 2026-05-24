@@ -3,10 +3,7 @@ import math
 from typing import Optional, List, Union, Tuple, Any, Dict
 import logging
 import pandas as pd
-from pandas import DataFrame, read_pickle, DatetimeIndex
 from datetime import datetime, timedelta
-
-from pandas.core.resample import maybe_warn_args_and_kwargs
 
 from core.common import HistoricalData, RequestedInfoType
 from core.utils import (
@@ -19,7 +16,7 @@ from core.utils import (
     current_datetime,
     non_naive_datetime,
 )
-from core.stock_data import StockData, StockDataException
+from core.stock_data import StockData, StockDataException, DB_PATH
 from core.ib_driver import IBDriver
 
 _logger = logging.getLogger(__name__)
@@ -38,9 +35,11 @@ class StockDataManager:
         self._ib_driver: Optional[IBDriver] = None
         self._log_to_stdout = False
 
-    def add_driver(self, ib_driver: IBDriver):
+    def add_driver(self, ib_driver: IBDriver) -> bool:
+        """Adds driver for connecting to brokerage, returns True if connection successful"""
         self._ib_driver = ib_driver
         self._ib_driver.connect()
+        return self._ib_driver.is_connected()
 
     def set_log_to_stdout(self, to_stdout: bool):
         self._log_to_stdout = True
@@ -50,41 +49,38 @@ class StockDataManager:
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        filename: Optional[str] = None,
+        db_path: str = DB_PATH,
     ) -> bool:
         """
-        Creates a StockData object, attempts to load data from disk
+        Creates a StockData object, attempts to load data from the HDF5 database.
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
-        :param filename: if not given, a filename will be chosen from symbol/bar size
-        :return: True if file successfully loaded from disk
+        :param db_path: path to the HDF5 database file
+        :return: True if data was successfully loaded
         """
-        file_str = f" from file {filename}" if filename else ""
-        self._log(f"Loading data for {symbol}, {bar_size.name}{file_str}")
+        self._log(f"Loading data for {symbol}, {bar_size.name} from {db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
-        return stock_data.load(filename)
+        return stock_data.load_from_db(db_path)
 
     def save_data(
         self,
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        filename: Optional[str] = None,
+        db_path: str = DB_PATH,
     ):
         """
-        Creates a StockData object, attempts to load data from disk
+        Saves data to the HDF5 database.
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
-        :param filename: if not given, a filename will be chosen from symbol/bar size
-        :return:
+        :param db_path: path to the HDF5 database file
         """
-        file_str = f" to file {filename}" if filename else ""
-        self._log(f"Saving data for {symbol}, {bar_size.name}{file_str}")
+        self._log(f"Saving data for {symbol}, {bar_size.name} to {db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data:
-            stock_data.save(filename)
+            stock_data.save_to_db(db_path)
 
     def clear_data(
         self,
@@ -150,6 +146,7 @@ class StockDataManager:
                 request_info_type=info_type,
             )
             if error_str:
+                self._log(f"Got error while scraping: {error_str}", level=logging.ERROR)
                 ret_error_str = error_str
             if historical_data.is_empty():
                 break
@@ -190,7 +187,8 @@ class StockDataManager:
 
         df = stock_data.get_data_frame()
         if len(df) == 0:
-            # There's nothing "smart" we can do here, no data loaded at all
+            # There's nothing "smart" we can do here, no data loaded at all. So, we just scrape it all from broker.
+            self._log("No data cached locally, scrape_data_smart() must scrape it all")
             return await self.scrape_data(symbol, bar_size, info_type, start_date, end_date)
 
         # Oldest date for which there's data

@@ -35,11 +35,11 @@ async def main(mode: int):
             )
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("SPY", BarSize.ONE_DAY, "SPY-1d-tr-test.zip")
+            stock_manager.save_data("SPY", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
             print_df(df)
         if mode == 2:
-            stock_manager.load_data("SPY", BarSize.ONE_DAY, "SPY-1d-tr-test.zip")
+            stock_manager.load_data("SPY", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
             print_df(df)
         if mode == 3:
@@ -49,16 +49,16 @@ async def main(mode: int):
             )
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("DIA", BarSize.ONE_DAY, "DIA-1d-tr-test.zip")
+            stock_manager.save_data("DIA", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
             print_df(df)
         if mode == 4:
             print("Here we go with smart scrape!")
-            stock_manager.load_data("DIA", BarSize.ONE_DAY, "DIA-1d-tr-test.zip")
+            stock_manager.load_data("DIA", BarSize.ONE_DAY)
             success, error_str = await stock_manager.scrape_data_smart("DIA", BarSize.ONE_DAY, start_date="19700101")
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("DIA", BarSize.ONE_DAY, "DIA-1d-tr-test.zip")
+            stock_manager.save_data("DIA", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
             print_df(df)
     except Exception as ex:
@@ -68,7 +68,7 @@ async def main(mode: int):
 
 
 parser = argparse.ArgumentParser(description="StockDataManager test")
-parser.add_argument("--mode", help="choice are 1, 2", default=1, type=int)
+parser.add_argument("--mode", help="choice are 1, 2, 3, 4", default=1, type=int)
 args = parser.parse_args()
 
 asyncio.run(main(args.mode))
