@@ -1,13 +1,14 @@
-from typing import Optional, List, Union, Tuple, Any, Dict
+from typing import Any, Dict
 import logging
 import pandas as pd
-from pandas import DataFrame, read_pickle, DatetimeIndex
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from core.utils import BarSize, bar_size_to_str, str_to_bar_size, non_naive_datetime
+from core.utils import BarSize, bar_size_to_str, non_naive_datetime
 from core.common import RequestedInfoType
 
 _logger = logging.getLogger(__name__)
+
+DB_PATH = "data/market_data.h5"
 
 
 class StockDataException(Exception):
@@ -31,7 +32,7 @@ class StockData:
         self._symbol = symbol
         self._bar_size = bar_size
         self._info_type = info_type
-        self.clear()
+        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -41,8 +42,11 @@ class StockData:
         :param date: datetime at which bar begins
         """
         # Make sure the date is in the right timezone
+        _logger.info("xxxx butt 1")
         date = non_naive_datetime(date)
+        _logger.info("xxxx butt 2")
         date_str = self._get_readable_date(date)
+        _logger.info("xxxx butt 3")
         df = self._price_and_vol_df
         df.loc[date_str] = [
             date,
@@ -61,48 +65,37 @@ class StockData:
         """Returns pandas Dataframe"""
         return self._price_and_vol_df
 
-    def load(self, filename: Optional[str] = None) -> bool:
+    def load_from_db(self, db_path: str = DB_PATH) -> bool:
         """
-        Loads data from disk.
-        :param filename: if not given, one will be chosen from symbol and bar size
-        :return: True if data was loaded from disk
+        Loads data from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if data was loaded successfully
         """
-        if filename:
-            try:
-                self._symbol, self._bar_size, self._info_type = self._infer_characteristics_from_file_name(filename)
-            except:
-                _logger.warning(f"Couldn't infer symbol and bar size from filename {filename}")
-                pass
-        else:
-            filename = self._get_file_name()
-
-        path = f"./data/{filename}"
+        key = self.db_key
         try:
-            _logger.info(f"Attempting to load pickle {path}")
-            self._price_and_vol_df = read_pickle(path)
+            _logger.info(f"Loading from DB {db_path}, key={key}")
+            self._price_and_vol_df = pd.read_hdf(db_path, key=key)
         except:
-            _logger.warning(f"Couldn't load file {filename}")
+            _logger.warning(f"Couldn't load key {key} from {db_path}")
             return False
 
-        # Go through date, make sure timezone is right for date
         for idx in range(len(self._price_and_vol_df)):
-            # TODO: 0 is index of "date" column, make a constant for it
             self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
 
         return True
 
-    def save(self, filename: Optional[str] = None) -> bool:
+    def save_to_db(self, db_path: str = DB_PATH) -> bool:
         """
-        Saves data to disk.
-        :param filename: if not given, one will be chosen from symbol and bar size
+        Saves data to the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if data was saved successfully
         """
-        filename = self._get_file_name() if filename is None else filename
-        path = f"./data/{filename}"
+        key = self.db_key
         try:
-            _logger.info(f"Attempting to save pickle {path}")
-            self._price_and_vol_df.to_pickle(path)
+            _logger.info(f"Saving to DB {db_path}, key={key}")
+            self._price_and_vol_df.to_hdf(db_path, key=key, complevel=6, complib="zlib")
         except:
-            _logger.warning(f"Couldn't save file {filename}")
+            _logger.warning(f"Couldn't save key {key} to {db_path}")
             return False
         return True
 
@@ -121,6 +114,12 @@ class StockData:
     @property
     def info_type(self) -> RequestedInfoType:
         return self._info_type
+
+    @property
+    def db_key(self) -> str:
+        """Returns the HDF5 store key for this series, e.g. 'SPY_1d_tr'"""
+        raw = f"{self._symbol}_{bar_size_to_str(self._bar_size)}_{StockData.get_info_type_str(self._info_type)}"
+        return raw.replace("-", "_").replace(".", "_")
 
     @staticmethod
     def get_info_type_str(info_type: RequestedInfoType) -> str:
@@ -156,20 +155,3 @@ class StockData:
             return f"{dt.month:02}/{dt.day:02}/{dt.year:04}"
         else:
             return f"{dt.month:02}/{dt.day:02} {dt.hour:02}:{dt.minute:02}"
-
-    def _get_file_name(self) -> str:
-        """Assigns a filename based on symbol, bar size, and info type, returns in a string"""
-        return f"{self._symbol}-{bar_size_to_str(self._bar_size)}-{StockData.get_info_type_str(self._info_type)}.zip"
-
-    def _infer_characteristics_from_file_name(self, filename: str) -> Tuple[str, BarSize, RequestedInfoType]:
-        """Attempts to infer symbol, bar size, and info type from a filename"""
-        try:
-            # Get part of filename before extension
-            parts = filename.split(".")
-            characteristics_str = parts[0].split("-")
-            symbol_str = characteristics_str[0]
-            bar_size = str_to_bar_size(characteristics_str[1])
-            info_type = StockData.get_info_type(characteristics_str[2])
-            return symbol_str, bar_size, info_type
-        except:
-            raise StockDataException(f"Couldn't infer symbol/bar size/info y from {filename}")

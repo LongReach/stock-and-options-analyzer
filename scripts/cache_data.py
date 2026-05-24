@@ -20,6 +20,12 @@ from core.utils import (
 
 """
 Utility for collecting price (or other) data for a particular security, in bar form, then caching it to disk.
+
+Run like:
+d:
+cd CodingProjects\Python\TWS2025
+conda activate options_2025_1
+python -m scripts.cache_data --symbol SPY
 """
 
 CLIENT_ID = 13
@@ -50,7 +56,10 @@ async def main(
     ib_driver = None
     if not info_only:
         ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
-        stock_manager.add_driver(ib_driver)
+        success = stock_manager.add_driver(ib_driver)
+        if not success:
+            print("Error connecting to broker data")
+            return
     stock_manager.set_log_to_stdout(True)
     bar_size = str_to_bar_size(bar_size_str)
     info_type = StockData.get_info_type(info_type_str)
@@ -75,6 +84,7 @@ async def main(
         else:
             stock_manager.load_data(symbol, bar_size, info_type)
         if not info_only:
+            print(f"Performing data scrape for {symbol}...")
             success, error_str = await stock_manager.scrape_data_smart(
                 symbol, bar_size, info_type, start_date=start_date, update_recent=update
             )

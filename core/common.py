@@ -217,9 +217,8 @@ class HistoricalData:
 
     def get_zipped_lists(self) -> List[Tuple[Dict, datetime]]:
         """Returns list of (bar data dict, timestamp for bar)"""
-        with self.lock:
-            bar_data_dicts = self.get_bar_data_as_dicts()
-            return list(zip(bar_data_dicts, self.timestamps))
+        bar_data_dicts = self.get_bar_data_as_dicts()
+        return list(zip(bar_data_dicts, self.timestamps))
 
     def get_bar_data_as_dicts(self):
         """Gets bar data as list of Dicts"""
