@@ -67,6 +67,16 @@ class StockDataManager:
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         return stock_data.load_from_db(db_path)
 
+    def unload_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
+        """
+        Unload StockData object from memory. Doesn't affect data saved in cache.
+        :param symbol: e.g. "AAPL"
+        :param bar_size: --
+        :param info_type: --
+        """
+        key = (symbol, bar_size, info_type)
+        self._data_map.pop(key, None)
+
     def save_data(
         self,
         symbol: str,
@@ -91,10 +101,14 @@ class StockDataManager:
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        remove_from_cache: bool = False,
+        db_path: str = DB_PATH,
     ):
-        """Clear out any data already loaded"""
+        """Clear out any data already loaded. If remove_from_cache is True, also deletes from the database."""
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         stock_data.clear()
+        if remove_from_cache:
+            stock_data.delete_from_db(db_path)
 
     async def scrape_data(
         self,

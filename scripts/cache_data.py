@@ -85,6 +85,7 @@ async def do_cache(
                 error_msg = error_str
             stock_manager.save_data(symbol, bar_size, info_type)
         df = stock_manager.get_pandas_df(symbol, bar_size, info_type)
+        stock_manager.unload_data(symbol, bar_size, info_type)
     except Exception as ex:
         print(f"Exception: {ex}")
         print(traceback.format_exc())
@@ -119,6 +120,7 @@ async def show_cache_contents(stock_manager: StockDataManager):
             print(out_line)
         else:
             print(f"Could not find data for {key}")
+        stock_manager.unload_data(symbol, bar_size, info_type)
 
 
 async def cache_single_stock(
@@ -216,6 +218,26 @@ async def cache_multiple_stocks(
     print()
 
 
+async def remove_single_stock(
+    stock_manager: StockDataManager,
+    symbol: str,
+    bar_size_str: str,
+    info_type_str: str,
+):
+    """
+    Removes a single stock from cache.
+
+    :param stock_manager:  --
+    :param symbol: stock or ETF ticker, e.g. SPY
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    """
+    print(f"Removing stock from cache: symbol is {symbol}, bar size is {bar_size_str}, info type is {info_type_str}")
+    bar_size = str_to_bar_size(bar_size_str)
+    info_type = StockData.get_info_type(info_type_str)
+    stock_manager.clear_data(symbol, bar_size, info_type, remove_from_cache=True)
+
+
 async def main(parser: argparse.ArgumentParser):
     """Top-level function, unpacks arguments and calls functions that do the work"""
     args = parser.parse_args()
@@ -235,15 +257,18 @@ async def main(parser: argparse.ArgumentParser):
     if args.show:
         await show_cache_contents(stock_manager)
     elif args.symbol:
-        await cache_single_stock(
-            stock_manager,
-            args.symbol,
-            args.barsize,
-            args.info_type,
-            args.info_only,
-            args.update,
-            args.fresh,
-        )
+        if args.remove:
+            await remove_single_stock(stock_manager, args.symbol, args.barsize, args.info_type)
+        else:
+            await cache_single_stock(
+                stock_manager,
+                args.symbol,
+                args.barsize,
+                args.info_type,
+                args.info_only,
+                args.update,
+                args.fresh,
+            )
     elif args.file:
         await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type)
 
@@ -272,5 +297,6 @@ parser.add_argument("--info-only", help="don't do any scraping, just show info",
 parser.add_argument("--update", help="add more recent data to file", action="store_true")
 parser.add_argument("--fresh", help="re-scrape all data", action="store_true")
 parser.add_argument("--show", help="show what data is in cache", action="store_true")
+parser.add_argument("--remove", help="remove symbol from cache", action="store_true")
 
 asyncio.run(main(parser))
