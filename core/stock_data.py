@@ -100,6 +100,25 @@ class StockData:
         """Make new, empty dataframe"""
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
 
+    def delete_from_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Removes this series from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if the key was found and removed
+        """
+        key = self.db_key
+        try:
+            with pd.HDFStore(db_path) as store:
+                if f"/{key}" in store:
+                    store.remove(key)
+                    _logger.info(f"Deleted key {key} from {db_path}")
+                    return True
+                _logger.warning(f"Key {key} not found in {db_path}")
+                return False
+        except Exception:
+            _logger.warning(f"Couldn't delete key {key} from {db_path}")
+            return False
+
     @property
     def symbol(self) -> str:
         return self._symbol
