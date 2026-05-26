@@ -2,7 +2,7 @@
 
 ![](./images/WIP.png)
 
-I'm sharing this repository as an example of something I worked during a period that included self-employment, caring for an aging family member, and recovery from a debilitating injury. My life was very challenging in 2025/2026, far more so than any corporate job, but it was still important to me to design and write code, as well as learn how to supercharge my working process by using Claude.
+I'm sharing this repository as an example of something I worked during a period that included self-employment, caring for an aging family member, and recovery from a debilitating injury. My life was very challenging in 2025/2026, far more so than any corporate job, but it was still important to me to design and write code, as well as learn how to supercharge my working process by using Claude/Copilot.
 
 The code and documentation are not yet as polished as they'd be in a "finished" project, so please bear that in mind.
 
