@@ -28,6 +28,8 @@ async def main(mode: int):
     stock_manager.add_driver(ib_driver)
     try:
         print(f"Running in mode {mode}")
+        if mode == 0:
+            print("Mode 0: do nothing")
         if mode == 1:
             # Notice that 3/29/25 is a weekend
             success, error_str = await stock_manager.scrape_data(
@@ -92,7 +94,7 @@ async def main(mode: int):
 
 
 parser = argparse.ArgumentParser(description="StockDataManager test")
-parser.add_argument("--mode", help="choice are 1, 2, 3, 4", default=1, type=int)
+parser.add_argument("--mode", help="choice are 1, 2, 3, 4", default=0, type=int)
 args = parser.parse_args()
 
 asyncio.run(main(args.mode))
