@@ -318,7 +318,9 @@ class IBDriver(IBWrapper):
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
 
-    async def get_head_timestamp(self, ticker: str, info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Optional[datetime]:
+    async def get_head_timestamp(
+        self, ticker: str, info_type: RequestedInfoType = RequestedInfoType.TRADES
+    ) -> Optional[datetime]:
         """
         Returns the head timestamp for a particular ticker, i.e. the earliest datetime for which
         IB has data.
