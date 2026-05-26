@@ -42,11 +42,8 @@ class StockData:
         :param date: datetime at which bar begins
         """
         # Make sure the date is in the right timezone
-        _logger.info("xxxx butt 1")
         date = non_naive_datetime(date)
-        _logger.info("xxxx butt 2")
         date_str = self._get_readable_date(date)
-        _logger.info("xxxx butt 3")
         df = self._price_and_vol_df
         df.loc[date_str] = [
             date,
@@ -119,7 +116,7 @@ class StockData:
     def db_key(self) -> str:
         """Returns the HDF5 store key for this series, e.g. 'SPY_1d_tr'"""
         raw = f"{self._symbol}_{bar_size_to_str(self._bar_size)}_{StockData.get_info_type_str(self._info_type)}"
-        return raw.replace("-", "_").replace(".", "_")
+        return raw.replace(".", "_")
 
     @staticmethod
     def get_info_type_str(info_type: RequestedInfoType) -> str:
