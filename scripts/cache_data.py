@@ -44,6 +44,7 @@ def print_df(df):
     print("Tail:")
     print(df.tail())
 
+
 async def do_cache(
     stock_manager: StockDataManager,
     symbol: str,
@@ -91,6 +92,7 @@ async def do_cache(
 
     return df, error_msg
 
+
 async def show_cache_contents(stock_manager: StockDataManager):
     """Prints information about data currently in cache"""
     stock_manager.set_log_to_stdout(False)
@@ -117,6 +119,7 @@ async def show_cache_contents(stock_manager: StockDataManager):
             print(out_line)
         else:
             print(f"Could not find data for {key}")
+
 
 async def cache_single_stock(
     stock_manager: StockDataManager,
@@ -156,6 +159,7 @@ async def cache_single_stock(
         print(f"Error caching single stock: {error_str}")
     print()
 
+
 async def cache_multiple_stocks(
     stock_manager: StockDataManager,
     file_path: str,
@@ -176,7 +180,7 @@ async def cache_multiple_stocks(
     symbols_with_error: Dict[Tuple[str, RequestedInfoType], str] = {}
 
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             for line in file:
                 symbol = line.strip()
                 info_types_to_cache: List[RequestedInfoType] = [info_type]
@@ -186,7 +190,15 @@ async def cache_multiple_stocks(
 
                 print(f"Scraping and caching data for {symbol}...")
                 for info_type_to_cache in info_types_to_cache:
-                    df, error_message = await do_cache(stock_manager=stock_manager, symbol=symbol, bar_size=bar_size, info_type=info_type_to_cache, info_only=False, update=True, fresh=False)
+                    df, error_message = await do_cache(
+                        stock_manager=stock_manager,
+                        symbol=symbol,
+                        bar_size=bar_size,
+                        info_type=info_type_to_cache,
+                        info_only=False,
+                        update=True,
+                        fresh=False,
+                    )
                     if error_message is not None:
                         symbols_with_error[(symbol, info_type_to_cache)] = error_message
                 print(f"Done with {symbol}")
@@ -202,6 +214,7 @@ async def cache_multiple_stocks(
             print(f"{symbol}, {info_type_str}: {error_msg}")
 
     print()
+
 
 async def main(parser: argparse.ArgumentParser):
     """Top-level function, unpacks arguments and calls functions that do the work"""
@@ -260,6 +273,4 @@ parser.add_argument("--update", help="add more recent data to file", action="sto
 parser.add_argument("--fresh", help="re-scrape all data", action="store_true")
 parser.add_argument("--show", help="show what data is in cache", action="store_true")
 
-asyncio.run(
-    main(parser)
-)
+asyncio.run(main(parser))
