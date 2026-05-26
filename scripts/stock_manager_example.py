@@ -61,6 +61,30 @@ async def main(mode: int):
             stock_manager.save_data("DIA", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
             print_df(df)
+        if mode == 5:
+            print("Initial cache purge.")
+            stock_manager.clear_data("XLK", BarSize.ONE_DAY, remove_from_cache=True)
+            print("Scraping some XLK data.")
+            success, error_str = await stock_manager.scrape_data(
+                "XLK", BarSize.ONE_DAY, start_date="20260513", end_date="20260521"
+            )
+            if not success:
+                print(f"Error: {error_str}")
+            print("Saving it to cache.")
+            stock_manager.save_data("XLK", BarSize.ONE_DAY, db_path="data/test_xlk_data.h5")
+            print("Removing it from memory.")
+            stock_manager.clear_data("XLK", BarSize.ONE_DAY)
+            print("Scraping new data, overlapping with the cached data.")
+            success, error_str = await stock_manager.scrape_data(
+                "XLK", BarSize.ONE_DAY, start_date="20260519", end_date="20260526"
+            )
+            if not success:
+                print(f"Error: {error_str}")
+            success = stock_manager.load_data("XLK", BarSize.ONE_DAY, db_path="data/test_xlk_data.h5")
+            if not success:
+                print(f"Error: {error_str}")
+            df = stock_manager.get_pandas_df("XLK", BarSize.ONE_DAY)
+            print("Dataframe is:\n", df)
     except Exception as ex:
         print(f"Exception: {ex}")
 
