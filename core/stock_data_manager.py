@@ -41,8 +41,12 @@ class StockDataManager:
         self._ib_driver.connect()
         return self._ib_driver.is_connected()
 
+    @property
+    def driver(self) -> Optional[IBDriver]:
+        return self._ib_driver
+
     def set_log_to_stdout(self, to_stdout: bool):
-        self._log_to_stdout = True
+        self._log_to_stdout = to_stdout
 
     def load_data(
         self,
@@ -175,8 +179,8 @@ class StockDataManager:
         :param bar_size: --
         :param info_type: --
         :param start_date: earliest date for which to scrape data. If not given, don't attempt to scrape data
-            that's earlier than data already loaded. If date is earlier than available data, then start from
-            there.
+            that's earlier than data already loaded. If date is earlier than available data from broker side,
+            then start from the earliest date for which data exists.
         :param end_date: latest date for which to scrape data. If not given, only attempt to scrape data
             that's later than data already loaded if update_recent set.
         :param update_recent: if True, and end_date not set, most recent data not already loaded will be
@@ -202,8 +206,8 @@ class StockDataManager:
             start_dt = None
         else:
             start_dt = get_datetime(start_date)
-            earliest_data_dt = await self._ib_driver.get_head_timestamp(symbol)
-            if start_dt < earliest_data_dt:
+            earliest_data_dt = await self._ib_driver.get_head_timestamp(symbol, info_type)
+            if earliest_data_dt is not None and start_dt < earliest_data_dt:
                 start_dt = earliest_data_dt
 
         # Scrape data that's older than already-loaded data
@@ -244,6 +248,25 @@ class StockDataManager:
         if stock_data is None:
             return None
         return stock_data.get_data_frame()
+
+    def get_cached_keys(self, db_path: str = DB_PATH) -> List[str]:
+        """
+        Returns the list of series keys present in the local database, e.g. ['SPY_1d_tr', 'AAPL_1d_tr'].
+        Returns an empty list if the database file does not exist.
+        """
+        try:
+            with pd.HDFStore(db_path, mode="r") as store:
+                return [key.lstrip("/") for key in store.keys()]
+        except:
+            return []
+
+    @staticmethod
+    def get_key_elements(key: str) -> Tuple[str, BarSize, RequestedInfoType]:
+        parts = key.split("_")
+        symbol = parts[0]
+        bar_size = str_to_bar_size(parts[1])
+        info_type = StockData.get_info_type(parts[2])
+        return symbol, bar_size, info_type
 
     def _log(self, message: str, level: int = logging.INFO):
         if self._log_to_stdout and level == logging.INFO:
