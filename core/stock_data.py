@@ -33,6 +33,7 @@ class StockData:
         self._bar_size = bar_size
         self._info_type = info_type
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
+        self._loaded_from_cache: bool = False
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -62,12 +63,15 @@ class StockData:
         """Returns pandas Dataframe"""
         return self._price_and_vol_df
 
-    def load_from_db(self, db_path: str = DB_PATH) -> bool:
+    def load_from_db(self, db_path: str = DB_PATH, preserve_existing_data: bool = True) -> bool:
         """
         Loads data from the HDF5 database.
         :param db_path: path to the HDF5 file
+        :param preserve_existing_data: if True, keep any data that was already scraped
         :return: True if data was loaded successfully
         """
+        original_df = self._price_and_vol_df
+
         key = self.db_key
         try:
             _logger.info(f"Loading from DB {db_path}, key={key}")
@@ -79,6 +83,13 @@ class StockData:
         for idx in range(len(self._price_and_vol_df)):
             self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
 
+        if preserve_existing_data and len(original_df) > 0:
+            self._price_and_vol_df = pd.concat([original_df, self._price_and_vol_df])
+            # Remove rows with duplicate labels
+            self._price_and_vol_df.drop_duplicates(inplace=True)
+            self.finalize_data()
+
+        self._loaded_from_cache = True
         return True
 
     def save_to_db(self, db_path: str = DB_PATH) -> bool:
@@ -94,11 +105,14 @@ class StockData:
         except:
             _logger.warning(f"Couldn't save key {key} to {db_path}")
             return False
+
+        self._loaded_from_cache = True
         return True
 
     def clear(self):
         """Make new, empty dataframe"""
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
+        self._loaded_from_cache = False
 
     def delete_from_db(self, db_path: str = DB_PATH) -> bool:
         """
@@ -112,6 +126,7 @@ class StockData:
                 if f"/{key}" in store:
                     store.remove(key)
                     _logger.info(f"Deleted key {key} from {db_path}")
+                    self.clear()
                     return True
                 _logger.warning(f"Key {key} not found in {db_path}")
                 return False
