@@ -105,10 +105,10 @@ class IBDriver(IBWrapper):
         self._request_order_objects: Dict[int, OrderRequest] = {}
         self._request_positions_object: PositionsRequest = PositionsRequest()
 
-        # Maps head timestamp request ID to symbol
-        self._head_timestamp_map: Dict[int, str] = {}
-        # Maps symbol to head timestamp
-        self._symbol_to_head_timestamp: Dict[str, str] = {}
+        # Maps head timestamp request ID to symbol, request info type
+        self._head_timestamp_map: Dict[int, Tuple[str, RequestedInfoType]] = {}
+        # Maps symbol, request info type to head timestamp
+        self._symbol_to_head_timestamp: Dict[Tuple[str, RequestedInfoType], str] = {}
 
         # For synchronizing changes to self._request_objects maps
         self._lock = asyncio.Lock()
@@ -318,28 +318,28 @@ class IBDriver(IBWrapper):
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
 
-    async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
+    async def get_head_timestamp(self, ticker: str, info_type: RequestedInfoType = RequestedInfoType.TRADES) -> Optional[datetime]:
         """
         Returns the head timestamp for a particular ticker, i.e. the earliest datetime for which
         IB has data.
         """
         async with self._lock:
             req_id_for_head_timestamp = self._next_id()
-            self._head_timestamp_map[req_id_for_head_timestamp] = ticker
+            self._head_timestamp_map[req_id_for_head_timestamp] = (ticker, info_type)
 
         new_contract = self._make_contract(ticker, primary_exchange="NYSE")
         try:
-            self._request_head_timestamp(req_id_for_head_timestamp, new_contract)
+            self._request_head_timestamp(req_id_for_head_timestamp, new_contract, info_type)
         except Exception as e:
             raise IBDriverException(f"Failure with head timestamp request, exception was {e}")
 
         def _head_timestamp_available():
-            return self._symbol_to_head_timestamp.get(ticker) is not None
+            return self._symbol_to_head_timestamp.get((ticker, info_type)) is not None
 
         timed_out = not await wait_for_condition(_head_timestamp_available, timeout=HISTORICAL_DATA_TIMEOUT)
         result = None
         if not timed_out:
-            result = get_datetime(self._symbol_to_head_timestamp[ticker])
+            result = get_datetime(self._symbol_to_head_timestamp[(ticker, info_type)])
 
         async with self._lock:
             self._head_timestamp_map.pop(req_id_for_head_timestamp, None)
@@ -965,7 +965,7 @@ class IBDriver(IBWrapper):
         if req_obj:
             req_obj.data_fetch_complete = True
 
-    def _request_head_timestamp(self, req_id: int, contract: Contract):
+    def _request_head_timestamp(self, req_id: int, contract: Contract, info_type: RequestedInfoType):
         """Requests head timestamp (datetime of earliest bar) from TWS"""
         # Request Head Timestamp
         #     reqId: ID of request
@@ -973,7 +973,8 @@ class IBDriver(IBWrapper):
         #     whatToShow: kind of info (e.g. 'BID', 'ASK', 'OPTION_IMPLIED_VOLATILITY', 'TRADES'). Some choices won't return volume data.
         #     useRTH: 1 for regular trading hours only, 0 otherwise
         #     formatDate: 1 for human-readable string, 2 for system format
-        self.reqHeadTimeStamp(req_id, contract, "TRADES", 1, 1)
+        what_to_show = str(info_type.value)
+        self.reqHeadTimeStamp(req_id, contract, what_to_show, 1, 1)
 
     def _head_timestamp_cb(self, req_id: int, start: str):
         """
@@ -981,10 +982,11 @@ class IBDriver(IBWrapper):
         :param req_id: applicable request
         :param start: the earliest timestamp
         """
-        symbol = self._head_timestamp_map.get(req_id)
-        if not symbol:
+        result = self._head_timestamp_map.get(req_id)
+        if not result:
             return
-        self._symbol_to_head_timestamp[symbol] = start
+        symbol, info_type = result
+        self._symbol_to_head_timestamp[(symbol, info_type)] = start
 
     def _contract_details_cb(self, req_id: int, contract_details: ContractDetails):
         """Called when a ContractDetails object has arrived"""
