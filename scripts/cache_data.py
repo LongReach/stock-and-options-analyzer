@@ -254,23 +254,29 @@ async def main(parser: argparse.ArgumentParser):
             return
     stock_manager.set_log_to_stdout(True)
 
-    if args.show:
-        await show_cache_contents(stock_manager)
-    elif args.symbol:
-        if args.remove:
-            await remove_single_stock(stock_manager, args.symbol, args.barsize, args.info_type)
-        else:
-            await cache_single_stock(
-                stock_manager,
-                args.symbol,
-                args.barsize,
-                args.info_type,
-                args.info_only,
-                args.update,
-                args.fresh,
-            )
-    elif args.file:
-        await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type)
+    try:
+        if args.show:
+            await show_cache_contents(stock_manager)
+        elif args.symbol:
+            if args.remove:
+                await remove_single_stock(stock_manager, args.symbol, args.barsize, args.info_type)
+            else:
+                await cache_single_stock(
+                    stock_manager,
+                    args.symbol,
+                    args.barsize,
+                    args.info_type,
+                    args.info_only,
+                    args.update,
+                    args.fresh,
+                )
+        elif args.file:
+            await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type)
+    except asyncio.CancelledError:
+        print("Program cancelled by user.")
+    except Exception as ex:
+        print(f"Got exception: {ex}")
+        print(traceback.format_exc())
 
     if ib_driver:
         ib_driver.disconnect()
