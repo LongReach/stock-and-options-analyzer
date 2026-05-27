@@ -27,6 +27,7 @@ async def main(mode: int):
     ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
     stock_manager = StockDataManager()
     stock_manager.add_driver(ib_driver)
+    stock_manager.set_db_path(TEST_DB)
     try:
         print(f"Running in mode {mode}")
         if mode == 0:
@@ -40,13 +41,13 @@ async def main(mode: int):
             )
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("SPY", BarSize.ONE_DAY, db_path=TEST_DB)
+            stock_manager.save_data("SPY", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
             print_df(df)
         if mode == 2:
             # Load SPY data
 
-            stock_manager.load_data("SPY", BarSize.ONE_DAY, db_path=TEST_DB)
+            stock_manager.load_data("SPY", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("SPY", BarSize.ONE_DAY)
             print_df(df)
         if mode == 3:
@@ -58,25 +59,26 @@ async def main(mode: int):
             )
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("DIA", BarSize.ONE_DAY, db_path=TEST_DB)
+            stock_manager.save_data("DIA", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
             print_df(df)
         if mode == 4:
             # Smart scrape of DIA data
 
             print("Here we go with smart scrape!")
-            stock_manager.load_data("DIA", BarSize.ONE_DAY, db_path=TEST_DB)
+            stock_manager.load_data("DIA", BarSize.ONE_DAY)
             success, error_str = await stock_manager.scrape_data_smart("DIA", BarSize.ONE_DAY, start_date="19700101")
             if not success:
                 print(f"Error: {error_str}")
-            stock_manager.save_data("DIA", BarSize.ONE_DAY, db_path=TEST_DB)
+            stock_manager.save_data("DIA", BarSize.ONE_DAY)
             df = stock_manager.get_pandas_df("DIA", BarSize.ONE_DAY)
             print_df(df)
         if mode == 5:
             # Tests being able to load cached data on top of scraped data, keeping both
 
+            stock_manager.set_db_path("data/test_xlk_data.h5")
             print("Initial cache purge.")
-            stock_manager.clear_data("XLK", BarSize.ONE_DAY, remove_from_cache=True, db_path="data/test_xlk_data.h5")
+            stock_manager.clear_data("XLK", BarSize.ONE_DAY, remove_from_cache=True)
             print("Scraping some XLK data.")
             success, error_str = await stock_manager.scrape_data(
                 "XLK", BarSize.ONE_DAY, start_date="20260513", end_date="20260521"
@@ -84,16 +86,16 @@ async def main(mode: int):
             if not success:
                 print(f"Error: {error_str}")
             print("Saving it to cache.")
-            stock_manager.save_data("XLK", BarSize.ONE_DAY, db_path="data/test_xlk_data.h5")
+            stock_manager.save_data("XLK", BarSize.ONE_DAY)
             print("Removing it from memory.")
-            stock_manager.clear_data("XLK", BarSize.ONE_DAY, db_path="data/test_xlk_data.h5")
+            stock_manager.clear_data("XLK", BarSize.ONE_DAY)
             print("Scraping new data, overlapping with the cached data.")
             success, error_str = await stock_manager.scrape_data(
                 "XLK", BarSize.ONE_DAY, start_date="20260519", end_date="20260526"
             )
             if not success:
                 print(f"Error: {error_str}")
-            success = stock_manager.load_data("XLK", BarSize.ONE_DAY, db_path="data/test_xlk_data.h5")
+            success = stock_manager.load_data("XLK", BarSize.ONE_DAY)
             if not success:
                 print(f"Error: {error_str}")
             df = stock_manager.get_pandas_df("XLK", BarSize.ONE_DAY)
