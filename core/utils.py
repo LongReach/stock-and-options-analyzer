@@ -70,7 +70,11 @@ async def wait_for_condition(condition, timeout: float, check_interval: float = 
     while asyncio.get_event_loop().time() - start_time < timeout:
         if condition():
             return True
-        await asyncio.sleep(check_interval)
+        try:
+            await asyncio.sleep(check_interval)
+        except asyncio.CancelledError as ex:
+            # Happens if user control-Cs out of program
+            raise ex from None
     return False
 
 

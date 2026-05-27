@@ -329,6 +329,7 @@ class IBDriver(IBWrapper):
             req_id_for_head_timestamp = self._next_id()
             self._head_timestamp_map[req_id_for_head_timestamp] = (ticker, info_type)
 
+        # FICME: exchange
         new_contract = self._make_contract(ticker, primary_exchange="NYSE")
         try:
             self._request_head_timestamp(req_id_for_head_timestamp, new_contract, info_type)
@@ -469,6 +470,7 @@ class IBDriver(IBWrapper):
         if underlying_name is None:
             return None, "Underlying not defined"
 
+        # FIXME: exchange
         contract_details_list, error_msg = await self._get_contract_details(
             ticker=underlying_name,
             primary_exchange=None,
@@ -796,6 +798,7 @@ class IBDriver(IBWrapper):
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
+        # FIXME: exchange
         ticker_desc = self._request_bardata_objects[req_id].ticker_desc
         new_contract = self._make_contract(
             ticker_desc.ticker,
