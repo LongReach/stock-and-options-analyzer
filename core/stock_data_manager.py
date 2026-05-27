@@ -1,6 +1,7 @@
 import asyncio
 import math
 from typing import Optional, List, Union, Tuple, Any, Dict
+from threading import Lock
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -35,6 +36,9 @@ class StockDataManager:
         self._ib_driver: Optional[IBDriver] = None
         self._log_to_stdout = False
 
+        self._map_lock: Lock = Lock()  # Controls access to self._data_map
+        self._cache_lock: Lock = Lock()  # Controls access to the cache DB
+
     def add_driver(self, ib_driver: IBDriver) -> bool:
         """Adds driver for connecting to brokerage, returns True if connection successful"""
         self._ib_driver = ib_driver
@@ -65,7 +69,26 @@ class StockDataManager:
         """
         self._log(f"Loading data for {symbol}, {bar_size.name} from {db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
-        return stock_data.load_from_db(db_path)
+        with self._cache_lock:
+            return stock_data.load_from_db(db_path)
+
+    async def load_data_async(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        db_path: str = DB_PATH,
+    ) -> bool:
+        """
+        Runs load_data() asynchronously. Good for being able to stream in data as a background task.
+
+        :param symbol: e.g. "AAPL"
+        :param bar_size: --
+        :param info_type: --
+        :param db_path: path to the HDF5 database file
+        :return: True if data was successfully loaded
+        """
+        return await asyncio.to_thread(self.load_data, symbol, bar_size, info_type, db_path)
 
     def unload_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
         """
@@ -75,7 +98,8 @@ class StockDataManager:
         :param info_type: --
         """
         key = (symbol, bar_size, info_type)
-        self._data_map.pop(key, None)
+        with self._map_lock:
+            self._data_map.pop(key, None)
 
     def save_data(
         self,
@@ -94,7 +118,8 @@ class StockDataManager:
         self._log(f"Saving data for {symbol}, {bar_size.name} to {db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data:
-            stock_data.save_to_db(db_path)
+            with self._cache_lock:
+                stock_data.save_to_db(db_path)
 
     def clear_data(
         self,
@@ -108,7 +133,8 @@ class StockDataManager:
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         stock_data.clear()
         if remove_from_cache:
-            stock_data.delete_from_db(db_path)
+            with self._cache_lock:
+                stock_data.delete_from_db(db_path)
 
     async def scrape_data(
         self,
@@ -268,11 +294,12 @@ class StockDataManager:
         Returns the list of series keys present in the local database, e.g. ['SPY_1d_tr', 'AAPL_1d_tr'].
         Returns an empty list if the database file does not exist.
         """
-        try:
-            with pd.HDFStore(db_path, mode="r") as store:
-                return [key.lstrip("/") for key in store.keys()]
-        except:
-            return []
+        with self._cache_lock:
+            try:
+                with pd.HDFStore(db_path, mode="r") as store:
+                    return [key.lstrip("/") for key in store.keys()]
+            except:
+                return []
 
     @staticmethod
     def get_key_elements(key: str) -> Tuple[str, BarSize, RequestedInfoType]:
@@ -304,7 +331,8 @@ class StockDataManager:
         :return:
         """
         key = (symbol, bar_size, info_type)
-        stock_data = self._data_map.get(key)
+        with self._map_lock:
+            stock_data = self._data_map.get(key)
         if stock_data is None and add_if_missing:
             stock_data = StockData(symbol, bar_size, info_type)
             self._add_stock_data(stock_data)
@@ -313,4 +341,5 @@ class StockDataManager:
     def _add_stock_data(self, stock_data: StockData):
         """Adds a StockData object to tracking"""
         key = (stock_data.symbol, stock_data.bar_size, stock_data.info_type)
-        self._data_map[key] = stock_data
+        with self._map_lock:
+            self._data_map[key] = stock_data
