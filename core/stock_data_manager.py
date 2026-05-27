@@ -35,6 +35,7 @@ class StockDataManager:
         self._data_map: Dict[Tuple[str, BarSize, RequestedInfoType], StockData] = {}
         self._ib_driver: Optional[IBDriver] = None
         self._log_to_stdout = False
+        self._db_path: str = DB_PATH
 
         self._map_lock: Lock = Lock()  # Controls access to self._data_map
         self._cache_lock: Lock = Lock()  # Controls access to the cache DB
@@ -52,32 +53,32 @@ class StockDataManager:
     def set_log_to_stdout(self, to_stdout: bool):
         self._log_to_stdout = to_stdout
 
+    def set_db_path(self, db_path: str):
+        self._db_path = db_path
+
     def load_data(
         self,
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        db_path: str = DB_PATH,
     ) -> bool:
         """
         Creates a StockData object, attempts to load data from the HDF5 database.
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
-        :param db_path: path to the HDF5 database file
         :return: True if data was successfully loaded
         """
-        self._log(f"Loading data for {symbol}, {bar_size.name} from {db_path}")
+        self._log(f"Loading data for {symbol}, {bar_size.name} from {self._db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         with self._cache_lock:
-            return stock_data.load_from_db(db_path)
+            return stock_data.load_from_db(self._db_path)
 
     async def load_data_async(
         self,
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        db_path: str = DB_PATH,
     ) -> bool:
         """
         Runs load_data() asynchronously. Good for being able to stream in data as a background task.
@@ -85,10 +86,9 @@ class StockDataManager:
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
-        :param db_path: path to the HDF5 database file
         :return: True if data was successfully loaded
         """
-        return await asyncio.to_thread(self.load_data, symbol, bar_size, info_type, db_path)
+        return await asyncio.to_thread(self.load_data, symbol, bar_size, info_type)
 
     def unload_data(self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES):
         """
@@ -106,20 +106,18 @@ class StockDataManager:
         symbol: str,
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
-        db_path: str = DB_PATH,
     ):
         """
         Saves data to the HDF5 database.
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
-        :param db_path: path to the HDF5 database file
         """
-        self._log(f"Saving data for {symbol}, {bar_size.name} to {db_path}")
+        self._log(f"Saving data for {symbol}, {bar_size.name} to {self._db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data:
             with self._cache_lock:
-                stock_data.save_to_db(db_path)
+                stock_data.save_to_db(self._db_path)
 
     def clear_data(
         self,
@@ -127,14 +125,13 @@ class StockDataManager:
         bar_size: BarSize,
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
         remove_from_cache: bool = False,
-        db_path: str = DB_PATH,
     ):
         """Clear out any data already loaded. If remove_from_cache is True, also deletes from the database."""
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         stock_data.clear()
         if remove_from_cache:
             with self._cache_lock:
-                stock_data.delete_from_db(db_path)
+                stock_data.delete_from_db(self._db_path)
 
     async def scrape_data(
         self,
@@ -289,14 +286,14 @@ class StockDataManager:
             return None
         return stock_data.get_data_frame()
 
-    def get_cached_keys(self, db_path: str = DB_PATH) -> List[str]:
+    def get_cached_keys(self) -> List[str]:
         """
         Returns the list of series keys present in the local database, e.g. ['SPY_1d_tr', 'AAPL_1d_tr'].
         Returns an empty list if the database file does not exist.
         """
         with self._cache_lock:
             try:
-                with pd.HDFStore(db_path, mode="r") as store:
+                with pd.HDFStore(self._db_path, mode="r") as store:
                     return [key.lstrip("/") for key in store.keys()]
             except:
                 return []
