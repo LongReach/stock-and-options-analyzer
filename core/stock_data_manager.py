@@ -28,7 +28,7 @@ class StockDataManager:
     Keeps track of stock data for any number of symbols (e.g. AAPL)
     """
 
-    BARS_PER_SCRAPE = 200
+    BARS_PER_SCRAPE = 50
     TIME_BETWEEN_SCRAPES = 0.2
 
     def __init__(self):
@@ -179,17 +179,30 @@ class StockDataManager:
             self._log(
                 f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}"
             )
-            historical_data, error_str = await self._ib_driver.get_historical_data(
-                stock_data.symbol,
-                bar_size=stock_data.bar_size,
-                start_date=current_start_dt,
-                end_date=current_end_dt,
-                request_info_type=info_type,
-            )
+
+            async def _get_historical_data() -> Tuple[Optional[HistoricalData], Optional[str]]:
+                # This function is experimental. I'm trying different approaches to deal with non-responses from broker
+                # Might put the following back later:
+                # exchanges = [None, "NYSE", "NASDAQ"]
+                exchanges = [None]
+                for primary_ex in exchanges:
+                    _historical_data, _error_str = await self._ib_driver.get_historical_data(
+                        stock_data.symbol,
+                        bar_size=stock_data.bar_size,
+                        start_date=current_start_dt,
+                        end_date=current_end_dt,
+                        request_info_type=info_type,
+                        primary_exchange=primary_ex,
+                    )
+                    if _error_str is None or "Timed out" not in _error_str:
+                        return _historical_data, _error_str
+                return None, "StockDataManager: timed out with all exchanges"
+
+            historical_data, error_str = await _get_historical_data()
             if error_str:
                 self._log(f"Got error while scraping: {error_str}", level=logging.ERROR)
                 ret_error_str = error_str
-            if historical_data.is_empty():
+            if historical_data is None or historical_data.is_empty():
                 break
             for results_tup in historical_data.get_zipped_lists():
                 stock_data.add_data(results_tup[0], results_tup[1])
@@ -215,9 +228,9 @@ class StockDataManager:
         :param symbol: ticker symbol
         :param bar_size: --
         :param info_type: --
-        :param start_date: earliest date for which to scrape data. If not given, don't attempt to scrape data
-            that's earlier than data already loaded. If date is earlier than available data from broker side,
-            then start from the earliest date for which data exists.
+        :param start_date: earliest date for which to scrape data. If date is earlier than available data from broker
+            side, then start from the earliest date for which data exists. If not given, don't attempt to scrape data
+            that's earlier than data already loaded.
         :param end_date: latest date for which to scrape data. If not given, only attempt to scrape data
             that's later than data already loaded if update_recent set.
         :param update_recent: if True, and end_date not set, most recent data not already loaded will be
@@ -286,6 +299,27 @@ class StockDataManager:
             return None
         return stock_data.get_data_frame()
 
+    def get_metadata(
+        self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES
+    ) -> Optional[Tuple[int, datetime, datetime]]:
+        """
+        Gets the metadata. If stock data for requested series is loaded in memory, compute metadata from that.
+        If not loaded in memory, attempt to load metadata from DB.
+
+        :param symbol: ticker symbol
+        :param bar_size: --
+        :param info_type: --
+        :return: (num bars, start date, end date) or None, if metadata not in memory and can't be loaded
+        """
+        stock_data = self._get_stock_data(symbol, bar_size, info_type)
+        if stock_data is not None:
+            return stock_data.get_metadata()
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        loaded_metadata = stock_data.load_metadata_from_db(self._db_path)
+        if loaded_metadata:
+            return stock_data.get_metadata()
+        return None
+
     def get_cached_keys(self) -> List[str]:
         """
         Returns the list of series keys present in the local database, e.g. ['SPY_1d_tr', 'AAPL_1d_tr'].
@@ -294,9 +328,10 @@ class StockDataManager:
         with self._cache_lock:
             try:
                 with pd.HDFStore(self._db_path, mode="r") as store:
-                    return [key.lstrip("/") for key in store.keys()]
+                    results = [key.lstrip("/") for key in store.keys()]
             except:
                 return []
+        return [result for result in results if "_meta" not in result]
 
     @staticmethod
     def get_key_elements(key: str) -> Tuple[str, BarSize, RequestedInfoType]:

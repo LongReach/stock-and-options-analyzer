@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 from logging import basicConfig, INFO, getLogger
 import time
 from typing import List, Tuple, Dict, Optional
+from enum import IntEnum
 
 import pandas
 from ibapi.common import BarData
@@ -13,7 +14,7 @@ import traceback
 from core.common import RequestedInfoType
 from core.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
-from core.stock_data import StockData
+from core.stock_data import StockData, StockDataException
 from core.utils import (
     str_to_bar_size,
     get_datetime,
@@ -22,7 +23,8 @@ from core.utils import (
 )
 
 """
-Utility for finding stocks with high or low IV rank.
+Utility for finding stocks with high or low IV rank. It's strongly recommended, before using, to build a data
+cache with the cache_data tool. 
 
 Run like:
 d:
@@ -33,6 +35,16 @@ python -m scripts.iv_finder --help
 
 CLIENT_ID = 20
 DB_PATH = "data/iv_data.h5"
+NUM_ACCEPTABLE_BARS = 50
+ACCEPTABLE_RECENCY = 2
+
+
+class ScrapeLevel(IntEnum):
+    """Specifies level of scraping to do"""
+
+    FULL = 0  # both old data and recent data
+    RECENT = 1  # recent data only
+    NONE = 2  # don't scrape any data
 
 
 async def do_cache(
@@ -40,6 +52,7 @@ async def do_cache(
     symbol: str,
     bar_size: BarSize,
     info_type: RequestedInfoType,
+    scrape_level: ScrapeLevel = ScrapeLevel.FULL,
 ) -> Tuple[Optional[pandas.DataFrame], Optional[str]]:
     """
     Scrapes and caches data for a single stock or ETF.
@@ -47,12 +60,14 @@ async def do_cache(
     :param symbol: stock or ETF ticker, e.g. SPY
     :param bar_size: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type: type of chart data, e.g. trades or implied volatility
-    :param info_only: if True, no scraping will be performed
-    :param update: if True, update cache with any new stock movements that might have occurred since last update
-    :param fresh: if True, clear all cached data and scrape it fresh again
+    :param scrape_level: indicates how much data should be scraped. It can be helpful to do no scraping when
+        the broker is being unresponsive.
     :return:
     """
-    start_date = get_datetime_as_str(current_datetime() - timedelta(days=365))
+    if scrape_level in [ScrapeLevel.NONE, ScrapeLevel.RECENT]:
+        start_date = ""
+    else:
+        start_date = get_datetime_as_str(current_datetime() - timedelta(days=365), date_only=True)
 
     df = None
     error_msg: Optional[str] = None
@@ -60,16 +75,19 @@ async def do_cache(
         # We'll be using cached data
         stock_manager.load_data(symbol, bar_size, info_type)
 
-        success, error_str = await stock_manager.scrape_data_smart(
-            symbol, bar_size, info_type, start_date=start_date, update_recent=True
-        )
-        if not success:
-            error_msg = error_str
-        stock_manager.save_data(symbol, bar_size, info_type)
+        if scrape_level != ScrapeLevel.NONE:
+            success, error_str = await stock_manager.scrape_data_smart(
+                symbol, bar_size, info_type, start_date=start_date, update_recent=True
+            )
+            if not success:
+                error_msg = error_str
+            stock_manager.save_data(symbol, bar_size, info_type)
         df = stock_manager.get_pandas_df(symbol, bar_size, info_type)
         stock_manager.unload_data(symbol, bar_size, info_type)
     except KeyboardInterrupt:
         raise
+    except StockDataException as ex:
+        return None, f"StockDataException {ex}"
     except Exception as ex:
         print(f"Exception: {ex}")
         print(traceback.format_exc())
@@ -78,51 +96,7 @@ async def do_cache(
     return df, error_msg
 
 
-async def cache_multiple_stocks(
-    stock_manager: StockDataManager,
-    file_path: str,
-):
-    """
-    Scrapes and caches IV data for multiple stocks or ETFs
-    :param stock_manager:  --
-    :param file_path: path of file containing list of ticker symbols
-    :return:
-    """
-    bar_size = BarSize.ONE_DAY
-    info_type = RequestedInfoType.IMPLIED_VOLATILITY
-
-    symbols_with_error: Dict[Tuple[str, RequestedInfoType], str] = {}
-
-    try:
-        with open(file_path, "r") as file:
-            for line in file:
-                symbol = line.strip()
-
-                print(f"Scraping and caching data for {symbol}...")
-                df, error_message = await do_cache(
-                    stock_manager=stock_manager,
-                    symbol=symbol,
-                    bar_size=bar_size,
-                    info_type=info_type,
-                )
-                if error_message is not None:
-                    symbols_with_error[(symbol, info_type)] = error_message
-                print(f"Done with {symbol}")
-
-    except FileNotFoundError:
-        print(f"Could not find file {file_path}")
-
-    if len(symbols_with_error) > 0:
-        print("Caching had errors with:")
-        for key, error_msg in symbols_with_error.items():
-            symbol, info_type = key
-            info_type_str = StockData.get_info_type_str(info_type)
-            print(f"{symbol}, {info_type_str}: {error_msg}")
-
-    print()
-
-
-async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bool):
+async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bool, no_scrape: bool):
     stock_manager.set_log_to_stdout(False)
 
     found_map: Dict[str, Tuple[float, float]] = {}
@@ -134,12 +108,23 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
             continue
 
         print(f"Examining {key}...")
-        df, error_msg = await do_cache(stock_manager, symbol, bar_size, info_type)
+        df, error_msg = await do_cache(
+            stock_manager,
+            symbol,
+            bar_size,
+            info_type,
+            scrape_level=(ScrapeLevel.NONE if no_scrape else ScrapeLevel.RECENT),
+        )
         if df is None or error_msg is not None:
             print(f"Error finding IV rank with {key}, is: {error_msg}")
             continue
-        if len(df) < 10:
+        if len(df) < NUM_ACCEPTABLE_BARS:
             print(f"Not enough data found for {key}")
+            continue
+
+        most_recent_dt = df.iloc[-1]["date"].to_pydatetime()
+        if (current_datetime() - most_recent_dt).days > ACCEPTABLE_RECENCY:
+            print(f"Data found for {key} not recent enough")
             continue
 
         lowest_iv = 1000000.0
@@ -155,6 +140,9 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
             found_map[key] = (rank, latest_iv)
         if not above and rank <= iv_rank:
             found_map[key] = (rank, latest_iv)
+
+    # Sort by IV rank
+    found_map = dict(sorted(found_map.items(), key=lambda item: item[1][0], reverse=above))
 
     print(f"Stocks with IV rank {'above' if above else 'below'} {iv_rank}:")
     print("----------------------------------------")
@@ -180,13 +168,10 @@ async def main(parser: ArgumentParser):
     stock_manager.set_log_to_stdout(True)
 
     try:
-        if args.file is not None:
-            await cache_multiple_stocks(stock_manager, args.file)
-
         if args.above >= 0:
-            await find_stocks(stock_manager, args.above, True)
+            await find_stocks(stock_manager, args.above, True, no_scrape=args.info_only)
         elif args.below >= 0:
-            await find_stocks(stock_manager, args.below, False)
+            await find_stocks(stock_manager, args.below, False, no_scrape=args.info_only)
         else:
             print("No --above or --below argument given")
     except asyncio.CancelledError:
@@ -200,7 +185,6 @@ async def main(parser: ArgumentParser):
 
 
 parser = ArgumentParser(description="Tool for finding high or low IV stocks")
-parser.add_argument("--file", help="file containing list of ticker symbols", required=False, default=None, type=str)
 parser.add_argument(
     "--above",
     help="IV rank to be above, in percent",
@@ -215,5 +199,6 @@ parser.add_argument(
     default=-1.0,
     type=float,
 )
+parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
 
 asyncio.run(main(parser))
