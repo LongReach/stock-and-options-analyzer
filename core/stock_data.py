@@ -1,9 +1,9 @@
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 import logging
 import pandas as pd
 from datetime import datetime
 
-from core.utils import BarSize, bar_size_to_str, non_naive_datetime
+from core.utils import BarSize, bar_size_to_str, non_naive_datetime, current_datetime
 from core.common import RequestedInfoType
 
 _logger = logging.getLogger(__name__)
@@ -34,6 +34,10 @@ class StockData:
         self._info_type = info_type
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
         self._loaded_from_cache: bool = False
+        # Permits quick lookup of data range for cached data
+        self._metadata_df: pd.DataFrame = pd.DataFrame(
+            {"earliest_date": [current_datetime()], "latest_date": [current_datetime()], "bars": [0]}
+        )
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -57,11 +61,23 @@ class StockData:
 
     def finalize_data(self):
         """Call when all data has been added. Puts data into proper order."""
+        # Remove rows with duplicate labels
+        self._price_and_vol_df.drop_duplicates(inplace=True)
         self._price_and_vol_df.sort_values(by="date", inplace=True)
+        self._build_metadata()
 
     def get_data_frame(self):
         """Returns pandas Dataframe"""
         return self._price_and_vol_df
+
+    def get_metadata(self) -> Tuple[int, datetime, datetime]:
+        """
+        Returns metadata: (num bars in cache, earliest datetime of cached data, latest datetime)
+        """
+        bars = self._metadata_df.iloc[0]["bars"]
+        earliest_dt = self._metadata_df.iloc[0]["earliest_date"]
+        latest_dt = self._metadata_df.iloc[0]["latest_date"]
+        return bars, earliest_dt, latest_dt
 
     def load_from_db(self, db_path: str = DB_PATH, preserve_existing_data: bool = True) -> bool:
         """
@@ -85,11 +101,31 @@ class StockData:
 
         if preserve_existing_data and len(original_df) > 0:
             self._price_and_vol_df = pd.concat([original_df, self._price_and_vol_df])
-            # Remove rows with duplicate labels
-            self._price_and_vol_df.drop_duplicates(inplace=True)
             self.finalize_data()
 
         self._loaded_from_cache = True
+
+        # Rebuild metadata
+        self._build_metadata()
+
+        return True
+
+    def load_metadata_from_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Loads metadata from the HDF5 database. It's for quick lookup of basics about cached stock data: earliest
+        bar date, latest bar date, number of bars.
+
+        :param db_path: path to the HDF5 file
+        :return: True if data was loaded successfully
+        """
+        key = self.db_key + "_meta"
+        try:
+            _logger.info(f"Loading metadata from DB {db_path}, key={key}")
+            self._metadata_df = pd.read_hdf(db_path, key=key)
+        except:
+            _logger.warning(f"Couldn't load key {key} from {db_path}")
+            return False
+
         return True
 
     def save_to_db(self, db_path: str = DB_PATH) -> bool:
@@ -106,12 +142,15 @@ class StockData:
             _logger.warning(f"Couldn't save key {key} to {db_path}")
             return False
 
+        self._save_metadata_to_db(db_path)
+
         self._loaded_from_cache = True
         return True
 
     def clear(self):
         """Make new, empty dataframe"""
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
+        self._build_metadata()
         self._loaded_from_cache = False
 
     def delete_from_db(self, db_path: str = DB_PATH) -> bool:
@@ -120,6 +159,8 @@ class StockData:
         :param db_path: path to the HDF5 file
         :return: True if the key was found and removed
         """
+        self._delete_metadata_from_db(db_path)
+
         key = self.db_key
         try:
             with pd.HDFStore(db_path) as store:
@@ -186,3 +227,47 @@ class StockData:
             return f"{dt.month:02}/{dt.day:02}/{dt.year:04}"
         else:
             return f"{dt.month:02}/{dt.day:02} {dt.hour:02}:{dt.minute:02}"
+
+    def _build_metadata(self):
+        """Builds the metadata from self._price_and_vol_df"""
+        num_bars = len(self._price_and_vol_df)
+        earliest_dt = (
+            current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[0]["date"])
+        )
+        latest_dt = current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[-1]["date"])
+        self._metadata_df: pd.DataFrame = pd.DataFrame(
+            {"earliest_date": [earliest_dt], "latest_date": [latest_dt], "bars": [num_bars]}
+        )
+
+    def _save_metadata_to_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Saves metadata into DB. It's for quick lookup of basics about cached stock data: earliest bar date, latest
+        bar date, number of bars.
+        """
+        key = self.db_key + "_meta"
+        try:
+            _logger.info(f"Saving metadata to DB {db_path}, key={key}")
+            self._metadata_df.to_hdf(db_path, key=key)
+        except:
+            _logger.warning(f"Couldn't save key {key} to {db_path}")
+            return False
+
+        return True
+
+    def _delete_metadata_from_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Removes metadata from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if the key was found and removed, or just not present.
+        """
+        key = self.db_key + "_meta"
+        try:
+            with pd.HDFStore(db_path) as store:
+                if f"/{key}" in store:
+                    store.remove(key)
+                    _logger.info(f"Deleted key {key} from {db_path}")
+                    self.clear()
+                return True
+        except Exception:
+            _logger.warning(f"Couldn't delete key {key} from {db_path}")
+            return False
