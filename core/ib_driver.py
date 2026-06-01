@@ -196,6 +196,7 @@ class IBDriver(IBWrapper):
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
         regular_trading_hours_only: bool = True,
+        primary_exchange: Optional[str] = None,
     ) -> Tuple[HistoricalData, Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results.
@@ -213,6 +214,7 @@ class IBDriver(IBWrapper):
         :param live_data: if True, data will continue to flow in
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
         :param regular_trading_hours_only: if True, premarket or extended hours data will not be included
+        :param primary_exchange: if given, primary exchange to use; if None, use default (SMART)
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
@@ -248,6 +250,7 @@ class IBDriver(IBWrapper):
                 live_data,
                 request_info_type,
                 regular_trading_hours_only,
+                primary_exchange,
             )
         except Exception as e:
             raise IBDriverException(f"Failure with historical data request, exception was {e}")
@@ -261,6 +264,8 @@ class IBDriver(IBWrapper):
         elif timed_out:
             ret_error_str = "Timed out getting historical data."
             self._logger.error(ret_error_str)
+            # Better cancel request
+            self.cancelHistoricalData(req_id)
         else:
             self._logger.info("get_historical_data() finished")
 
@@ -319,7 +324,10 @@ class IBDriver(IBWrapper):
         return ret_tuple, error_str
 
     async def get_head_timestamp(
-        self, ticker: str, info_type: RequestedInfoType = RequestedInfoType.TRADES
+        self,
+        ticker: str,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        primary_exchange: Optional[str] = None,
     ) -> Optional[datetime]:
         """
         Returns the head timestamp for a particular ticker, i.e. the earliest datetime for which
@@ -329,8 +337,7 @@ class IBDriver(IBWrapper):
             req_id_for_head_timestamp = self._next_id()
             self._head_timestamp_map[req_id_for_head_timestamp] = (ticker, info_type)
 
-        # FICME: exchange
-        new_contract = self._make_contract(ticker, primary_exchange="NYSE")
+        new_contract = self._make_contract(ticker, primary_exchange=primary_exchange)
         try:
             self._request_head_timestamp(req_id_for_head_timestamp, new_contract, info_type)
         except Exception as e:
@@ -456,7 +463,9 @@ class IBDriver(IBWrapper):
 
         return option_info, ret_error_str
 
-    async def get_greeks(self, option_info: OptionInfo) -> Tuple[Optional[OptionInfo], Optional[str]]:
+    async def get_greeks(
+        self, option_info: OptionInfo, primary_exchange: Optional[str] = None
+    ) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
         Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
         interest, etc.)
@@ -464,16 +473,16 @@ class IBDriver(IBWrapper):
         For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
 
         :param option_info: info about option for which Greeks are wanted
+        :param primary_exchange: if given, primary exchange to use; if None, use default
         :return: (OptionInfo or None, error string or None)
         """
         underlying_name = option_info.get_underlying_name()
         if underlying_name is None:
             return None, "Underlying not defined"
 
-        # FIXME: exchange
         contract_details_list, error_msg = await self._get_contract_details(
             ticker=underlying_name,
-            primary_exchange=None,
+            primary_exchange=primary_exchange,
             is_option=True,
             is_call=option_info.is_call,
             strike=option_info.strike,
@@ -792,17 +801,17 @@ class IBDriver(IBWrapper):
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
         regular_trading_hours_only: bool = True,
+        primary_exchange: Optional[str] = None,
     ):
         """
         Sends request for historical data to TWS.
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
-        # FIXME: exchange
         ticker_desc = self._request_bardata_objects[req_id].ticker_desc
         new_contract = self._make_contract(
             ticker_desc.ticker,
-            primary_exchange=None,
+            primary_exchange=primary_exchange,
             is_option=ticker_desc.is_opt,
             is_call=ticker_desc.is_call(),
             strike=ticker_desc.strike,
