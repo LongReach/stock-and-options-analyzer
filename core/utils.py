@@ -122,13 +122,16 @@ def get_datetime(ib_date: str) -> datetime:
     return dt
 
 
-def get_datetime_as_str(dt: Union[datetime, str]) -> str:
+def get_datetime_as_str(dt: Union[datetime, str], date_only: bool = False) -> str:
     """
     Given a datetimte, return it as an IB-style datetime string, e.g. "20250523 09:30:00 US/Eastern"
     """
     if isinstance(dt, str):
         dt = get_datetime(dt)
-    return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
+    if date_only:
+        return f"{dt.year:04}{dt.month:02}{dt.day:02}"
+    else:
+        return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
 
 
 def is_trading_hours() -> bool:
