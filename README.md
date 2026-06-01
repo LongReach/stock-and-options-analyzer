@@ -94,3 +94,9 @@ Sometimes efforts to get options Greeks will fail because of an error, `No marke
 
 `No data of type EODChart is available for the exchange 'BEST' and the security type 'Option' and '1 d' and '1 day'`: When getting historical price data for an option, must use a smaller bar size than one-day.
 
+### Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data
+
+This seems to be a throttling issue. If you ask for data for too many securities in too short of a time frame (supposedly more than 60 within the space of ten minutes), IB won't respond. 
+
+The solution, of course, is to store market data that's more than a few days old locally. It's never going to change, so no point to pulling it repeatedly from a remote server.
+
