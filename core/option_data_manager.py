@@ -55,7 +55,7 @@ class OptionDataManager:
             f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
         )
         # This is the CD for the stock, not any option
-        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(ticker, primary_exchange="NYSE")
+        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(ticker, primary_exchange=None)
         if error_str:
             raise OptionDataException(error_str)
 
@@ -72,20 +72,32 @@ class OptionDataManager:
         return out_expirations
 
     async def get_strikes(
-        self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
+        self,
+        ticker: str,
+        expiration: str,
+        right: str,
+        num_below: Optional[int] = None,
+        num_above: Optional[int] = None,
+        min_strike: Optional[float] = None,
+        max_strike: Optional[float] = None,
     ) -> Tuple[List[float], int]:
         """
         Gets all strikes for a particular stock at a particular expiration date.
         :param ticker: underlying stock/ETF
         :param expiration: IB-style date
         :param right: "C" or "P"
-        :param num_below: number of strikes above at-the-money price
-        :param num_above: number of strikes below at-the-money price
+        :param num_below: number of strikes below at-the-money price, or None if all strikes
+        :param num_above: number of strikes above at-the-money price, or None if all strikes
+        :param min_strike: if given, lowest allowed strike price to return
+        :param max_strike: if given, highest allowed strike price to return
         :return: (list of strikes, index of which strike is closest to ATM)
         """
-        self._logger.info(
-            f"Getting strikes for {ticker}, expiration={expiration}, right={right}, num_below={num_below}, num_above={num_above}"
-        )
+        info_str = f"Getting strikes for {ticker}, expiration={expiration}, right={right}"
+        if num_below:
+            info_str += f", num_below={num_below}"
+        if num_above:
+            info_str += f", num_above={num_above}"
+        self._logger.info(info_str)
 
         option_info_list, error_str = await self._ib_driver.get_option_info(
             ticker,
@@ -101,7 +113,7 @@ class OptionDataManager:
 
         underlying_price = await self._get_underlying_price(ticker)
 
-        # Closest to being at the money
+        # Will reference closest to being at the money
         closest_strike_idx: int = 0
         best_dist = 1000000
         for idx, strike in enumerate(strikes):
@@ -109,13 +121,38 @@ class OptionDataManager:
                 best_dist = math.fabs(strike - underlying_price)
                 closest_strike_idx = idx
 
-        # Go from lowest allowed strike to highest
-        lowest_idx = closest_strike_idx - num_below
-        if lowest_idx < 0:
+        # Constrain results to how many strikes to go below/above
+        if num_below:
+            lowest_idx = closest_strike_idx - num_below
+            if lowest_idx < 0:
+                lowest_idx = 0
+        else:
             lowest_idx = 0
-        highest_idx = closest_strike_idx + num_above
-        if highest_idx > len(strikes):
+        if num_above:
+            highest_idx = closest_strike_idx + num_above
+            if highest_idx > len(strikes):
+                highest_idx = len(strikes)
+        else:
             highest_idx = len(strikes)
+        strikes = strikes[lowest_idx:highest_idx]
+        closest_strike_idx = closest_strike_idx - lowest_idx
+
+        # Now, we take into account lowest and highest desired strike price
+        lowest_idx = 0
+        if min_strike:
+            for idx, strike in enumerate(strikes):
+                if strike >= min_strike:
+                    lowest_idx = idx
+                    break
+
+        highest_idx = len(strikes)
+        if max_strike:
+            # Note the different logic of this loop
+            for idx in range(len(strikes) - 1, -1, -1):
+                strike = strikes[idx]
+                if strike > max_strike:
+                    highest_idx = idx
+
         return strikes[lowest_idx:highest_idx], closest_strike_idx - lowest_idx
 
     async def get_option_chain(
@@ -261,7 +298,7 @@ class OptionDataManager:
         """
 
         # This limits the number of requests active with IB at once
-        MAX_TO_RETRIEVE_AT_ONCE = 15
+        MAX_TO_RETRIEVE_AT_ONCE = 20
         MAX_ERRORS = 5
 
         # Keep tracks of which entries in contract_details_list we've made tasks for
@@ -272,26 +309,34 @@ class OptionDataManager:
         ignore_strikes_above: float = 1000000000.0
         error_count = 0
 
+        # Note: deltas are negative for puts
+        delta_multiplier = 1.0 if right == "C" else -1.0
+
+        # The idea: once we get info about an options contract, including its delta, and we find out that
+        # the delta is higher or lower than desired, then we don't need to fetch data for contracts above/below
+        # that option's strike.
+
         def _set_ignorable_strikes(_option_info: OptionInfo):
             """Helper function to set values of ignore_strikes_below, ignore_strikes_above"""
             nonlocal ignore_strikes_above, ignore_strikes_below
             _strike = _option_info.strike
+            _delta = _option_info.delta * delta_multiplier
             if right == "C":
-                if _strike > underlying_price and _option_info.delta < min_delta:
+                if _strike > underlying_price and _delta < min_delta:
                     ignore_strikes_above = _strike
-                if _strike <= underlying_price and _option_info.delta > max_delta:
+                if _strike <= underlying_price and _delta > max_delta:
                     ignore_strikes_below = _strike
             else:
-                if _strike < underlying_price and _option_info.delta < min_delta:
+                if _strike < underlying_price and _delta < min_delta:
                     ignore_strikes_below = _strike
-                if _strike >= underlying_price and _option_info.delta > max_delta:
+                if _strike >= underlying_price and _delta > max_delta:
                     ignore_strikes_above = _strike
 
         def _test_for_ignorable(_option_info: OptionInfo):
             """Returns True if we don't need info for a particular options contract due to strike being too high or low"""
             return not (ignore_strikes_below <= _option_info.strike <= ignore_strikes_above)
 
-        # Loop until we've processed all ContractDetails and task queue is empty
+        # Loop until we've processed all OptionInfos and task queue is empty
         while current_idx < len(option_info_list) or len(task_queue) > 0:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible
@@ -325,8 +370,11 @@ class OptionDataManager:
                             else:
                                 self._logger.debug(f"Task done for {option_info.full_name}")
                                 _set_ignorable_strikes(option_info)
+                                # Debugging
+                                # print(f"option {option_info.strike}/{option_info.delta}")
                                 if ignore_strikes_below <= option_info.strike <= ignore_strikes_above:
-                                    option_data.add_data(option_info)
+                                    if min_delta <= option_info.delta * delta_multiplier <= max_delta:
+                                        option_data.add_data(option_info)
 
                         if error_found:
                             if error_count >= MAX_ERRORS:
