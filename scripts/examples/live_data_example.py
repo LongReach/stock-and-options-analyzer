@@ -16,8 +16,8 @@ live, constantly streaming data.
 """
 
 TICKER = "AAPL"
-# If True, communicate with TWS app instead of Gateway
-USE_GATEWAY = False
+# If False, communicate with TWS app instead of Gateway
+USE_GATEWAY = True
 CLIENT_ID = 14
 
 
