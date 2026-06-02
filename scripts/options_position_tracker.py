@@ -23,6 +23,10 @@ from app.common import PositionColumn, TradeColumn, column_enum_to_str
 from app.dialog import Dialog, MainDialog, PositionDialog, TradeDialog
 from app.opt_position_tracker import OptionPositionTracker
 
+"""
+Note: this program needs refactoring
+"""
+
 position_tracker: OptionPositionTracker = None
 
 

@@ -2,6 +2,29 @@
 
 ![](./images/WIP.png)
 
+## Table of Contents
+
+* [Table of Contents](#table-of-contents)
+* [For Potential Employers](#for-potential-employers)
+* [Description](#description)
+* [Design Inspirations](#design-inspirations)
+  + [Repackaging as pandas dataframes](#repackaging-as-pandas-dataframes)
+* [Warning!](#warning)
+* [Setup](#setup)
+* [First Test](#first-test)
+* [Libraries Here](#libraries-here)
+* [Programs Here](#programs-here)
+* [Troubleshooting](#troubleshooting)
+  + [Error about another client accessing IB from a different IP address](#error-about-another-client-accessing-ib-from-a-different-ip-address)
+  + [No market data during competing live session](#no-market-data-during-competing-live-session)
+  + [Limitations on historical price data for an option](#limitations-on-historical-price-data-for-an-option)
+  + [Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data](#interactive-brokers-sometimes-fails-to-return-historical-data-timing-out-even-though-it-has-the-data)
+  + [Interactive Brokers responds to historical data request with error about no data](#interactive-brokers-responds-to-historical-data-request-with-error-about-no-data)
+  + [Errors about Interactive Brokers market data subscriptions](#errors-about-interactive-brokers-market-data-subscriptions)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
+
 ## For Potential Employers
 
 See [this page](./docs/ForPotentialEmployers.md)
@@ -26,9 +49,17 @@ Third, back in 2020, I had already written some daytrading software that communi
 
 It makes good sense to keep historical market data, once obtained, in `pandas` dataframes. These can be easily cached on disk (past market data is unchanging), as well as fed to machine-learning models.
 
+## Warning!
+
+![](./images/SkullAndBones.jpg)
+
+Use these tools at your own risk! I take no responsibility for any financial losses incurred through their use, whether due to bugs/faults in my software, mistakes or omissions in the documentation, user misunderstanding, problematic trading strategies, market behavior, unexpected presidential tweets, or anything else. I don't yet consider this to be a fully mature software framework. Several parts are under active development.
+
+If you want to trade stocks or options, it's a good idea to practice with a paper account first.
+
 ## Setup
 
-Obviously, you have to have an Interactive Brokers account to use this software.
+Obviously, you have to have an Interactive Brokers account to use this software. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite.
 
 I created a `conda` environment for this project. First step was to install the Interactive Brokers API, as detailed in their [online guide](https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/). Once I ran `python setup.py install`, the Python packages were installed in my environment. I suppose you can use `venv`, if you prefer that.
 
@@ -79,6 +110,14 @@ reqId: 4, errorCode: 366, errorString: No historical data query found for ticker
 ```
 
 To exit the program, close Gateway.
+
+## Libraries Here
+
+See the `core/` [README](./core/README.md).
+
+## Programs Here
+
+See the `scripts/` [README](./scripts/README.md)
 
 ## Troubleshooting
 
