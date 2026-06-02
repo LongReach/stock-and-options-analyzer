@@ -1,4 +1,5 @@
 import asyncio
+import math
 from argparse import ArgumentParser
 from logging import basicConfig, INFO, getLogger
 import time
@@ -21,6 +22,8 @@ from core.utils import (
     get_datetime_as_str,
     current_datetime,
 )
+from core.options_data import OptionData
+from core.option_data_manager import OptionDataManager
 
 """
 Utility for finding stocks with high or low IV rank. It's strongly recommended, before using, to build a data
@@ -96,6 +99,23 @@ async def do_cache(
     return df, error_msg
 
 
+def calculate_iv_rank(df: pandas.DataFrame) -> Tuple[float, float]:
+    """Given a dataframe holding IV data, return IV rank and latest IV"""
+    lowest_iv = 1000000.0
+    highest_iv = 0.0
+    total_bars = len(df)
+    start_bar = total_bars - 200
+    start_bar = 0 if start_bar < 0 else start_bar
+    for idx in range(start_bar, total_bars):
+        iv = df.iloc[idx]["close"]
+        lowest_iv = min(iv, lowest_iv)
+        highest_iv = max(iv, highest_iv)
+    latest_iv = df.iloc[-1]["close"]
+    rank = (latest_iv - lowest_iv) / (highest_iv - lowest_iv)
+    rank *= 100.0
+    return rank, latest_iv
+
+
 async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bool, no_scrape: bool):
     stock_manager.set_log_to_stdout(False)
 
@@ -127,15 +147,7 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
             print(f"Data found for {key} not recent enough")
             continue
 
-        lowest_iv = 1000000.0
-        highest_iv = 0.0
-        for idx in range(len(df)):
-            iv = df.iloc[idx]["close"]
-            lowest_iv = min(iv, lowest_iv)
-            highest_iv = max(iv, highest_iv)
-        latest_iv = df.iloc[-1]["close"]
-        rank = (latest_iv - lowest_iv) / (highest_iv - lowest_iv)
-        rank *= 100.0
+        rank, latest_iv = calculate_iv_rank(df)
         if above and rank >= iv_rank:
             found_map[key] = (rank, latest_iv)
         if not above and rank <= iv_rank:
@@ -149,7 +161,94 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
     for key, info in found_map.items():
         symbol, bar_size, info_type = stock_manager.get_key_elements(key)
         rank, iv = info
-        print(f"{symbol}: rank is {rank}, IV is {iv}")
+        print(f"{symbol}: rank is {rank:.2f}, IV is {iv:.2f}")
+
+
+async def get_single_stock_data(
+    stock_manager: StockDataManager, options_manager: OptionDataManager, symbol: str, dte: float, no_scrape: bool
+):
+    stock_manager.set_log_to_stdout(False)
+
+    df, error_msg = await do_cache(
+        stock_manager,
+        symbol,
+        BarSize.ONE_DAY,
+        RequestedInfoType.IMPLIED_VOLATILITY,
+        scrape_level=(ScrapeLevel.NONE if no_scrape else ScrapeLevel.RECENT),
+    )
+    if df is None or error_msg is not None:
+        print(f"Error finding IV rank for {symbol}, is: {error_msg}")
+        return
+    if len(df) < NUM_ACCEPTABLE_BARS:
+        print(f"Not enough data found for {symbol}")
+        return
+
+    most_recent_dt = df.iloc[-1]["date"].to_pydatetime()
+    if (current_datetime() - most_recent_dt).days > ACCEPTABLE_RECENCY:
+        print(f"Data found for {symbol} not recent enough")
+        return
+
+    recent_data, error_msg = await stock_manager.driver.get_most_recent_data(
+        symbol, BarSize.ONE_DAY, RequestedInfoType.TRADES
+    )
+    if recent_data is None or error_msg is not None:
+        print(f"Error getting underlying price for symbol {symbol}")
+        return
+    bar_dict = recent_data[0]
+    price = bar_dict["close"]
+
+    rank, latest_iv = calculate_iv_rank(df)
+    print(f"\nInfo for {symbol}:\n----------------------------------------------")
+    print(f"Current price: {price}")
+    print(f"IV rank is {rank}, IV is {latest_iv}")
+    expirations = await options_manager.get_expirations(symbol, 20, 70)
+    print(f"Nearby expirations are: {expirations}")
+    if len(expirations) == 0:
+        print(f"Could not find options contracts with appropriate expirations for {symbol}")
+        return
+    expiration_dts: List[datetime] = [get_datetime(exp) for exp in expirations]
+
+    def _get_best_fit_expiration(_dte: float):
+        # Find which of the available expiration dates is closest to desired DTE. Return date, actual DTE of contract.
+        best_delta = 1000000
+        best_exp = None
+        for exp in expiration_dts:
+            days_to_exp = (exp - current_datetime()).days
+            if abs(days_to_exp - _dte) < best_delta:
+                best_delta = abs(days_to_exp - _dte)
+                best_exp = exp
+        return best_exp, (best_exp - current_datetime()).days
+
+    best_expiration_dt, best_dte = _get_best_fit_expiration(dte)
+    best_expiration_date_str = get_datetime_as_str(best_expiration_dt)
+    expected_move = price * latest_iv * math.sqrt(best_dte / 365.0)
+    print(
+        f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
+    )
+
+    min_strike = price - expected_move * 2.0
+    put_strikes, idx = await options_manager.get_strikes(
+        symbol, best_expiration_date_str, "P", min_strike=min_strike, max_strike=price
+    )
+    print("Put strikes are:", put_strikes)
+    print("Please wait for put option chain...")
+    put_option_data = await options_manager.get_option_chain(
+        symbol, best_expiration_date_str, "P", strike=put_strikes, min_delta=0.05, max_delta=0.2
+    )
+    df = put_option_data.get_dataframe(drop_columns=["date", "expiration"])
+    print(f"Put chain is:\n{df}")
+
+    max_strike = price + expected_move * 2.0
+    call_strikes, idx = await options_manager.get_strikes(
+        symbol, best_expiration_date_str, "C", min_strike=price, max_strike=max_strike
+    )
+    print("Call strikes are:", call_strikes)
+    print("Please wait for call option chain...")
+    call_option_data = await options_manager.get_option_chain(
+        symbol, best_expiration_date_str, "C", strike=call_strikes, min_delta=0.05, max_delta=0.2
+    )
+    df = call_option_data.get_dataframe(drop_columns=["date", "expiration"])
+    print(f"Call chain is:\n{df}")
 
 
 async def main(parser: ArgumentParser):
@@ -167,11 +266,16 @@ async def main(parser: ArgumentParser):
         return
     stock_manager.set_log_to_stdout(True)
 
+    options_manager = OptionDataManager()
+    options_manager.add_driver(ib_driver)
+
     try:
         if args.above >= 0:
             await find_stocks(stock_manager, args.above, True, no_scrape=args.info_only)
         elif args.below >= 0:
             await find_stocks(stock_manager, args.below, False, no_scrape=args.info_only)
+        elif args.symbol is not None:
+            await get_single_stock_data(stock_manager, options_manager, args.symbol, args.dte, no_scrape=args.info_only)
         else:
             print("No --above or --below argument given")
     except asyncio.CancelledError:
@@ -197,6 +301,20 @@ parser.add_argument(
     help="IV rank to be below, in percent",
     required=False,
     default=-1.0,
+    type=float,
+)
+parser.add_argument(
+    "--symbol",
+    help="Collect information for specified symbol",
+    required=False,
+    default=None,
+    type=str,
+)
+parser.add_argument(
+    "--dte",
+    help="Options expiration to target",
+    required=False,
+    default=45,
     type=float,
 )
 parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
