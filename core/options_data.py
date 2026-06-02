@@ -63,7 +63,10 @@ class OptionData:
         self._current_index += 1
 
     def get_dataframe(self, drop_columns: Optional[List[str]] = None) -> DataFrame:
-        """Returns pandas dataframe"""
+        """
+        Returns pandas dataframe
+        :param drop_columns: if given, remove these columns from returned Dataframe
+        """
         if drop_columns is None:
             drop_columns = []
         return self._options_df.drop(columns=drop_columns)
