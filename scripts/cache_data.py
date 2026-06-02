@@ -166,6 +166,7 @@ async def cache_single_stock(
     bar_size_str: str,
     info_type_str: str,
     info_only: bool,
+    force_update: bool,
 ):
     """
     Scrapes and caches data for a single stock or ETF.
@@ -174,6 +175,7 @@ async def cache_single_stock(
     :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type_str: type of chart data, e.g. trades or implied volatility
     :param info_only: if True, no scraping will be performed
+    :param force_update: force the scraping of most recent data
     :return:
     """
     bar_size = str_to_bar_size(bar_size_str)
@@ -185,7 +187,11 @@ async def cache_single_stock(
         print(f"Scraping {info_type.value} data for {symbol}, {bar_size_str}\n======================================")
 
     df, error_str = await do_cache(
-        stock_manager, symbol, bar_size, info_type, scrape_level=(ScrapeLevel.NONE if info_only else ScrapeLevel.FULL)
+        stock_manager,
+        symbol,
+        bar_size,
+        info_type,
+        scrape_level=(ScrapeLevel.NONE if (info_only and not force_update) else ScrapeLevel.FULL),
     )
     if df is not None:
         print_df(df)
@@ -195,10 +201,7 @@ async def cache_single_stock(
 
 
 async def cache_multiple_stocks(
-    stock_manager: StockDataManager,
-    file_path: str,
-    bar_size_str: str,
-    info_type_str: str,
+    stock_manager: StockDataManager, file_path: str, bar_size_str: str, info_type_str: str, force_update: bool
 ):
     """
     Scrapes and caches data for a single stock or ETF.
@@ -206,12 +209,18 @@ async def cache_multiple_stocks(
     :param file_path: path of file containing list of ticker symbols
     :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type_str: type of chart data, e.g. trades or implied volatility
+    :param force_update: force the scraping of most recent data
     :return:
     """
     bar_size = str_to_bar_size(bar_size_str)
     info_type = StockData.get_info_type(info_type_str)
 
     symbols_with_error: Dict[Tuple[str, RequestedInfoType], str] = {}
+
+    print(
+        f"\nCaching multiple stocks: file path = {file_path}, bar size = {bar_size_str}, info type = {info_type_str}, force update = {force_update}"
+    )
+    print("-----------------------------------------------------------------------------")
 
     try:
         with open(file_path, "r") as file:
@@ -223,10 +232,18 @@ async def cache_multiple_stocks(
                 if metadata is not None:
                     current_dt = current_datetime()
                     num_bars, earliest_dt, latest_dt = metadata
-                    if num_bars > NUM_ACCEPTABLE_BARS and (current_dt - latest_dt).days <= ACCEPTABLE_RECENCY:
+                    if (
+                        num_bars >= NUM_ACCEPTABLE_BARS
+                        and (current_dt - latest_dt).days <= ACCEPTABLE_RECENCY
+                        and not force_update
+                    ):
                         # No need to cache. Data is fresh enough
                         print(f"Data scrape unnecessary for {symbol}. Have {num_bars} of data ending on {latest_dt}")
                         continue
+
+                scrape_level = ScrapeLevel.FULL
+                if force_update and num_bars >= NUM_ACCEPTABLE_BARS:
+                    scrape_level = ScrapeLevel.RECENT
 
                 print(f"Scraping and caching data for {symbol}...")
                 df, error_message = await do_cache(
@@ -234,7 +251,7 @@ async def cache_multiple_stocks(
                     symbol=symbol,
                     bar_size=bar_size,
                     info_type=info_type,
-                    scrape_level=ScrapeLevel.FULL,
+                    scrape_level=scrape_level,
                 )
                 if error_message is not None:
                     print(f"Error for symbol {symbol}: {error_message}")
@@ -303,14 +320,10 @@ async def main(parser: argparse.ArgumentParser):
                 await remove_single_stock(stock_manager, args.symbol, args.barsize, args.info_type)
             else:
                 await cache_single_stock(
-                    stock_manager,
-                    args.symbol,
-                    args.barsize,
-                    args.info_type,
-                    args.info_only,
+                    stock_manager, args.symbol, args.barsize, args.info_type, args.info_only, args.update
                 )
         elif args.file:
-            await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type)
+            await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type, args.update)
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:
@@ -342,5 +355,6 @@ parser.add_argument(
 parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
 parser.add_argument("--show", help="show what data is in cache", action="store_true")
 parser.add_argument("--remove", help="remove symbol from cache", action="store_true")
+parser.add_argument("--update", help="forces the getting of most recent data", action="store_true")
 
 asyncio.run(main(parser))
