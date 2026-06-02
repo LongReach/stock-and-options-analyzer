@@ -164,8 +164,12 @@ class StockDataManager:
 
         if end_date == "":
             end_dt = current_datetime()
+            # This is a bit hacky, but IB is more reliable about returning the very most recent data if we don't
+            # give it an end datetime.
+            first_scrape_no_end_date = True
         else:
             end_dt = get_datetime(end_date)
+            first_scrape_no_end_date = False
 
         # Work backwards through time, getting BARS_PER_SCRAPE at a time. We're doing this because IB can refuse requests for
         # too much data at once.
@@ -180,8 +184,11 @@ class StockDataManager:
                 f"Scraping tranch of data from {get_datetime_as_str(current_start_dt)} to {get_datetime_as_str(current_end_dt)}"
             )
 
-            async def _get_historical_data() -> Tuple[Optional[HistoricalData], Optional[str]]:
+            async def _get_historical_data(_no_end_date: bool) -> Tuple[Optional[HistoricalData], Optional[str]]:
                 # This function is experimental. I'm trying different approaches to deal with non-responses from broker
+
+                end_dt_to_use = None if _no_end_date else current_end_dt
+
                 # Might put the following back later:
                 # exchanges = [None, "NYSE", "NASDAQ"]
                 exchanges = [None]
@@ -190,7 +197,7 @@ class StockDataManager:
                         stock_data.symbol,
                         bar_size=stock_data.bar_size,
                         start_date=current_start_dt,
-                        end_date=current_end_dt,
+                        end_date=end_dt_to_use,
                         request_info_type=info_type,
                         primary_exchange=primary_ex,
                     )
@@ -198,7 +205,9 @@ class StockDataManager:
                         return _historical_data, _error_str
                 return None, "StockDataManager: timed out with all exchanges"
 
-            historical_data, error_str = await _get_historical_data()
+            historical_data, error_str = await _get_historical_data(first_scrape_no_end_date)
+            # Turn it off after first use
+            first_scrape_no_end_date = False
             if error_str:
                 self._log(f"Got error while scraping: {error_str}", level=logging.ERROR)
                 ret_error_str = error_str
@@ -269,18 +278,19 @@ class StockDataManager:
                 return success, error_str
 
         if end_date == "":
-            end_dt = current_datetime() if update_recent else None
+            end_dt = None
         else:
             end_dt = get_datetime(end_date)
 
         # Scrape data that's newer than already-loaded data
-        if end_dt is not None and end_dt > newest_dt:
+        if (end_dt is not None and end_dt > newest_dt) or update_recent:
+            end_date_str = "" if end_dt is None else get_datetime_as_str(end_dt)
             success, error_str = await self.scrape_data(
                 symbol,
                 bar_size,
                 info_type,
-                get_datetime_as_str(newest_dt + bar_size_to_time(bar_size)),
-                get_datetime_as_str(end_dt),
+                start_date=get_datetime_as_str(newest_dt + bar_size_to_time(bar_size)),
+                end_date=end_date_str,
             )
             if not success:
                 return success, error_str
