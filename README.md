@@ -100,3 +100,19 @@ This seems to be a throttling issue. If you ask for data for too many securities
 
 The solution, of course, is to store market data that's more than a few days old locally. It's never going to change, so no point to pulling it repeatedly from a remote server.
 
+### Interactive Brokers responds to historical data request with error about no data
+
+Check that your request is formatted in a way that makes sense, e.g.:
+
+```
+INFO:ibapi.utils:REQUEST reqHistoricalData {'reqId': 2, 'contract': 2604726071856: 0,SPY,STK,,,0,,,SMART,,USD,,,False,,,,combo:, 'endDateTime': '', 'durationStr': '1 D', 'barSizeSetting': '1 day', 'whatToShow': 'OPTION_IMPLIED_VOLATILITY', 'useRTH': 1, 'formatDate': 1, 'keepUpToDate': False, 'chartOptions': []}
+```
+
+In this case, we're trying to get the most recent single 1-day bar of implied volatility data for SPY. It makes sense that the `endDateTime` field is empty and that `durationStr` is '1 D'. Had `durationStr` been in seconds or minutes, it might not have worked. Same with trying to use some odd `endDateTime`, such as one in the middle of the day.
+
+### Errors about Interactive Brokers market data subscriptions
+
+You need to go to your account settings on the IB webpage. Subscribe to "US Equity and Options Add-On Streaming Bundle (NP)". You also have to subscribe to the bundle that this one tells you it needs.
+
+IB might cancel your subscriptions if the cash in your account falls below a certain threshold. If that happens, you need to transfer in more cash, then sign up for the subscriptions again. 
+
