@@ -513,7 +513,7 @@ class IBDriver(IBWrapper):
 
         option_contract = contract_details.contract
 
-        await self._set_market_data_type(is_trading_hours())
+        self._set_market_data_type(is_trading_hours())
         # 100 and 101 are for volume and open interest, respectively
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
@@ -808,6 +808,8 @@ class IBDriver(IBWrapper):
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
+        # For debugging
+        # print(f"**** bar size: {bar_size}, num bars: {num_bars}, end date: '{end_date_time}', start date: '{start_date_time}', live data: {live_data}, request type: {request_info_type}, regular hours: {regular_trading_hours_only}")
         ticker_desc = self._request_bardata_objects[req_id].ticker_desc
         new_contract = self._make_contract(
             ticker_desc.ticker,
@@ -857,11 +859,17 @@ class IBDriver(IBWrapper):
                 else:
                     duration_str = f"{diff.days} D"
             else:
-                duration_str = f"{diff.seconds} S"
+                if bar_size == BarSize.ONE_WEEK:
+                    duration_str = f"1 W"
+                elif bar_size == BarSize.ONE_DAY:
+                    duration_str = f"1 D"
+                else:
+                    duration_str = f"{diff.seconds} S"
 
         self._logger.info(
             f"Sending historical data request for: {ticker_desc.symbol_full}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}"
         )
+        self._set_market_data_type(is_trading_hours())
         # Request Historical Data
         #     reqId: ID of request
         #     contract: Contract object
@@ -1354,7 +1362,7 @@ class IBDriver(IBWrapper):
             the_contract.primaryExchange = primary_exchange
         return the_contract
 
-    async def _set_market_data_type(self, live: bool = True):
+    def _set_market_data_type(self, live: bool = True):
         """Call before calling reqMktData() to set whether live or frozen data"""
         self.reqMarketDataType(1 if live else 2)
 
