@@ -47,7 +47,7 @@ CLIENT_ID = 13
 DB_PATH = "data/market_data.h5"
 NUM_ACCEPTABLE_BARS = 50
 # TODO: this is in days, need values for other timeframes
-ACCEPTABLE_RECENCY = 2
+GENERAL_ACCEPTABLE_RECENCY = 2
 MAX_ERRORS_ALLOWED = 10
 
 
@@ -222,48 +222,50 @@ async def cache_multiple_stocks(
     )
     print("-----------------------------------------------------------------------------")
 
+    symbols: List[str] = []
     try:
         with open(file_path, "r") as file:
-            error_count: int = 0
             for line in file:
                 symbol = line.strip()
-
-                metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
-                if metadata is not None:
-                    current_dt = current_datetime()
-                    num_bars, earliest_dt, latest_dt = metadata
-                    if (
-                        num_bars >= NUM_ACCEPTABLE_BARS
-                        and (current_dt - latest_dt).days <= ACCEPTABLE_RECENCY
-                        and not force_update
-                    ):
-                        # No need to cache. Data is fresh enough
-                        print(f"Data scrape unnecessary for {symbol}. Have {num_bars} of data ending on {latest_dt}")
-                        continue
-
-                scrape_level = ScrapeLevel.FULL
-                if force_update and num_bars >= NUM_ACCEPTABLE_BARS:
-                    scrape_level = ScrapeLevel.RECENT
-
-                print(f"Scraping and caching data for {symbol}...")
-                df, error_message = await do_cache(
-                    stock_manager=stock_manager,
-                    symbol=symbol,
-                    bar_size=bar_size,
-                    info_type=info_type,
-                    scrape_level=scrape_level,
-                )
-                if error_message is not None:
-                    print(f"Error for symbol {symbol}: {error_message}")
-                    symbols_with_error[(symbol, info_type)] = error_message
-                    error_count += 1
-                    if error_count > MAX_ERRORS_ALLOWED:
-                        print("Too many errors, stopping program.")
-                        break
-                print(f"Done with {symbol}")
-
+                symbols.append(symbol)
     except FileNotFoundError:
         print(f"Could not find file {file_path}")
+
+    # Scraping must occur if latest cached data is more than acceptable_recency days in the past
+    acceptable_recency = 0 if force_update else GENERAL_ACCEPTABLE_RECENCY
+
+    error_count: int = 0
+    for symbol in symbols:
+        metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
+        num_bars = 0
+        if metadata is not None:
+            current_dt = current_datetime()
+            num_bars, earliest_dt, latest_dt = metadata
+            if num_bars >= NUM_ACCEPTABLE_BARS and (current_dt - latest_dt).days <= acceptable_recency:
+                # No need to cache. Data is fresh enough
+                print(f"Data scrape unnecessary for {symbol}. Have {num_bars} of data ending on {latest_dt}")
+                continue
+
+        scrape_level = ScrapeLevel.FULL
+        if force_update and num_bars >= NUM_ACCEPTABLE_BARS:
+            scrape_level = ScrapeLevel.RECENT
+
+        print(f"Scraping and caching data for {symbol}...")
+        df, error_message = await do_cache(
+            stock_manager=stock_manager,
+            symbol=symbol,
+            bar_size=bar_size,
+            info_type=info_type,
+            scrape_level=scrape_level,
+        )
+        if error_message is not None:
+            print(f"Error for symbol {symbol}: {error_message}")
+            symbols_with_error[(symbol, info_type)] = error_message
+            error_count += 1
+            if error_count > MAX_ERRORS_ALLOWED:
+                print("Too many errors, stopping program.")
+                break
+        print(f"Done with {symbol}")
 
     if len(symbols_with_error) > 0:
         print("Caching had errors with:")
