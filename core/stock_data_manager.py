@@ -351,6 +351,89 @@ class StockDataManager:
         info_type = StockData.get_info_type(parts[2])
         return symbol, bar_size, info_type
 
+    async def get_iv_rank(
+        self, symbol: str, cache_only: bool = False, acceptable_recency: int = 0
+    ) -> Tuple[float, float, Optional[str]]:
+        """
+        Gets IV rank for a particular stock.
+
+        :param symbol: ticker
+        :param cache_only: if True, only get data from cache
+        :param acceptable_recency: how many days in the past most recent IV data can be to be usable
+        :return: (IV rank as %, latest IV, error msg)
+        """
+        num_acceptable_bars = 200
+
+        if cache_only:
+            start_date = ""
+        else:
+            start_date = get_datetime_as_str(current_datetime() - timedelta(days=365), date_only=True)
+
+        df = None
+        error_msg: Optional[str] = None
+        try:
+            # We'll be using cached data
+            self.load_data(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
+
+            if not cache_only:
+                success, error_str = await self.scrape_data_smart(
+                    symbol,
+                    BarSize.ONE_DAY,
+                    RequestedInfoType.IMPLIED_VOLATILITY,
+                    start_date=start_date,
+                    update_recent=True,
+                )
+                if not success:
+                    error_msg = error_str
+                self.save_data(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
+            df = self.get_pandas_df(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
+            self.unload_data(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
+        except KeyboardInterrupt:
+            raise
+        except StockDataException as ex:
+            return 0, 0, f"StockDataException {ex}"
+        except Exception as ex:
+            return 0, 0, f"Exception {ex}"
+
+        if df is None or error_msg is not None:
+            return 0, 0, f"Error finding IV rank for {symbol}, is: {error_msg}"
+        if len(df) < num_acceptable_bars:
+            return 0, 0, f"Not enough data found for {symbol}"
+
+        most_recent_dt = df.iloc[-1]["date"].to_pydatetime()
+        if (current_datetime() - most_recent_dt).days > acceptable_recency:
+            return 0, 0, f"Data found for {symbol} not recent enough"
+
+        lowest_iv = 1000000.0
+        highest_iv = 0.0
+        total_bars = len(df)
+        start_bar = total_bars - 200
+        start_bar = 0 if start_bar < 0 else start_bar
+        for idx in range(start_bar, total_bars):
+            iv = df.iloc[idx]["close"]
+            lowest_iv = min(iv, lowest_iv)
+            highest_iv = max(iv, highest_iv)
+        latest_iv = df.iloc[-1]["close"]
+        rank = (latest_iv - lowest_iv) / (highest_iv - lowest_iv)
+        rank *= 100.0
+
+        return rank, latest_iv, None
+
+    async def get_most_recent_price(
+        self, symbol: str, bar_size: BarSize = BarSize.ONE_DAY
+    ) -> Tuple[float, Optional[str]]:
+        """
+        Gets last trading price for security from broker.
+
+        :param symbol: ticker of security
+        :param bar_size: one-day by default
+        :return: (price, error message)
+        """
+        recent_data, error_msg = await self.driver.get_most_recent_data(symbol, bar_size, RequestedInfoType.TRADES)
+        if recent_data is None or error_msg is not None:
+            return 0, f"Error getting underlying price for symbol {symbol}"
+        return recent_data[0]["close"], None
+
     def _log(self, message: str, level: int = logging.INFO):
         if self._log_to_stdout and level == logging.INFO:
             print(message)

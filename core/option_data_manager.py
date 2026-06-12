@@ -265,6 +265,30 @@ class OptionDataManager:
 
         return option_info
 
+    async def get_best_expiration(self, symbol: str, desired_dte: int) -> Tuple[Optional[datetime], int, Optional[str]]:
+        """
+        Gets the best options expiration date that fits a desired DTE
+
+        :param symbol: ticker of security
+        :param desired_dte: preferred days to expiration
+        :return: (best fit options expiration date, days to that date, error message)
+        """
+        expirations = await self.get_expirations(symbol, int(desired_dte / 2), desired_dte * 2)
+        if len(expirations) == 0:
+            return None, 0, f"Could not find options contracts with appropriate expirations for {symbol}"
+        expiration_dts: List[datetime] = [get_datetime(exp) for exp in expirations]
+
+        # Find which of the available expiration dates is closest to desired DTE. Return date, actual DTE of contract.
+        best_diff = 1000000
+        best_exp = None
+        for exp in expiration_dts:
+            days_to_exp = (exp - current_datetime()).days
+            if abs(days_to_exp - desired_dte) < best_diff:
+                best_diff = abs(days_to_exp - desired_dte)
+                best_exp = exp
+
+        return best_exp, (best_exp - current_datetime()).days, None
+
     async def _get_underlying_price(self, ticker: str):
         """Get the latest trading price (within a minute) for ticker"""
         ret_tup, error_str = await self._ib_driver.get_most_recent_data(ticker, BarSize.ONE_MINUTE)
