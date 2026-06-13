@@ -21,6 +21,7 @@ from core.utils import (
     get_datetime_as_str,
     current_datetime,
     get_full_symbol_name,
+    get_best_strike,
 )
 from core.options_data import OptionData, OptionDataException
 from core.ib_driver import IBDriver
@@ -289,9 +290,56 @@ class OptionDataManager:
 
         return best_exp, (best_exp - current_datetime()).days, None
 
-    async def _get_underlying_price(self, ticker: str):
-        """Get the latest trading price (within a minute) for ticker"""
-        ret_tup, error_str = await self._ib_driver.get_most_recent_data(ticker, BarSize.ONE_MINUTE)
+    async def get_atm_straddle_move(
+        self, symbol: str, expiration: str, standard_deviations: int = 1
+    ) -> Tuple[float, float, Optional[str]]:
+        """
+        Return ATM straddle move for security. Well-known formula of taking prices for ATM put and ATM call
+        and adding them together.
+
+        :param symbol: ticker
+        :param expiration: expiration date, IB-style
+        :param standard_deviations: number of standard deviations
+        :return: (expected move, best strike, error message)
+        """
+        price = await self._get_underlying_price(symbol, bar_size=BarSize.ONE_DAY)
+
+        put_strikes, _ = await self.get_strikes(symbol, expiration, "P", 4, 4)
+        if len(put_strikes) == 0:
+            return 0, 0, "No put strikes found"
+        best_put_strike = get_best_strike(put_strikes, price)
+
+        call_strikes, _ = await self.get_strikes(symbol, expiration, "C", 4, 4)
+        if len(call_strikes) == 0:
+            return 0, 0, "No call strikes found"
+        best_call_strike = get_best_strike(call_strikes, price)
+
+        try:
+            put_option_data = await self.get_option_chain(symbol, expiration, "P", best_put_strike)
+        except:
+            return 0, 0, "Failed to get put option data"
+
+        df = put_option_data.get_dataframe()
+        if len(df) == 0:
+            return 0, 0, "Put option chain empty for some reason"
+        put_price = df.iloc[0]["price"]
+
+        try:
+            call_option_data = await self.get_option_chain(symbol, expiration, "C", best_call_strike)
+        except:
+            return 0, 0, "Failed to get call option data"
+
+        df = call_option_data.get_dataframe()
+        if len(df) == 0:
+            return 0, 0, "Call option chain empty for some reason"
+        call_price = df.iloc[0]["price"]
+
+        atm_straddle_move = put_price + call_price
+        return atm_straddle_move * 1.25 * float(standard_deviations), best_put_strike, None
+
+    async def _get_underlying_price(self, ticker: str, bar_size: BarSize = BarSize.ONE_MINUTE):
+        """Get the latest trading price (within a minute by default) for ticker"""
+        ret_tup, error_str = await self._ib_driver.get_most_recent_data(ticker, bar_size)
         if not ret_tup or error_str:
             raise OptionDataException(f"Couldn't get underlying price, error is: {error_str}")
         underlying_price = ret_tup[0]["close"]
@@ -322,7 +370,7 @@ class OptionDataManager:
         """
 
         # This limits the number of requests active with IB at once
-        MAX_TO_RETRIEVE_AT_ONCE = 20
+        MAX_TO_RETRIEVE_AT_ONCE = 10
         MAX_ERRORS = 5
 
         # Keep tracks of which entries in contract_details_list we've made tasks for
