@@ -1,10 +1,11 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Union, Optional
+from typing import Union, Optional, List
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from enum import Enum, auto
 import traceback
+import math
 
 from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
@@ -202,3 +203,33 @@ def get_full_symbol_name(
         return f"{ticker}-{'C' if is_call else 'P'}-{expiration}"
 
     return f"{ticker}-{'C' if is_call else 'P'}-{expiration}-{strike}"
+
+
+def calculate_expected_move(price: float, iv: float, dte: int, standard_devs: int = 1):
+    """
+    Calculates expected move for a stock/ETF. This is a standard formula, kept here for easy finding.
+
+    :param price: current price
+    :param iv: current implied volatility
+    :param dte: days to expiration
+    :param standard_devs: standard deviations
+    :return: expected move
+    """
+    return price * iv * math.sqrt(float(dte) / 365.0) * float(standard_devs)
+
+
+def get_best_strike(strike_list: List[float], desired_strike: float):
+    """
+    Given a list of available strikes, return the one closest to desired strike price.
+    :param strike_list: list of valid strikes
+    :param desired_strike: the desired strike, often some price of the stock
+    :return: strike that's best fit
+    """
+    best_dist = math.fabs(strike_list[0] - desired_strike)
+    best_idx = 0
+    for idx, strike in enumerate(strike_list):
+        dist = math.fabs(strike - desired_strike)
+        if dist < best_dist:
+            best_dist = dist
+            best_idx = idx
+    return strike_list[best_idx]

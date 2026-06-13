@@ -21,6 +21,8 @@ from core.utils import (
     get_datetime,
     get_datetime_as_str,
     current_datetime,
+    calculate_expected_move,
+    get_best_strike,
 )
 from core.options_data import OptionData
 from core.option_data_manager import OptionDataManager
@@ -136,7 +138,7 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
             continue
 
         print(f"Examining {key}...")
-        rank, latest_iv, error_msg = await stock_manager.get_iv_rank(symbol, cache_only=no_scrape)
+        rank, latest_iv, error_msg = await stock_manager.get_iv_rank(symbol, cache_only=no_scrape, acceptable_recency=2)
         if error_msg is not None:
             print(f"Error finding IV rank with {key}, is: {error_msg}")
             continue
@@ -192,7 +194,7 @@ async def get_single_stock_data(
         min_delta = delta - 0.05
         max_delta = delta + 0.05
 
-    rank, latest_iv, error_msg = stock_manager.get_iv_rank(symbol, cache_only=no_scrape)
+    rank, latest_iv, error_msg = await stock_manager.get_iv_rank(symbol, cache_only=no_scrape, acceptable_recency=2)
     if error_msg is not None:
         print(f"Error finding IV rank for {symbol}, is: {error_msg}")
         return
@@ -211,88 +213,63 @@ async def get_single_stock_data(
         print(f"Could not find options contracts with appropriate expirations for {symbol}")
         return
 
-    best_expiration_dt, best_dte, error_msg = options_manager.get_best_expiration(symbol, dte)
+    best_expiration_dt, best_dte, error_msg = await options_manager.get_best_expiration(symbol, dte)
     if error_msg:
         print(f"Error getting best expiration: {error_msg}")
         return
 
     best_expiration_date_str = get_datetime_as_str(best_expiration_dt)
-    expected_move = price * latest_iv * math.sqrt(best_dte / 365.0)
+    expected_move = calculate_expected_move(price, latest_iv, best_dte)
     print(
         f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
     )
 
-    if strike is None:
-        min_strike = price - expected_move * 2.0
-        put_strikes, idx = await options_manager.get_strikes(
-            symbol, best_expiration_date_str, "P", min_strike=min_strike, max_strike=price
+    # Get both put and call chains, then print them
+    sides = [("P", "put"), ("C", "call")]
+    for side in sides:
+        right, contract_type = side
+        if strike is None:
+            if right == "P":
+                min_strike = price - expected_move * 2.0
+                max_strike = price
+            else:
+                min_strike = price
+                max_strike = price + expected_move * 2.0
+            the_strikes, idx = await options_manager.get_strikes(
+                symbol, best_expiration_date_str, right, min_strike=min_strike, max_strike=max_strike
+            )
+        else:
+            the_strikes = [strike]
+        print(f"The {contract_type} strikes are:", the_strikes)
+        print(f"Please wait for {contract_type} option chain...")
+        option_data = await options_manager.get_option_chain(
+            symbol, best_expiration_date_str, right, strike=the_strikes, min_delta=min_delta, max_delta=max_delta
         )
-    else:
-        put_strikes = [strike]
-    print("Put strikes are:", put_strikes)
-    print("Please wait for put option chain...")
-    put_option_data = await options_manager.get_option_chain(
-        symbol, best_expiration_date_str, "P", strike=put_strikes, min_delta=min_delta, max_delta=max_delta
-    )
-    df = put_option_data.get_dataframe(drop_columns=["date", "expiration"])
-    print(f"Put chain is:\n{df}")
-
-    if strike is None:
-        max_strike = price + expected_move * 2.0
-        call_strikes, idx = await options_manager.get_strikes(
-            symbol, best_expiration_date_str, "C", min_strike=price, max_strike=max_strike
-        )
-    else:
-        call_strikes = [strike]
-    print("Call strikes are:", call_strikes)
-    print("Please wait for call option chain...")
-    call_option_data = await options_manager.get_option_chain(
-        symbol, best_expiration_date_str, "C", strike=call_strikes, min_delta=min_delta, max_delta=max_delta
-    )
-    df = call_option_data.get_dataframe(drop_columns=["date", "expiration"])
-    print(f"Call chain is:\n{df}")
+        df = option_data.get_dataframe(drop_columns=["date", "expiration"])
+        print(f"The {contract_type} chain is:\n{df}")
 
 
 async def find_move(stock_manager: StockDataManager, options_manager: OptionDataManager, symbol: str, dte: int):
     """
-    TODO: fix duplicated code here
-    :param stock_manager:
-    :param options_manager:
-    :param symbol:
-    :param dte:
-    :return:
+    Finds and prints expected move of stock, using both IV and ATM straddle methods.
+
+    :param stock_manager: StockManager instance. Connection to brokerage must be established.
+    :param options_manager: OptionsDataManager instance. Same about connection.
+    :param symbol: ticker symbol, e.g. SPY
+    :param dte: days to expiration
     """
     stock_manager.set_log_to_stdout(False)
 
-    df, error_msg = await do_cache(
-        stock_manager,
-        symbol,
-        BarSize.ONE_DAY,
-        RequestedInfoType.IMPLIED_VOLATILITY,
-        scrape_level=ScrapeLevel.RECENT,
-    )
-    if df is None or error_msg is not None:
+    rank, latest_iv, error_msg = await stock_manager.get_iv_rank(symbol, cache_only=False, acceptable_recency=2)
+    if error_msg is not None:
         print(f"Error finding IV rank for {symbol}, is: {error_msg}")
         return
-    if len(df) < NUM_ACCEPTABLE_BARS:
-        print(f"Not enough data found for {symbol}")
-        return
 
-    most_recent_dt = df.iloc[-1]["date"].to_pydatetime()
-    if (current_datetime() - most_recent_dt).days > ACCEPTABLE_RECENCY:
-        print(f"Data found for {symbol} not recent enough")
-        return
-
-    recent_data, error_msg = await stock_manager.driver.get_most_recent_data(
-        symbol, BarSize.ONE_DAY, RequestedInfoType.TRADES
-    )
-    if recent_data is None or error_msg is not None:
+    price, error_msg = await stock_manager.get_most_recent_price(symbol)
+    if error_msg is not None:
         print(f"Error getting underlying price for symbol {symbol}")
         return
-    bar_dict = recent_data[0]
-    price = bar_dict["close"]
 
-    rank, latest_iv = calculate_iv_rank(df)
     print(f"\nInfo for {symbol}:\n----------------------------------------------")
     print(f"Current price: {price}")
     print(f"IV rank is {rank}, IV is {latest_iv}")
@@ -301,79 +278,26 @@ async def find_move(stock_manager: StockDataManager, options_manager: OptionData
     if len(expirations) == 0:
         print(f"Could not find options contracts with appropriate expirations for {symbol}")
         return
-    expiration_dts: List[datetime] = [get_datetime(exp) for exp in expirations]
 
-    def _get_best_fit_expiration(_dte: float):
-        # Find which of the available expiration dates is closest to desired DTE. Return date, actual DTE of contract.
-        best_delta = 1000000
-        best_exp = None
-        for exp in expiration_dts:
-            days_to_exp = (exp - current_datetime()).days
-            if abs(days_to_exp - _dte) < best_delta:
-                best_delta = abs(days_to_exp - _dte)
-                best_exp = exp
-        return best_exp, (best_exp - current_datetime()).days
+    best_expiration_dt, best_dte, error_msg = await options_manager.get_best_expiration(symbol, dte)
+    if error_msg:
+        print(f"Error finding best expiration: {error_msg}")
+        return
 
-    best_expiration_dt, best_dte = _get_best_fit_expiration(dte)
     best_expiration_date_str = get_datetime_as_str(best_expiration_dt)
-    expected_move = price * latest_iv * math.sqrt(best_dte / 365.0)
+    expected_move = calculate_expected_move(price, latest_iv, best_dte)
     print(
         f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
     )
 
-    def _get_best_strike(_strike_list: List[float], _desired: float):
-        best_dist = math.fabs(_strike_list[0] - _desired)
-        best_idx = 0
-        for idx, strike in enumerate(_strike_list):
-            dist = math.fabs(strike - _desired)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = idx
-        return _strike_list[best_idx]
-
-    put_strikes, _ = await options_manager.get_strikes(symbol, best_expiration_date_str, "P", 4, 4)
-    if len(put_strikes) == 0:
-        print("No put strikes found")
-        return
-    best_put_strike = _get_best_strike(put_strikes, price)
-
-    call_strikes, _ = await options_manager.get_strikes(symbol, best_expiration_date_str, "C", 4, 4)
-    if len(call_strikes) == 0:
-        print("No call strikes found")
-        return
-    best_call_strike = _get_best_strike(call_strikes, price)
-
-    try:
-        put_option_data = await options_manager.get_option_chain(symbol, best_expiration_date_str, "P", best_put_strike)
-    except:
-        print("Failed to get put option data")
-        return
-
-    df = put_option_data.get_dataframe()
-    if len(df) == 0:
-        print("Put option chain empty for some reason")
-        return
-    put_price = df.iloc[0]["price"]
-
-    try:
-        call_option_data = await options_manager.get_option_chain(
-            symbol, best_expiration_date_str, "C", best_call_strike
-        )
-    except:
-        print("Failed to get call option data")
-        return
-
-    df = call_option_data.get_dataframe()
-    if len(df) == 0:
-        print("Call option chain empty for some reason")
-        return
-    call_price = df.iloc[0]["price"]
-
-    atm_straddle_move = put_price + call_price
-    print(
-        f"ATM straddle move, one standard deviation: {atm_straddle_move * 1.25}, using strikes of {best_put_strike} and {best_call_strike}"
+    atm_straddle_move, best_strike, error_msg = await options_manager.get_atm_straddle_move(
+        symbol, best_expiration_date_str
     )
-    print(f"ATM straddle move, two standard deviations: {atm_straddle_move * 2.5}")
+    if error_msg:
+        print(f"Error getting ATM straddle: {error_msg}")
+        return
+    print(f"ATM straddle move, one standard deviation: {atm_straddle_move}, using strikes at {best_strike}")
+    print(f"ATM straddle move, two standard deviations: {atm_straddle_move * 2.0}")
 
 
 async def main(parser: ArgumentParser):
