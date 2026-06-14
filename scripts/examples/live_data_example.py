@@ -1,14 +1,8 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from time import sleep
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 
 from core.common import HistoricalData, RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.ib.ib_driver import IBDriver, BarSize
 
 """
 An example of how to get recent data bars (price, volatility) from the market, as well as how to get

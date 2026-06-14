@@ -1,23 +1,19 @@
 import asyncio
-from argparse import ArgumentParser
 from logging import basicConfig, INFO, getLogger
-import time
 from typing import List, Tuple, Dict, Optional
 from enum import IntEnum
 
 import pandas
-from ibapi.common import BarData
-from datetime import datetime, timedelta
+from datetime import timedelta
 import argparse
 import traceback
 
 from core.common import RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
+from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
 from core.utils import (
     str_to_bar_size,
-    get_datetime,
     get_datetime_as_str,
     current_datetime,
 )
@@ -34,6 +30,10 @@ d:
 cd CodingProjects\Python\TWS2025
 conda activate options_2025_1
 python -m scripts.cache_data --help
+
+To build data cache for tradable ETFs
+------------------------
+python -m scripts.cache_data --file .\data\tradeable.txt
 
 To build data cache for iv_finder tool
 ------------------------

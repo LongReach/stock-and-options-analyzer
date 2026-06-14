@@ -1,6 +1,5 @@
 import asyncio
-import math
-from typing import Optional, List, Union, Tuple, Any, Dict
+from typing import Optional, List, Tuple, Dict
 from threading import Lock
 import logging
 import pandas as pd
@@ -9,7 +8,6 @@ from datetime import datetime, timedelta
 from core.common import HistoricalData, RequestedInfoType
 from core.utils import (
     BarSize,
-    bar_size_to_str,
     str_to_bar_size,
     bar_size_to_time,
     get_datetime,
@@ -18,7 +16,7 @@ from core.utils import (
     non_naive_datetime,
 )
 from core.stock_data import StockData, StockDataException, DB_PATH
-from core.ib_driver import IBDriver
+from core.ib.ib_driver import IBDriver
 
 _logger = logging.getLogger(__name__)
 

@@ -4,22 +4,20 @@ import math
 
 from _decimal import Decimal
 
-from core.utils import current_datetime, lock_with_timeout
+from core.utils import current_datetime
 from ibapi.contract import Contract, ContractDetails
-from ibapi.client import EClient
 from ibapi.order import *
 from ibapi.order_cancel import OrderCancel
 from ibapi.order_state import OrderState
-from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
+from ibapi.common import BarData, TickerId
 from ibapi.execution import Execution
 from ibapi.ticktype import TickType
-from ibapi.wrapper import EWrapper, OrderId
-from logging import getLogger, basicConfig
+from ibapi.wrapper import OrderId
+from logging import getLogger
 import threading
 import time
 from typing import Optional, Dict, List, Tuple, Union, Set
-from enum import Enum, auto
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core.common import (
     HistoricalData,
@@ -32,7 +30,6 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
-    PositionDescriptor,
 )
 from core.utils import (
     wait_for_condition,
@@ -40,9 +37,8 @@ from core.utils import (
     get_datetime_as_str,
     BarSize,
     is_trading_hours,
-    get_full_symbol_name,
 )
-from core.ib_driver_requests import (
+from core.ib.ib_driver_requests import (
     ContractDetailsRequest,
     OptionChainInfoRequest,
     OptionRequest,
@@ -51,7 +47,7 @@ from core.ib_driver_requests import (
     OrderRequest,
     PositionsRequest,
 )
-from core.ib_wrapper import IBWrapper, CallbackID
+from core.ib.ib_wrapper import IBWrapper, CallbackID
 
 GATEWAY_LIVE_PORT = 4001
 GATEWAY_SIM_PORT = 4002
@@ -121,7 +117,8 @@ class IBDriver(IBWrapper):
             BarSize.ONE_HOUR: "1 hour",
             BarSize.FOUR_HOURS: "4 hours",
             BarSize.ONE_DAY: "1 day",
-            BarSize.ONE_WEEK: "7 days",
+            BarSize.ONE_WEEK: "1W",
+            BarSize.ONE_MONTH: "1M",
         }
 
         self.set_callback(CallbackID.HISTORICAL_DATA_CB, self._historical_data_cb)
@@ -847,6 +844,8 @@ class IBDriver(IBWrapper):
                 duration_str = str(num_bars) + " D"
             elif bar_size == BarSize.ONE_WEEK:
                 duration_str = str(num_bars) + " W"
+            elif bar_size == BarSize.ONE_MONTH:
+                duration_str = str(num_bars) + " M"
             else:
                 duration_str = str(num_bars) + " D"
         else:
@@ -861,7 +860,9 @@ class IBDriver(IBWrapper):
                 else:
                     duration_str = f"{diff.days} D"
             else:
-                if bar_size == BarSize.ONE_WEEK:
+                if bar_size == BarSize.ONE_MONTH:
+                    duration_str = f"1 M"
+                elif bar_size == BarSize.ONE_WEEK:
                     duration_str = f"1 W"
                 elif bar_size == BarSize.ONE_DAY:
                     duration_str = f"1 D"

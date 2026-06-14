@@ -1,18 +1,10 @@
 import asyncio
-import os
-import sys
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 
 # module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'core'))
 # sys.path.append(module_path)
 
-from core.common import RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.ib.ib_driver import IBDriver
 from core.option_data_manager import OptionDataManager
 
 """

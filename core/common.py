@@ -31,6 +31,7 @@ class BarSize(Enum):
     FOUR_HOURS = auto()
     ONE_DAY = auto()
     ONE_WEEK = auto()
+    ONE_MONTH = auto()
 
 
 class RequestedInfoType(Enum):

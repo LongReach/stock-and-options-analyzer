@@ -4,7 +4,7 @@ from enum import Enum, auto
 from asyncio import Event
 
 from core.common import SecurityDescriptor, OrderPurpose
-from core.ib_driver import IBDriver
+from core.ib.ib_driver import IBDriver
 from core.utils import get_exception_traceback
 from guided_missile.position_manager import PositionManager, PositionDirection
 
