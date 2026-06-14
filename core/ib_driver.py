@@ -174,6 +174,8 @@ class IBDriver(IBWrapper):
             self._logger.error("Couldn't connect to IB server.")
             return False
 
+        self._set_market_data_type(is_trading_hours())
+
         return True
 
     def disconnect(self):
