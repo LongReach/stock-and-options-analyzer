@@ -1,30 +1,21 @@
 import asyncio
 import math
 from asyncio import CancelledError
-from typing import Optional, List, Union, Tuple, Any, Dict
+from typing import Optional, List, Union, Tuple
 import logging
-import pandas as pd
-from ibapi.contract import ContractDetails
-from pandas import DataFrame, read_pickle, DatetimeIndex
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from pandas.core.resample import maybe_warn_args_and_kwargs
-
-from core.common import HistoricalData, OptionInfo
+from core.common import OptionInfo
 from core.cache import TTLCache
 from core.utils import (
     BarSize,
-    bar_size_to_str,
-    str_to_bar_size,
-    bar_size_to_time,
     get_datetime,
-    get_datetime_as_str,
     current_datetime,
     get_full_symbol_name,
     get_best_strike,
 )
 from core.options_data import OptionData, OptionDataException
-from core.ib_driver import IBDriver
+from core.ib.ib_driver import IBDriver
 
 _logger = logging.getLogger(__name__)
 

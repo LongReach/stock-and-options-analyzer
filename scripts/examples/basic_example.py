@@ -1,12 +1,8 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 
 from core.common import HistoricalData
-from core.ib_driver import IBDriver, BarSize
+from core.ib.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
 """

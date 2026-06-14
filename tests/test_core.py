@@ -1,11 +1,10 @@
 from ibapi.common import BarData
-from datetime import datetime
 import pytest
 from typing import List, Dict
 
 from core.common import SecurityDescriptor
 from core.utils import get_datetime, get_datetime_as_str, BarSize
-from core.ib_driver_requests import BarDataRequest
+from core.ib.ib_driver_requests import BarDataRequest
 from core.stock_data import StockData
 
 

@@ -1,12 +1,8 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 import argparse
 
-from core.ib_driver import IBDriver, BarSize
+from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 
 CLIENT_ID = 17

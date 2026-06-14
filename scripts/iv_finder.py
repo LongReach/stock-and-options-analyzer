@@ -1,30 +1,23 @@
 import asyncio
-import math
 from argparse import ArgumentParser
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional
 from enum import IntEnum
 
 import pandas
-from ibapi.common import BarData
-from datetime import datetime, timedelta
-import argparse
+from datetime import timedelta
 import traceback
 
 from core.common import RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
+from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
-from core.stock_data import StockData, StockDataException
+from core.stock_data import StockDataException
 from core.utils import (
-    str_to_bar_size,
     get_datetime,
     get_datetime_as_str,
     current_datetime,
     calculate_expected_move,
-    get_best_strike,
 )
-from core.options_data import OptionData
 from core.option_data_manager import OptionDataManager
 
 """

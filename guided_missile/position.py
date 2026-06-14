@@ -1,5 +1,4 @@
 import asyncio
-from tokenize import group
 from typing import Optional, Dict, List, Tuple, Callable, Any
 from enum import Enum, auto
 from logging import getLogger
@@ -13,8 +12,7 @@ from core.common import (
     HistoricalData,
     OrderPurpose,
 )
-from core.utils import wait_for_condition
-from core.ib_driver import IBDriver
+from core.ib.ib_driver import IBDriver
 
 
 class OrderGroup:

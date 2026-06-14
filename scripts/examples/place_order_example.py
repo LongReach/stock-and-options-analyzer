@@ -1,10 +1,6 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from time import sleep
-from typing import List, Tuple, Dict, Optional
-from ibapi.common import BarData
-from datetime import datetime
+from typing import Tuple, Optional
 
 from core.common import (
     HistoricalData,
@@ -15,8 +11,7 @@ from core.common import (
     OrderStatus,
     PositionsInfo,
 )
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.ib.ib_driver import IBDriver, BarSize
 
 """
 An example of how to place an order with IB. This script should be used while the TWS desktop application
