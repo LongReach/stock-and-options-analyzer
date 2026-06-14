@@ -290,6 +290,7 @@ async def find_move(stock_manager: StockDataManager, options_manager: OptionData
         f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
     )
 
+    print("Please wait for ATM straddle move...")
     atm_straddle_move, best_strike, error_msg = await options_manager.get_atm_straddle_move(
         symbol, best_expiration_date_str
     )

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from enum import Enum, auto
 import traceback
 import math
+import pandas_market_calendars as mcal
 
 from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
@@ -135,14 +136,19 @@ def get_datetime_as_str(dt: Union[datetime, str], date_only: bool = False) -> st
         return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
 
 
+_nyse = mcal.get_calendar("NYSE")
+
+
 def is_trading_hours() -> bool:
-    """Returns True if it's trading hours right now"""
+    """Returns True if it's currently within NYSE trading hours"""
     current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
-    if 10 <= current_dt.hour < 16:
-        return True
-    if current_dt.hour == 9 and current_dt.minute >= 30:
-        return True
-    return False
+    today_str = current_dt.strftime("%Y-%m-%d")
+    schedule = _nyse.schedule(start_date=today_str, end_date=today_str)
+    if schedule.empty:
+        return False
+    market_open = schedule.iloc[0]["market_open"].to_pydatetime()
+    market_close = schedule.iloc[0]["market_close"].to_pydatetime()
+    return market_open <= current_dt <= market_close
 
 
 def current_datetime():

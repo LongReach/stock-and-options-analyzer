@@ -155,3 +155,22 @@ You need to go to your account settings on the IB webpage. Subscribe to "US Equi
 
 IB might cancel your subscriptions if the cash in your account falls below a certain threshold. If that happens, you need to transfer in more cash, then sign up for the subscriptions again. 
 
+### Can't get options data on weekend/after hours
+
+Inside Gateway, you might see an error like:
+```
+2026-06-14 10:52:32.299 [WU] ERROR [JTS-Model-Notifier-200] - Model is not valid: Active:true SPY/20260731/742.0/Put TOP/PACED isApplcbl=false ref=756733 befCalc=false isValid=false greeks=NaN/NaN/NaN/NaN mdlVol=FROZEN: (TICK_MPIV 0.15385965165194782 PerYear 1) impVol=FROZEN: NAN/NAN/NAN bidGreeks=NULL askGreeks=NULL lastGreeks=NULL
+2026-06
+```
+
+Make sure that the call to:
+```python
+self.reqMktData(req_id, option_contract, "100,101", False, False, [])
+```
+
+...is preceded by:
+```python
+self.reqMarketDataType(1 if live else 2)
+```
+
+The `2` requests "frozen" data.
