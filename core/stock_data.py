@@ -1,9 +1,9 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 import logging
 import pandas as pd
 from datetime import datetime
 
-from core.utils import BarSize, bar_size_to_str, non_naive_datetime, current_datetime
+from core.utils import BarSize, bar_size_to_str, non_naive_datetime, current_datetime, get_datetime
 from core.common import RequestedInfoType
 
 _logger = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ class StockData:
     Indexed by: human-readable date-time
     """
 
+    far_future_date = get_datetime("22000101")
+
     def __init__(
         self,
         symbol: str,
@@ -36,8 +38,36 @@ class StockData:
         self._loaded_from_cache: bool = False
         # Permits quick lookup of data range for cached data
         self._metadata_df: pd.DataFrame = pd.DataFrame(
-            {"earliest_date": [current_datetime()], "latest_date": [current_datetime()], "bars": [0]}
+            {
+                "earliest_date": [current_datetime()],
+                "latest_date": [current_datetime()],
+                "bars": [0],
+                "head_date": [self.far_future_date],
+            }
         )
+
+    @property
+    def head_date(self) -> Optional[datetime]:
+        """
+        Accessor for head_date, the earliest timestamp for which data is available from broker. Returns None if not set
+        with meaningful value. This is saved with metadata.
+        """
+        try:
+            # For older files, might not be present
+            head_dt = self._metadata_df.iloc[0]["head_date"]
+        except:
+            return None
+        if head_dt == self.far_future_date:
+            return None
+        return head_dt
+
+    @head_date.setter
+    def head_date(self, val: Optional[datetime]):
+        """Setter for head_date, the earliest timestamp for which data is available from broker"""
+        if val is None:
+            self._metadata_df.at[0, "head_date"] = self.far_future_date
+        else:
+            self._metadata_df.at[0, "head_date"] = val
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -70,14 +100,22 @@ class StockData:
         """Returns pandas Dataframe"""
         return self._price_and_vol_df
 
-    def get_metadata(self) -> Tuple[int, datetime, datetime]:
+    def get_metadata(self) -> Tuple[int, datetime, datetime, Optional[datetime]]:
         """
-        Returns metadata: (num bars in cache, earliest datetime of cached data, latest datetime)
+        Returns metadata: (num bars in cache, earliest datetime of cached data, latest datetime, head timestamp)
+
+        TODO: more notes
         """
         bars = self._metadata_df.iloc[0]["bars"]
         earliest_dt = self._metadata_df.iloc[0]["earliest_date"]
         latest_dt = self._metadata_df.iloc[0]["latest_date"]
-        return bars, earliest_dt, latest_dt
+        try:
+            head_dt = self._metadata_df.iloc[0]["head_date"]
+            if head_dt == self.far_future_date:
+                head_dt = None
+        except:
+            head_dt = None
+        return bars, earliest_dt, latest_dt, head_dt
 
     def load_from_db(self, db_path: str = DB_PATH, preserve_existing_data: bool = True) -> bool:
         """
@@ -235,8 +273,9 @@ class StockData:
             current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[0]["date"])
         )
         latest_dt = current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[-1]["date"])
+        head_dt = self.head_date or self.far_future_date
         self._metadata_df: pd.DataFrame = pd.DataFrame(
-            {"earliest_date": [earliest_dt], "latest_date": [latest_dt], "bars": [num_bars]}
+            {"earliest_date": [earliest_dt], "latest_date": [latest_dt], "bars": [num_bars], "head_date": [head_dt]}
         )
 
     def _save_metadata_to_db(self, db_path: str = DB_PATH) -> bool:
