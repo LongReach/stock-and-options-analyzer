@@ -20,6 +20,7 @@ def bar_size_to_str(bar_size: BarSize) -> str:
         BarSize.FOUR_HOURS: "4h",
         BarSize.ONE_DAY: "1d",
         BarSize.ONE_WEEK: "1w",
+        BarSize.ONE_MONTH: "1M",
     }
     try:
         return conversion_map[bar_size]
@@ -36,6 +37,7 @@ def str_to_bar_size(bar_size_str: str) -> BarSize:
         "4h": BarSize.FOUR_HOURS,
         "1d": BarSize.ONE_DAY,
         "1w": BarSize.ONE_WEEK,
+        "1M": BarSize.ONE_MONTH,
     }
     try:
         return conversion_map[bar_size_str]
@@ -52,11 +54,16 @@ def bar_size_to_time(bar_size: BarSize) -> timedelta:
         BarSize.FOUR_HOURS: timedelta(hours=4),
         BarSize.ONE_DAY: timedelta(days=1),
         BarSize.ONE_WEEK: timedelta(weeks=1),
+        BarSize.ONE_MONTH: timedelta(days=30),
     }
     try:
         return conversion_map[bar_size]
     except:
         raise CoreException(f"Couldn't convert {bar_size.name} to timedelta")
+
+
+def get_bars_between_times(start_dt: datetime, end_dt: datetime, bar_size: BarSize) -> int:
+    return int((end_dt - start_dt) / bar_size_to_time(bar_size))
 
 
 async def wait_for_condition(condition, timeout: float, check_interval: float = 0.1):
