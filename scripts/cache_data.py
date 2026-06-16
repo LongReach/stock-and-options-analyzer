@@ -1,4 +1,5 @@
 import asyncio
+from importlib.metadata import metadata
 from logging import basicConfig, INFO, getLogger
 from typing import List, Tuple, Dict, Optional
 from enum import IntEnum
@@ -12,11 +13,7 @@ from core.common import RequestedInfoType
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
-from core.utils import (
-    str_to_bar_size,
-    get_datetime_as_str,
-    current_datetime,
-)
+from core.utils import str_to_bar_size, get_datetime_as_str, current_datetime, get_bars_between_times
 
 """
 Utility for collecting price (or other) data for a particular security, in bar form, then caching it to disk.
@@ -46,8 +43,17 @@ python -m scripts.cache_data --db .\data\iv_data.h5 --info-type iv --show
 CLIENT_ID = 13
 DB_PATH = "data/market_data.h5"
 NUM_ACCEPTABLE_BARS = 50
-# TODO: this is in days, need values for other timeframes
-GENERAL_ACCEPTABLE_RECENCY = 2
+GENERAL_ACCEPTABLE_RECENCY = {
+    BarSize.ONE_MINUTE: 1,
+    BarSize.TWO_MINUTES: 1,
+    BarSize.FIVE_MINUTES: 1,
+    BarSize.FIFTEEN_MINUTES: 1,
+    BarSize.ONE_HOUR: 1,
+    BarSize.FOUR_HOURS: 1,
+    BarSize.ONE_DAY: 2,
+    BarSize.ONE_WEEK: 1,
+    BarSize.ONE_MONTH: 1,
+}
 MAX_ERRORS_ALLOWED = 10
 
 
@@ -117,44 +123,40 @@ async def do_cache(
     return df, error_msg
 
 
-async def show_cache_contents(stock_manager: StockDataManager):
+async def show_cache_contents(stock_manager: StockDataManager, bar_size_str: str, info_type_str: str):
     """Prints information about data currently in cache"""
+    match_bar_size = str_to_bar_size(bar_size_str) if bar_size_str else None
+    match_info_type = StockData.get_info_type(info_type_str) if info_type_str else None
+
     stock_manager.set_log_to_stdout(False)
     ib_driver: Optional[IBDriver] = stock_manager.driver
     keys: List[str] = stock_manager.get_cached_keys()
     print("Cache contents\n======================================")
     for key in keys:
         symbol, bar_size, info_type = StockDataManager.get_key_elements(key)
+        if match_bar_size and bar_size != match_bar_size:
+            continue
+        if match_info_type and info_type != match_info_type:
+            continue
 
-        entry_type: str = "cache"
         metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
-        if metadata is not None:
-            current_dt = current_datetime()
-            num_bars, earliest_dt, latest_dt = metadata
-            entry_type = "metadata"
-        else:
-            success = stock_manager.load_data(symbol=symbol, bar_size=bar_size, info_type=info_type)
-            if not success:
-                print(f"Could not find data for cache entry {key}")
-                continue
-            df = stock_manager.get_pandas_df(symbol, bar_size, info_type)
-            if df is not None and len(df) > 0:
-                earliest_dt = df.iloc[0]["date"]
-                latest_dt = df.iloc[-1]["date"]
-                num_bars = len(df)
-            else:
-                print(f"Not enough data for cache entry {key}")
-                continue
-            # This will save the metadata, if it doesn't exist in DB
-            stock_manager.save_data(symbol=symbol, bar_size=bar_size, info_type=info_type)
+        if metadata is None:
+            print(f"No metadata for {key}")
+            continue
+
+        current_dt = current_datetime()
+        num_bars, earliest_dt, latest_dt, head_dt = metadata
+        bars_then_to_now = get_bars_between_times(latest_dt, current_datetime(), bar_size)
 
         earliest_date_str = get_datetime_as_str(earliest_dt)
         latest_date_str = get_datetime_as_str(latest_dt)
-        out_line = f"Have {entry_type} entry for {key}, num bars: {num_bars}, earliest data: {earliest_date_str}, latest date: {latest_date_str}"
-        if ib_driver and False:
-            head_dt = await ib_driver.get_head_timestamp(symbol, info_type)
-            if head_dt is not None and head_dt < earliest_dt:
-                out_line += f", available data begins at: {get_datetime_as_str(head_dt)}"
+        out_line = f"Have entry for {key}, num bars: {num_bars}, earliest data: {earliest_date_str}, latest date: {latest_date_str}"
+        if bars_then_to_now > 1:
+            out_line += f" (newer data exists)"
+        if head_dt is not None and not StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size):
+            out_line += f", available data begins at: {get_datetime_as_str(head_dt)} (not matched)"
+        elif head_dt is None:
+            out_line += ", no head timestamp established"
         print(out_line)
 
         stock_manager.unload_data(symbol, bar_size, info_type)
@@ -185,6 +187,15 @@ async def cache_single_stock(
         print(f"Displaying data for {symbol}, {bar_size_str}\n======================================")
     else:
         print(f"Scraping {info_type.value} data for {symbol}, {bar_size_str}\n======================================")
+
+    metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
+    if metadata:
+        num_bars, start_dt, end_dt, head_dt = metadata
+        print(
+            f"Metadata: num bars = {num_bars}, earliest data = {start_dt}, latest data = {end_dt}, head timestamp = {head_dt}"
+        )
+    else:
+        print(f"No metadata for {symbol}, {bar_size_str}")
 
     df, error_str = await do_cache(
         stock_manager,
@@ -232,19 +243,38 @@ async def cache_multiple_stocks(
         print(f"Could not find file {file_path}")
 
     # Scraping must occur if latest cached data is more than acceptable_recency days in the past
-    acceptable_recency = 0 if force_update else GENERAL_ACCEPTABLE_RECENCY
+    acceptable_recency = 0 if force_update else GENERAL_ACCEPTABLE_RECENCY[bar_size]
 
     error_count: int = 0
     for symbol in symbols:
         metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
         num_bars = 0
-        if metadata is not None:
+        if metadata is not None and not force_update:
             current_dt = current_datetime()
-            num_bars, earliest_dt, latest_dt = metadata
-            if num_bars >= NUM_ACCEPTABLE_BARS and (current_dt - latest_dt).days <= acceptable_recency:
-                # No need to cache. Data is fresh enough
-                print(f"Data scrape unnecessary for {symbol}. Have {num_bars} of data ending on {latest_dt}")
-                continue
+            num_bars, earliest_dt, latest_dt, head_dt = metadata
+            bars_missing_until_now = get_bars_between_times(latest_dt, current_dt, bar_size)
+            # If we don't have a head timestamp, we should scrape
+            if head_dt is not None:
+                if info_type == RequestedInfoType.IMPLIED_VOLATILITY:
+                    if num_bars >= NUM_ACCEPTABLE_BARS and bars_missing_until_now <= acceptable_recency:
+                        # No need to cache. Data is fresh enough
+                        print(
+                            f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data ending on {latest_dt}"
+                        )
+                        continue
+                else:
+                    if (
+                        StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size)
+                        and bars_missing_until_now <= acceptable_recency
+                    ):
+                        print(
+                            f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data beginning on {earliest_dt} and ending on {latest_dt}"
+                        )
+                        continue
+                    else:
+                        print(
+                            f"Need data scrape for {symbol}. Head timestamp matched: {StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size)}, data recency {bars_missing_until_now}."
+                        )
 
         scrape_level = ScrapeLevel.FULL
         if force_update and num_bars >= NUM_ACCEPTABLE_BARS:
@@ -316,16 +346,18 @@ async def main(parser: argparse.ArgumentParser):
 
     try:
         if args.show:
-            await show_cache_contents(stock_manager)
+            await show_cache_contents(stock_manager, args.bar_size, args.info_type)
         elif args.symbol:
+            bar_size = args.bar_size or "1d"
+            info_type = args.info_type or "tr"
             if args.remove:
-                await remove_single_stock(stock_manager, args.symbol, args.barsize, args.info_type)
+                await remove_single_stock(stock_manager, args.symbol, bar_size, info_type)
             else:
-                await cache_single_stock(
-                    stock_manager, args.symbol, args.barsize, args.info_type, args.info_only, args.update
-                )
+                await cache_single_stock(stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update)
         elif args.file:
-            await cache_multiple_stocks(stock_manager, args.file, args.barsize, args.info_type, args.update)
+            bar_size = args.bar_size or "1d"
+            info_type = args.info_type or "tr"
+            await cache_multiple_stocks(stock_manager, args.file, bar_size, info_type, args.update)
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:
@@ -337,26 +369,38 @@ async def main(parser: argparse.ArgumentParser):
 
 
 parser = argparse.ArgumentParser(description="Tool for caching market data on disk")
-parser.add_argument("--symbol", help="ticker symbol", required=False, default=None, type=str)
-parser.add_argument("--file", help="file containing list of ticker symbols", required=False, default=None, type=str)
-parser.add_argument("--db", help="path to database file", required=False, default=DB_PATH, type=str)
+parser.add_argument("--symbol", help="Ticker symbol", required=False, default=None, type=str)
 parser.add_argument(
-    "--barsize",
+    "--file",
+    help="File containing list of ticker symbols. Required for caching multiple tickers at once.",
+    required=False,
+    default=None,
+    type=str,
+)
+parser.add_argument("--db", help="Path to database file", required=False, default=DB_PATH, type=str)
+parser.add_argument(
+    "--bar-size",
     help="bar size, e.g. 1m, 1h, 1d, etc.",
     required=False,
-    default="1d",
+    default=None,
     type=str,
 )
 parser.add_argument(
     "--info-type",
     help="type of info, e.g. tr, iv, hv, al",
     required=False,
-    default="tr",
+    default=None,
     type=str,
 )
-parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
-parser.add_argument("--show", help="show what data is in cache", action="store_true")
-parser.add_argument("--remove", help="remove symbol from cache", action="store_true")
-parser.add_argument("--update", help="forces the getting of most recent data", action="store_true")
+parser.add_argument("--info-only", help="Don't do any scraping, just show info", action="store_true")
+parser.add_argument(
+    "--show", help="Show what data is in cache. Use --bar-size or --info-type to narrow it down.", action="store_true"
+)
+parser.add_argument("--remove", help="Remove symbol from cache. Requires --symbol.", action="store_true")
+parser.add_argument(
+    "--update",
+    help="Forces the getting of most recent data. Works when caching single or multiple stocks.",
+    action="store_true",
+)
 
 asyncio.run(main(parser))
