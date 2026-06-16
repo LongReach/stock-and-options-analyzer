@@ -149,13 +149,22 @@ class StockDataManager:
         :param end_date: data should be no newer than this date. If not given, use current datetime.
         :return: (success, error string)
         """
-        self._log(
-            f"Scraping data for {symbol}, {bar_size.name}, {info_type.name}. start_date='{start_date}', end_date='{end_date}'"
-        )
         if not self._ib_driver:
             raise StockDataException("No driver set")
 
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        # Make sure the head time is set
+        meta_data = stock_data.get_metadata()
+        _, _, _, head_dt = meta_data
+        if head_dt is None:
+            head_dt = await self._ib_driver.get_head_timestamp(symbol, info_type)
+            stock_data.head_date = head_dt
+
+        info_str = f"Scraping data for {symbol}, {bar_size.name}, {info_type.name}. start_date='{start_date}', end_date='{end_date}'"
+        if head_dt is not None:
+            info_str += f", head_timestamp='{head_dt}'"
+        self._log(info_str)
+
         if start_date == "":
             raise StockDataException("Need start date for data scraping")
         start_dt = get_datetime(start_date)
@@ -259,13 +268,17 @@ class StockDataManager:
         newest_dt = df.iloc[-1]["date"].to_pydatetime()
         newest_dt = non_naive_datetime(newest_dt)
 
+        # First, focus on obtaining data that's older than currently cached data
+
         if start_date == "":
             start_dt = None
         else:
             start_dt = get_datetime(start_date)
-            earliest_data_dt = await self._ib_driver.get_head_timestamp(symbol, info_type)
-            if earliest_data_dt is not None and start_dt < earliest_data_dt:
-                start_dt = earliest_data_dt
+            head_timestamp_dt = await self._ib_driver.get_head_timestamp(symbol, info_type)
+            if head_timestamp_dt is not None and self.is_head_timestamp_matched(start_dt, head_timestamp_dt, bar_size):
+                # The start datetime precedes the datetime of the earliest available bar offered by the broker, so
+                # adjust it to match reality.
+                start_dt = head_timestamp_dt
 
         # Scrape data that's older than already-loaded data
         if start_dt is not None and start_dt < oldest_dt:
@@ -274,6 +287,8 @@ class StockDataManager:
             )
             if not success:
                 return success, error_str
+
+        # Second, focus on obtaining data that's newer than currently cached data
 
         if end_date == "":
             end_dt = None
@@ -309,15 +324,18 @@ class StockDataManager:
 
     def get_metadata(
         self, symbol: str, bar_size: BarSize, info_type: RequestedInfoType = RequestedInfoType.TRADES
-    ) -> Optional[Tuple[int, datetime, datetime]]:
+    ) -> Optional[Tuple[int, datetime, datetime, Optional[datetime]]]:
         """
         Gets the metadata. If stock data for requested series is loaded in memory, compute metadata from that.
         If not loaded in memory, attempt to load metadata from DB.
 
+        Note on head timestamp: this is the earliest datetime for which data is available. If not knownn,
+        will be a datetime mapping to 1/1/3000.
+
         :param symbol: ticker symbol
         :param bar_size: --
         :param info_type: --
-        :return: (num bars, start date, end date) or None, if metadata not in memory and can't be loaded
+        :return: (num bars, start date, end date, head timestamp) or None, if metadata not in memory and can't be loaded
         """
         stock_data = self._get_stock_data(symbol, bar_size, info_type)
         if stock_data is not None:
@@ -349,6 +367,24 @@ class StockDataManager:
         info_type = StockData.get_info_type(parts[2])
         return symbol, bar_size, info_type
 
+    @staticmethod
+    def is_head_timestamp_matched(earliest_data_dt: datetime, head_timestamp_dt: datetime, bar_size: BarSize) -> bool:
+        """
+        Helper function for determining if the oldest data is old enough to match head timestamp (earliest
+        available data from broker). The issue is that head timestamps might not align with weekly or
+        monthly candles.
+
+        :param earliest_data_dt: datetime of earliest data available from broker
+        :param head_timestamp_dt: datetime of earliest data the caller has
+        :param bar_size: size of candle
+        :return: True if earliest data goes back far enough
+        """
+        if bar_size == BarSize.ONE_MONTH:
+            raise StockDataException("Monthly bars not supported (for now)")
+        if bar_size == BarSize.ONE_WEEK:
+            return (earliest_data_dt - head_timestamp_dt).days < 7
+        return earliest_data_dt <= head_timestamp_dt
+
     async def get_iv_rank(
         self, symbol: str, cache_only: bool = False, acceptable_recency: int = 0
     ) -> Tuple[float, float, Optional[str]]:
@@ -373,7 +409,16 @@ class StockDataManager:
             # We'll be using cached data
             self.load_data(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
 
-            if not cache_only:
+            scrape_needed = not cache_only
+            if scrape_needed:
+                # See if metadata is recent enough
+                metadata = self.get_metadata(symbol, BarSize.ONE_DAY, RequestedInfoType.IMPLIED_VOLATILITY)
+                if metadata:
+                    num_bars, start_dt, end_dt, _ = metadata
+                    if (current_datetime() - end_dt).days <= acceptable_recency:
+                        scrape_needed = False
+
+            if scrape_needed:
                 success, error_str = await self.scrape_data_smart(
                     symbol,
                     BarSize.ONE_DAY,
