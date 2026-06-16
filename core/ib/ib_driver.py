@@ -208,7 +208,7 @@ class IBDriver(IBWrapper):
         :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param num_bars: how many bars of data to collect. If not given (0), then start_date will be used to determine
         :param bar_size: daily, hourly, weekly, etc.
-        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
+        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 16:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
         :param live_data: if True, data will continue to flow in
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
@@ -217,6 +217,9 @@ class IBDriver(IBWrapper):
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
+        if bar_size == BarSize.ONE_MONTH:
+            raise IBDriverException(f"Month candles not supported for historical data request (for now)")
+
         async with self._lock:
             req_id = self._next_id()
             ticker_desc = SecurityDescriptor(symbol_full)
@@ -854,17 +857,20 @@ class IBDriver(IBWrapper):
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt
             if diff.days > 0:
-                if diff.days > 30:
+                if bar_size == BarSize.ONE_MONTH:
+                    months = int(math.ceil(diff.days / 30))
+                    duration_str = f"{months} W"
+                elif bar_size == BarSize.ONE_WEEK:
                     weeks = int(math.ceil(diff.days / 7))
                     duration_str = f"{weeks} W"
                 else:
-                    duration_str = f"{diff.days} D"
+                    if diff.days > 30:
+                        weeks = int(math.ceil(diff.days / 7))
+                        duration_str = f"{weeks} W"
+                    else:
+                        duration_str = f"{diff.days} D"
             else:
-                if bar_size == BarSize.ONE_MONTH:
-                    duration_str = f"1 M"
-                elif bar_size == BarSize.ONE_WEEK:
-                    duration_str = f"1 W"
-                elif bar_size == BarSize.ONE_DAY:
+                if bar_size == BarSize.ONE_DAY:
                     duration_str = f"1 D"
                 else:
                     duration_str = f"{diff.seconds} S"
