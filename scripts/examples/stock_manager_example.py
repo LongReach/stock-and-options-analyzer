@@ -2,6 +2,7 @@ import asyncio
 from logging import basicConfig, INFO, getLogger
 import argparse
 
+from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 
@@ -20,9 +21,9 @@ def print_df(df):
 async def main(mode: int):
     logger = getLogger(__name__)
     basicConfig(filename="test_2.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
+    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     stock_manager = StockDataManager()
-    stock_manager.add_driver(ib_driver)
+    stock_manager.add_driver(base_driver)
     stock_manager.set_db_path(TEST_DB)
     try:
         print(f"Running in mode {mode}")
@@ -103,7 +104,7 @@ async def main(mode: int):
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    ib_driver.disconnect()
+    base_driver.disconnect()
 
 
 parser = argparse.ArgumentParser(description="StockDataManager test")

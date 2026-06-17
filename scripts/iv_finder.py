@@ -9,6 +9,7 @@ from datetime import timedelta
 import traceback
 
 from core.common import RequestedInfoType
+from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockDataException
@@ -302,15 +303,15 @@ async def main(parser: ArgumentParser):
     basicConfig(filename="iv_finder.log", level=INFO)
     stock_manager = StockDataManager()
     stock_manager.set_db_path(DB_PATH)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
-    success = stock_manager.add_driver(ib_driver)
+    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+    success = stock_manager.add_driver(base_driver)
     if not success:
         print("Error connecting to broker data")
         return
     stock_manager.set_log_to_stdout(True)
 
     options_manager = OptionDataManager()
-    options_manager.add_driver(ib_driver)
+    options_manager.add_driver(base_driver)
 
     try:
         if args.above >= 0:
@@ -345,8 +346,8 @@ async def main(parser: ArgumentParser):
         print(f"Got exception: {ex}")
         print(traceback.format_exc())
 
-    if ib_driver:
-        ib_driver.disconnect()
+    if base_driver:
+        base_driver.disconnect()
 
 
 parser = ArgumentParser(description="Tool for finding high or low IV stocks")

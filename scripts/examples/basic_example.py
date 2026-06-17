@@ -2,6 +2,7 @@ import asyncio
 from logging import basicConfig, INFO, getLogger
 
 from core.common import HistoricalData
+from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.utils import get_datetime_as_str
 
@@ -21,26 +22,26 @@ def print_historical_data(bars: HistoricalData):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
+    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     try:
-        ib_driver.connect()
+        base_driver.connect()
 
-        head_timestamp_dt = await ib_driver.get_head_timestamp("SPY")
+        head_timestamp_dt = await base_driver.get_head_timestamp("SPY")
         if not head_timestamp_dt:
             print("Couldn't find head timestamp for SPY")
         else:
             print(f"Head timestamp for SPY is {get_datetime_as_str(head_timestamp_dt)}")
 
-        results, error_str = await ib_driver.get_historical_data("SPY", num_bars=10)
+        results, error_str = await base_driver.get_historical_data("SPY", num_bars=10)
         print("Daily bars for SPY are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR)
+        results, error_str = await base_driver.get_historical_data("AAPL", num_bars=32, bar_size=BarSize.ONE_HOUR)
         print("Hourly bars for AAPL are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data("DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS)
+        results, error_str = await base_driver.get_historical_data("DIA", num_bars=32, bar_size=BarSize.FOUR_HOURS)
         print("Four-hour bars for DIA are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
+        results, error_str = await base_driver.get_historical_data(
             "GLD",
             num_bars=4,
             bar_size=BarSize.ONE_DAY,
@@ -48,7 +49,7 @@ async def main():
         )
         print("Daily bars for GLD are\n------------------------")
         print_historical_data(results)
-        results, error_str = await ib_driver.get_historical_data(
+        results, error_str = await base_driver.get_historical_data(
             "TLT",
             bar_size=BarSize.ONE_DAY,
             end_date="20250404 16:00:00 US/Eastern",
@@ -59,7 +60,7 @@ async def main():
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    ib_driver.disconnect()
+    base_driver.disconnect()
 
 
 asyncio.run(main())
