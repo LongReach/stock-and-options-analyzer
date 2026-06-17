@@ -31,22 +31,22 @@ class StockDataManager:
 
     def __init__(self):
         self._data_map: Dict[Tuple[str, BarSize, RequestedInfoType], StockData] = {}
-        self._base_driver: Optional[BaseDriver] = None
+        self._data_driver: Optional[BaseDriver] = None
         self._log_to_stdout = False
         self._db_path: str = DB_PATH
 
         self._map_lock: Lock = Lock()  # Controls access to self._data_map
         self._cache_lock: Lock = Lock()  # Controls access to the cache DB
 
-    def add_driver(self, base_driver: BaseDriver) -> bool:
+    def add_driver(self, data_driver: BaseDriver) -> bool:
         """Adds driver for connecting to brokerage, returns True if connection successful"""
-        self._base_driver = base_driver
-        self._base_driver.connect()
-        return self._base_driver.is_connected()
+        self._data_driver = data_driver
+        self._data_driver.connect()
+        return self._data_driver.is_connected()
 
     @property
     def driver(self) -> Optional[BaseDriver]:
-        return self._base_driver
+        return self._data_driver
 
     def set_log_to_stdout(self, to_stdout: bool):
         self._log_to_stdout = to_stdout
@@ -149,7 +149,7 @@ class StockDataManager:
         :param end_date: data should be no newer than this date. If not given, use current datetime.
         :return: (success, error string)
         """
-        if not self._base_driver:
+        if not self._data_driver:
             raise StockDataException("No driver set")
 
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
@@ -157,7 +157,7 @@ class StockDataManager:
         meta_data = stock_data.get_metadata()
         _, _, _, head_dt = meta_data
         if head_dt is None:
-            head_dt = await self._base_driver.get_head_timestamp(symbol, info_type)
+            head_dt = await self._data_driver.get_head_timestamp(symbol, info_type)
             stock_data.head_date = head_dt
 
         info_str = f"Scraping data for {symbol}, {bar_size.name}, {info_type.name}. start_date='{start_date}', end_date='{end_date}'"
@@ -200,7 +200,7 @@ class StockDataManager:
                 # exchanges = [None, "NYSE", "NASDAQ"]
                 exchanges = [None]
                 for primary_ex in exchanges:
-                    _historical_data, _error_str = await self._base_driver.get_historical_data(
+                    _historical_data, _error_str = await self._data_driver.get_historical_data(
                         stock_data.symbol,
                         bar_size=stock_data.bar_size,
                         start_date=current_start_dt,
@@ -274,7 +274,7 @@ class StockDataManager:
             start_dt = None
         else:
             start_dt = get_datetime(start_date)
-            head_timestamp_dt = await self._base_driver.get_head_timestamp(symbol, info_type)
+            head_timestamp_dt = await self._data_driver.get_head_timestamp(symbol, info_type)
             if head_timestamp_dt is not None and self.is_head_timestamp_matched(start_dt, head_timestamp_dt, bar_size):
                 # The start datetime precedes the datetime of the earliest available bar offered by the broker, so
                 # adjust it to match reality.

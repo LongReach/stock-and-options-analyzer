@@ -17,21 +17,21 @@ CLIENT_ID = 19
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="guided_missile.log", level=INFO)
-    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
 
     try:
-        base_driver.connect()
+        data_driver.connect()
     except Exception as ex:
         print(f"Exception: {ex}")
         return
 
-    guided_missile_app = GuidedMissile(base_driver)
+    guided_missile_app = GuidedMissile(data_driver)
     task1 = asyncio.create_task(guided_missile_app.run_loop())
     task2 = asyncio.create_task(guided_missile_app.input_loop())
 
     await asyncio.gather(task1, task2)
 
-    base_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

@@ -42,7 +42,7 @@ class GuidedMissile:
     STARTING_CASH = 500000.0
 
     def __init__(self, base_driver: BaseDriver):
-        self._base_driver = base_driver
+        self._data_driver = base_driver
         self._position_manager = PositionManager(base_driver, self.STARTING_CASH)
 
         # Maps commands as entered by user to enum
