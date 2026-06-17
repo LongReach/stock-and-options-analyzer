@@ -4,6 +4,7 @@ from logging import basicConfig, INFO, getLogger
 # module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'core'))
 # sys.path.append(module_path)
 
+from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver
 from core.option_data_manager import OptionDataManager
 
@@ -29,12 +30,12 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
+    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     try:
-        ib_driver.connect()
+        base_driver.connect()
         await asyncio.sleep(1.0)
         options_manager = OptionDataManager()
-        options_manager.add_driver(ib_driver)
+        options_manager.add_driver(base_driver)
 
         print(f"Getting expirations for {TICKER}...")
         expirations = await options_manager.get_expirations(TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY)
@@ -72,7 +73,7 @@ async def main():
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    ib_driver.disconnect()
+    base_driver.disconnect()
 
 
 asyncio.run(main())

@@ -10,6 +10,7 @@ import argparse
 import traceback
 
 from core.common import RequestedInfoType
+from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
@@ -129,7 +130,7 @@ async def show_cache_contents(stock_manager: StockDataManager, bar_size_str: str
     match_info_type = StockData.get_info_type(info_type_str) if info_type_str else None
 
     stock_manager.set_log_to_stdout(False)
-    ib_driver: Optional[IBDriver] = stock_manager.driver
+    base_driver: Optional[BaseDriver] = stock_manager.driver
     keys: List[str] = stock_manager.get_cached_keys()
     print("Cache contents\n======================================")
     for key in keys:
@@ -249,7 +250,7 @@ async def cache_multiple_stocks(
     for symbol in symbols:
         metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
         num_bars = 0
-        if metadata is not None and not force_update:
+        if metadata is not None:
             current_dt = current_datetime()
             num_bars, earliest_dt, latest_dt, head_dt = metadata
             bars_missing_until_now = get_bars_between_times(latest_dt, current_dt, bar_size)
@@ -334,10 +335,10 @@ async def main(parser: argparse.ArgumentParser):
     logger = getLogger(__name__)
     basicConfig(filename="cache_data.log", level=INFO)
     stock_manager = StockDataManager()
-    ib_driver = None
+    base_driver: Optional[BaseDriver] = None
     if not args.info_only:
-        ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
-        success = stock_manager.add_driver(ib_driver)
+        base_driver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+        success = stock_manager.add_driver(base_driver)
         if not success:
             print("Error connecting to broker data")
             return
@@ -364,8 +365,8 @@ async def main(parser: argparse.ArgumentParser):
         print(f"Got exception: {ex}")
         print(traceback.format_exc())
 
-    if ib_driver:
-        ib_driver.disconnect()
+    if base_driver:
+        base_driver.disconnect()
 
 
 parser = argparse.ArgumentParser(description="Tool for caching market data on disk")

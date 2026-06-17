@@ -47,6 +47,7 @@ from core.ib.ib_driver_requests import (
     OrderRequest,
     PositionsRequest,
 )
+from core.base_driver import BaseDriver
 from core.ib.ib_wrapper import IBWrapper, CallbackID
 
 GATEWAY_LIVE_PORT = 4001
@@ -60,7 +61,7 @@ ORDER_DATA_TIMEOUT = 30.0
 POSITIONS_DATA_TIMEOUT = 30.0
 
 
-class IBDriver(IBWrapper):
+class IBDriver(IBWrapper, BaseDriver):
     """
     This class wraps the Interactive Brokers API, providing an async interface that's more intuitive and easier
     to use. It hides the threaded-ness of EClient and the need for callers to think about IB's callback-based communication
@@ -140,6 +141,11 @@ class IBDriver(IBWrapper):
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
 
         self._logger = getLogger(__file__)
+
+    @staticmethod
+    def create(sim_account: bool, client_id: int = 0, gateway_connection: bool = True) -> "BaseDriver":
+        """Factory method that creates and returns an IBDriver instance as a BaseDriver reference."""
+        return IBDriver(sim_account, client_id, gateway_connection)
 
     def connect(self) -> bool:
         """Attempts to connect to TWS. Returns True if successful."""
