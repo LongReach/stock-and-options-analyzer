@@ -30,12 +30,12 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     try:
-        base_driver.connect()
+        data_driver.connect()
         await asyncio.sleep(1.0)
         options_manager = OptionDataManager()
-        options_manager.add_driver(base_driver)
+        options_manager.add_driver(data_driver)
 
         print(f"Getting expirations for {TICKER}...")
         expirations = await options_manager.get_expirations(TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY)
@@ -73,7 +73,7 @@ async def main():
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    base_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

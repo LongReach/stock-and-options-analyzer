@@ -40,11 +40,11 @@ async def wait_for_keypress(stop_event: asyncio.Event):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="live_data_test.log", level=INFO)
-    base_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY)
     try:
-        base_driver.connect()
+        data_driver.connect()
 
-        price_data_five, error_str = await base_driver.get_historical_data(
+        price_data_five, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -54,7 +54,7 @@ async def main():
         print(f"Five minute bars for {TICKER} (trades) are\n------------------------")
         print_historical_data(price_data_five)
 
-        iv_data, error_str = await base_driver.get_historical_data(
+        iv_data, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -64,7 +64,7 @@ async def main():
         print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
         print_historical_data(iv_data)
 
-        hv_data, error_str = await base_driver.get_historical_data(
+        hv_data, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -74,7 +74,7 @@ async def main():
         print(f"One day bars for {TICKER} (historical volatility) are\n------------------------")
         print_historical_data(hv_data)
 
-        price_data_two, error_str = await base_driver.get_historical_data(
+        price_data_two, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=True,
@@ -93,7 +93,7 @@ async def main():
 
     await asyncio.gather(task1, task2)
 
-    base_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

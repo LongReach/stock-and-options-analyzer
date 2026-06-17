@@ -27,13 +27,13 @@ class OptionDataManager:
 
     def __init__(self):
         self._logger = logging.getLogger(__name__)
-        self._base_driver: Optional[BaseDriver] = None
+        self._data_driver: Optional[BaseDriver] = None
         self._opt_info_cache: TTLCache[OptionInfo] = TTLCache(maxsize=100, ttl=120.0)
 
-    def add_driver(self, base_driver: BaseDriver):
-        self._base_driver = base_driver
-        if not base_driver.is_connected():
-            self._base_driver.connect()
+    def add_driver(self, data_driver: BaseDriver):
+        self._data_driver = data_driver
+        if not data_driver.is_connected():
+            self._data_driver.connect()
 
     async def get_expirations(self, ticker: str, min_days_away: int, max_days_away: int) -> List[str]:
         """
@@ -47,7 +47,7 @@ class OptionDataManager:
             f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
         )
         # This is the CD for the stock, not any option
-        options_chain_info, error_str = await self._base_driver.get_options_chain_info(ticker, primary_exchange=None)
+        options_chain_info, error_str = await self._data_driver.get_options_chain_info(ticker, primary_exchange=None)
         if error_str:
             raise OptionDataException(error_str)
 
@@ -91,7 +91,7 @@ class OptionDataManager:
             info_str += f", num_above={num_above}"
         self._logger.info(info_str)
 
-        option_info_list, error_str = await self._base_driver.get_option_info(
+        option_info_list, error_str = await self._data_driver.get_option_info(
             ticker,
             is_call=(right == "C"),
             expiration=expiration,
@@ -183,7 +183,7 @@ class OptionDataManager:
         option_info_list: List[OptionInfo] = []
 
         for single_strike in strike_list:
-            temp_list, error_str = await self._base_driver.get_option_info(
+            temp_list, error_str = await self._data_driver.get_option_info(
                 ticker,
                 is_call=(right == "C"),
                 expiration=expiration,
@@ -242,13 +242,13 @@ class OptionDataManager:
         if cached_oi is not None:
             return cached_oi
 
-        option_info, error_msg = await self._base_driver.get_option_info_single(
+        option_info, error_msg = await self._data_driver.get_option_info_single(
             ticker=ticker, expiration=expiration, strike=strike, is_call=(right == "C")
         )
         if error_msg is not None:
             raise OptionDataException(f"Could not get option info: {error_msg}")
 
-        option_info, error_msg = await self._base_driver.get_greeks(option_info)
+        option_info, error_msg = await self._data_driver.get_greeks(option_info)
         if error_msg is not None:
             raise OptionDataException(f"Could not get Greeks: {error_msg}")
 
@@ -330,7 +330,7 @@ class OptionDataManager:
 
     async def _get_underlying_price(self, ticker: str, bar_size: BarSize = BarSize.ONE_MINUTE):
         """Get the latest trading price (within a minute by default) for ticker"""
-        ret_tup, error_str = await self._base_driver.get_most_recent_data(ticker, bar_size)
+        ret_tup, error_str = await self._data_driver.get_most_recent_data(ticker, bar_size)
         if not ret_tup or error_str:
             raise OptionDataException(f"Couldn't get underlying price, error is: {error_str}")
         underlying_price = ret_tup[0]["close"]
@@ -408,7 +408,7 @@ class OptionDataManager:
                 if not _test_for_ignorable(option_info):
                     task_name = option_info.full_name
                     self._logger.debug(f"Creating retrieval task for {task_name}")
-                    task = asyncio.create_task(self._base_driver.get_greeks(option_info), name=task_name)
+                    task = asyncio.create_task(self._data_driver.get_greeks(option_info), name=task_name)
                     task_queue.append(task)
                 current_idx += 1
 
