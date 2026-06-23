@@ -9,12 +9,12 @@ from datetime import timedelta
 import argparse
 import traceback
 
-from core.common import RequestedInfoType
+from core.common import RequestedInfoType, ScrapeLevel
 from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
-from core.utils import str_to_bar_size, get_datetime_as_str, current_datetime, get_bars_between_times
+from core.utils import str_to_bar_size, get_datetime_as_str, current_datetime, get_bars_between_times, bar_size_to_time
 
 """
 Utility for collecting price (or other) data for a particular security, in bar form, then caching it to disk.
@@ -43,7 +43,7 @@ python -m scripts.cache_data --db .\data\iv_data.h5 --info-type iv --show
 
 CLIENT_ID = 13
 DB_PATH = "data/market_data.h5"
-NUM_ACCEPTABLE_BARS = 50
+NUM_ACCEPTABLE_BARS = 200
 GENERAL_ACCEPTABLE_RECENCY = {
     BarSize.ONE_MINUTE: 1,
     BarSize.TWO_MINUTES: 1,
@@ -56,14 +56,6 @@ GENERAL_ACCEPTABLE_RECENCY = {
     BarSize.ONE_MONTH: 1,
 }
 MAX_ERRORS_ALLOWED = 10
-
-
-class ScrapeLevel(IntEnum):
-    """Specifies level of scraping to do"""
-
-    FULL = 0  # both old data and recent data
-    RECENT = 1  # recent data only
-    NONE = 2  # don't scrape any data
 
 
 def print_df(df):
@@ -90,14 +82,13 @@ async def do_cache(
     :param symbol: stock or ETF ticker, e.g. SPY
     :param bar_size: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type: type of chart data, e.g. trades or implied volatility
-    :param scrape_level: full, recent, or none
+    :param scrape_level: full, limited, recent, or none
     :return:
     """
     if scrape_level == ScrapeLevel.FULL:
-        if info_type == RequestedInfoType.IMPLIED_VOLATILITY:
-            start_date = get_datetime_as_str(current_datetime() - timedelta(days=365), date_only=True)
-        else:
-            start_date = "19700101"
+        start_date = "19700101"
+    elif scrape_level == ScrapeLevel.LIMITED:
+        start_date = get_datetime_as_str(current_datetime() - bar_size_to_time(bar_size) * 200, date_only=True)
     else:
         start_date = ""
 
@@ -170,6 +161,7 @@ async def cache_single_stock(
     info_type_str: str,
     info_only: bool,
     force_update: bool,
+    limited_scrape: bool,
 ):
     """
     Scrapes and caches data for a single stock or ETF.
@@ -179,6 +171,7 @@ async def cache_single_stock(
     :param info_type_str: type of chart data, e.g. trades or implied volatility
     :param info_only: if True, no scraping will be performed
     :param force_update: force the scraping of most recent data
+    :param limited_scrape: if True, only scrape about 200 bars into past
     :return:
     """
     bar_size = str_to_bar_size(bar_size_str)
@@ -198,13 +191,13 @@ async def cache_single_stock(
     else:
         print(f"No metadata for {symbol}, {bar_size_str}")
 
-    df, error_str = await do_cache(
-        stock_manager,
-        symbol,
-        bar_size,
-        info_type,
-        scrape_level=(ScrapeLevel.NONE if (info_only and not force_update) else ScrapeLevel.FULL),
-    )
+    scrape_level = ScrapeLevel.FULL
+    if info_only and not force_update:
+        scrape_level = ScrapeLevel.NONE
+    elif limited_scrape:
+        scrape_level = ScrapeLevel.LIMITED
+
+    df, error_str = await do_cache(stock_manager, symbol, bar_size, info_type, scrape_level=scrape_level)
     if df is not None:
         print_df(df)
     if error_str:
@@ -213,7 +206,12 @@ async def cache_single_stock(
 
 
 async def cache_multiple_stocks(
-    stock_manager: StockDataManager, file_path: str, bar_size_str: str, info_type_str: str, force_update: bool
+    stock_manager: StockDataManager,
+    file_path: str,
+    bar_size_str: str,
+    info_type_str: str,
+    force_update: bool,
+    limited_scrape: bool,
 ):
     """
     Scrapes and caches data for a single stock or ETF.
@@ -222,6 +220,7 @@ async def cache_multiple_stocks(
     :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type_str: type of chart data, e.g. trades or implied volatility
     :param force_update: force the scraping of most recent data
+    :param limited_scrape: only scrape 200 bars into the past
     :return:
     """
     bar_size = str_to_bar_size(bar_size_str)
@@ -256,7 +255,7 @@ async def cache_multiple_stocks(
             bars_missing_until_now = get_bars_between_times(latest_dt, current_dt, bar_size)
             # If we don't have a head timestamp, we should scrape
             if head_dt is not None:
-                if info_type == RequestedInfoType.IMPLIED_VOLATILITY:
+                if limited_scrape:
                     if num_bars >= NUM_ACCEPTABLE_BARS and bars_missing_until_now <= acceptable_recency:
                         # No need to cache. Data is fresh enough
                         print(
@@ -277,7 +276,7 @@ async def cache_multiple_stocks(
                             f"Need data scrape for {symbol}. Head timestamp matched: {StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size)}, data recency {bars_missing_until_now}."
                         )
 
-        scrape_level = ScrapeLevel.FULL
+        scrape_level = ScrapeLevel.LIMITED if limited_scrape else ScrapeLevel.FULL
         if force_update and num_bars >= NUM_ACCEPTABLE_BARS:
             scrape_level = ScrapeLevel.RECENT
 
@@ -354,11 +353,13 @@ async def main(parser: argparse.ArgumentParser):
             if args.remove:
                 await remove_single_stock(stock_manager, args.symbol, bar_size, info_type)
             else:
-                await cache_single_stock(stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update)
+                await cache_single_stock(
+                    stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update, args.limited
+                )
         elif args.file:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
-            await cache_multiple_stocks(stock_manager, args.file, bar_size, info_type, args.update)
+            await cache_multiple_stocks(stock_manager, args.file, bar_size, info_type, args.update, args.limited)
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:
@@ -403,5 +404,6 @@ parser.add_argument(
     help="Forces the getting of most recent data. Works when caching single or multiple stocks.",
     action="store_true",
 )
+parser.add_argument("--limited", help="Perform limited scrape, going only 200 bars into past", action="store_true")
 
 asyncio.run(main(parser))
