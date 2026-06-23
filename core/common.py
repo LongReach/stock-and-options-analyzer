@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Optional, Set, Any, Self
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum, auto, IntEnum
 from threading import Lock
 from logging import getLogger
 from ibapi.common import BarData
@@ -85,6 +85,15 @@ class OrderPurpose:
     ENTRY = auto()
     STOP_LOSS = auto()
     TAKE_PROFIT = auto()
+
+
+class ScrapeLevel(IntEnum):
+    """Specifies level of scraping to do"""
+
+    FULL = 0  # both old data and recent data
+    LIMITED = 1  # recent data and data going back only a few hundred bars
+    RECENT = 2  # recent data only
+    NONE = 3  # don't scrape any data
 
 
 class SecurityDescriptor:
