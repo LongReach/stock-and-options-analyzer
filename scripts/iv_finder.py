@@ -8,17 +8,12 @@ import pandas
 from datetime import timedelta
 import traceback
 
-from core.common import RequestedInfoType
+from core.common import RequestedInfoType, ScrapeLevel
 from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockDataException
-from core.utils import (
-    get_datetime,
-    get_datetime_as_str,
-    current_datetime,
-    calculate_expected_move,
-)
+from core.utils import get_datetime, get_datetime_as_str, current_datetime, calculate_expected_move, bar_size_to_time
 from core.option_data_manager import OptionDataManager
 
 """
@@ -34,65 +29,8 @@ python -m scripts.iv_finder --help
 
 CLIENT_ID = 20
 DB_PATH = "data/iv_data.h5"
-NUM_ACCEPTABLE_BARS = 50
+NUM_ACCEPTABLE_BARS = 200
 ACCEPTABLE_RECENCY = 2
-
-
-class ScrapeLevel(IntEnum):
-    """Specifies level of scraping to do"""
-
-    FULL = 0  # both old data and recent data
-    RECENT = 1  # recent data only
-    NONE = 2  # don't scrape any data
-
-
-async def do_cache(
-    stock_manager: StockDataManager,
-    symbol: str,
-    bar_size: BarSize,
-    info_type: RequestedInfoType,
-    scrape_level: ScrapeLevel = ScrapeLevel.FULL,
-) -> Tuple[Optional[pandas.DataFrame], Optional[str]]:
-    """
-    Scrapes and caches data for a single stock or ETF.
-    :param stock_manager:  --
-    :param symbol: stock or ETF ticker, e.g. SPY
-    :param bar_size: timeframe of data, e.g. 1 day, 1 minute, etc.
-    :param info_type: type of chart data, e.g. trades or implied volatility
-    :param scrape_level: indicates how much data should be scraped. It can be helpful to do no scraping when
-        the broker is being unresponsive.
-    :return:
-    """
-    if scrape_level in [ScrapeLevel.NONE, ScrapeLevel.RECENT]:
-        start_date = ""
-    else:
-        start_date = get_datetime_as_str(current_datetime() - timedelta(days=365), date_only=True)
-
-    df = None
-    error_msg: Optional[str] = None
-    try:
-        # We'll be using cached data
-        stock_manager.load_data(symbol, bar_size, info_type)
-
-        if scrape_level != ScrapeLevel.NONE:
-            success, error_str = await stock_manager.scrape_data_smart(
-                symbol, bar_size, info_type, start_date=start_date, update_recent=True
-            )
-            if not success:
-                error_msg = error_str
-            stock_manager.save_data(symbol, bar_size, info_type)
-        df = stock_manager.get_pandas_df(symbol, bar_size, info_type)
-        stock_manager.unload_data(symbol, bar_size, info_type)
-    except KeyboardInterrupt:
-        raise
-    except StockDataException as ex:
-        return None, f"StockDataException {ex}"
-    except Exception as ex:
-        print(f"Exception: {ex}")
-        print(traceback.format_exc())
-        error_msg = f"Exception: {error_msg}"
-
-    return df, error_msg
 
 
 def calculate_iv_rank(df: pandas.DataFrame) -> Tuple[float, float]:
