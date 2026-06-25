@@ -8,6 +8,7 @@
 * [For Potential Employers](#for-potential-employers)
 * [Description](#description)
 * [Design Inspirations](#design-inspirations)
+  + [Why didn't I use existing third-party wrappers?](#why-didnt-i-use-existing-third-party-wrappers)
   + [Repackaging as pandas dataframes](#repackaging-as-pandas-dataframes)
 * [Warning!](#warning)
 * [Setup](#setup)
@@ -31,11 +32,11 @@ See [this page](./docs/ForPotentialEmployers.md)
 
 ## Description
 
-This is a suite of tools and code modules for interacting with [Interactive Brokers](https://www.interactivebrokers.com/), abstracting away the challenges of dealing with its often unintuitive API. Data about specific stocks/ETFs and options contracts can be collected as "clean" representations. There is also code for placing stock, ETF, or options orders and keeping track of current positions held within the user's brokerage account.
+Central to this project, found in the `core/` folder, is a set of `async` libraries that wrap the APIs of several different brokerages. Or will -- currently, [Interactive Brokers](https://www.interactivebrokers.com/) is the only one supported, but Schwab will soon be included, too. Broker-specific details are kept hidden from library users, who can receive stock/options data or send orders in a "clean", generic form, via a readily understandable interface. It's a bit more than a light wrapper. The user experience will be more or less the same regardless of which brokerage is being used, and that layer can easily be swapped at runtime, as long as the user performs the required setup of "gateway" software provided by the brokerage. 
 
-The point of this whole framework is to simplify the creation of automated and semi-automated trading systems. Data is collected in a form that can easily be fed to machine-learning applications. 
+Users can also find `StockDataManager` and `OptionDataManager`, classes that simplify the collection and management of stock and options data, respectively. `StockDataManager` provides an immense performance boost, in that it caches data scraped from a brokerage locally, so that it can be retrieved more quickly in the future. It would be difficult to develop machine learning applications without this feature. Interactive Brokers, in particular, can be slow and temperamental about returning historical data. Indeed, data throttling seems to be a common practice at all major brokerages. 
 
-Another design feature here is that Interactive Brokers-specific details are kept separate from other code, hidden within their own wrapper. It wouldn't be difficult to swap out the Interactive Brokers layer altogether, replacing it with one that talks to some other brokerage. Thus, the user would be able to use these tools with their own choice of broker, not having to think about the implementation details.
+Elsewhere in this repository -- see [scripts/](./scripts/README.md) -- are several tools and applications that make use of the core libraries.
 
 ## Design Inspirations
 
@@ -43,7 +44,17 @@ At an earlier time, I'd created some software that pulled stock market data from
 
 It seemed smarter to get data from a paid source, rather than a free one. Could I use an API provided by a brokerage I already had an account with? The answer was yes and the obvious choice was [Interactive Brokers](https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#api-introduction). For one thing, they offer a paper-trading account, so you can test out strategies "live", but in a simulated environment. For another, you can obtain historical data for specific options contracts, which you can't really do with Yahoo.
 
-Third, back in 2020, I had already written some daytrading software that communicated with Interactive Brokers' popular trading platform, Trader Workstation. The software both gathered market data and opened/closed actual positions. Here in 2025/2026, I decided to do something similar again, except via the lightweight "Gateway" bridge. Interactive Brokers doesn't have the most user-friendly Python API, but it's very powerful and provides access to pretty much any market data I could possibly want. Since I have a funded account with IB, I don't have to worry about them blocking access or breaking a third party library, as was a constant concern with Yahoo.
+Third, back in 2020, I had already written some day trading software that communicated with Interactive Brokers' popular trading platform, Trader Workstation. The software both gathered market data and opened/closed actual positions. Here in 2025/2026, I decided to do something similar again, except via the lightweight "Gateway" bridge. Interactive Brokers doesn't have the most user-friendly Python API, but it's very powerful and provides access to pretty much any market data I could possibly want. 
+
+### Why didn't I use existing third-party wrappers?
+
+For Interactive Brokers, `ib_async` is a well-regarded third-party wrapper.
+
+A few reasons I didn't use it:
+* After my experience with `yfinance`, I distrusted third-party wrappers not officially supported by brokerages. I like having direct control.
+* This was initially a do-it-myself project with limited scope. I simply didn't need a full-featured wrapper for IB's API. Plus, I had already written a basic wrapper of my own, several years before `ib_async` came into being, so I modernized and adapted that.
+* As the project grew beyond its original scope, I decided to stick with my own library. `ib_async` exposes a bit too much of IB's implementation details for my liking, though this is perfectly natural for a thin wrapper. I wanted my interface to be more broker-agnostic. And I didn't want to have to write a wrapper around a wrapper -- better to just wrap the IB's API directly.
+* I preferred my own approach to dealing with options contracts.
 
 ### Repackaging as pandas dataframes
 
@@ -59,7 +70,9 @@ If you want to trade stocks or options, it's a good idea to practice with a pape
 
 ## Setup
 
-Obviously, you have to have an Interactive Brokers account to use this software. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite.
+_(Note to self: some of this is a bit too basic for a README. Clean it up later.)_
+
+Obviously, you have to have an Interactive Brokers account to use this software -- at least until another brokerage is supported. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite.
 
 I created a `conda` environment for this project. First step was to install the Interactive Brokers API, as detailed in their [online guide](https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/). Once I ran `python setup.py install`, the Python packages were installed in my environment. I suppose you can use `venv`, if you prefer that.
 
