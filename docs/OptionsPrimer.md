@@ -47,7 +47,7 @@ The options market exists because options offer tremendous flexibility compared 
 
 An option has both _instrinsic_ and _extrinsic_ value. "Extrinsic" value is essentially the "premium" that the option buyer pays for their "insurance policy" or "lottery ticket". If you're worried that XYZ's stock might lose value in the near future, you can buy a put option to insure it. Later, if your worry subsides, you can sell the put back, but it will have lost some of its extrinsic value. Indeed, it might have lost a significant chunk of it, as market participants might now collectively see the danger window as having passed. As time moves towards the expiration date of the option, extrinsic value will decay down to zero. Option _sellers_ often hope to profit from this decay. The extrinsic value of an option is determined by the options market and can change over time, though the eventual decay to zero is inevitable.
 
-Intrinsic value, when added to extrinsic value, computes to the option's actual market price. This value reflects where the stock's price currently sits in relation to the option's strike price, or how "in the money" the option is. For example, if XYZ is trading at $110 then the intrinsic value of a $105 strike call contract will be $500. Meanwhile, a call contract whose value is $110 or above will have an extrinsic value of zero.
+Intrinsic value, when added to extrinsic value, computes to the option's actual market price. This value reflects where the stock's price currently sits in relation to the option's strike price, or how "in the money" the option is. For example, if XYZ is trading at $110 then the intrinsic value of a $105 strike call contract will be $500. Meanwhile, a call contract whose value is $110 or above will have an intrinsic value of zero.
 
 Buyers of options contracts typically hope that gains in intrinsic value will outstrip losses in extrinsic. Sellers, meanwhile, usually hope for the reverse. 
 
@@ -67,7 +67,16 @@ Options marked in blue are "in the money". Their strike price is lower than the 
 
 The put option chain, meanwhile, is roughly a mirror imagine of the call chain. In-the-money puts have a strike _ABOVE_ AAPL's last trade price, out-of-the-money ones strikes below it.
 
-### Options from the Buyer's Perspective
+### Profit and Loss -- the Basics
+
+![](../images/ProfitLossDiagrams.png)    
+`Profit-loss (payoff) diagrams`
+
+Consider the diagrams for the long call and long put, for buying a call option and a put option, respectively. The x-axis maps to the price of the underlying stock, with `X` being the chosen strike price. These diagrams show the payout at expiration time. Notice how the underlying stock price needs to move a bit past the strike price of X for profit to occur. This reflects the deduction of the cost of the option itself. Potential loss is limited while potential gain is theoretically unlimited (key word: "theoretically" -- in a reality, an enormous gain is a statistically unlikely tail event).
+
+The short call and short put diagrams show the potential payouts for sold call and put options. The opposite relationship to long puts and calls applies, in that potential gains are limited while potential losses are unlimited. In reality, a wisely-chosen short position has a high probability of profit.
+
+#### Options from the Buyer's Perspective
 
 There are two basic things a buyer of a single option can do:
 1. Take a virtual long or short position in the underlying stock
@@ -75,21 +84,30 @@ There are two basic things a buyer of a single option can do:
 
 To explain 1), instead of buying 100 shares of AAPL, which last traded at ~$284, you might simply buy a single deep-in-the-money call contract, with a far-off expiration date, such as December, 2026 (six months from the current date of June 27, 2026). Now, instead of spending $28,400 on AAPL, you've spent only a few thousand dollars on your contract, which moves almost as 100 shares of AAPL would. That is, if 100 shares of AAPL go up by $500, your call contract will, too. If those shares lose $500 of value, your call contract will, too. Due to the contract being deep in the money, with a distant expiration date, decay of extrinsic value won't be too much of an issue in the near future. (This will be better explained later.)
 
+![](../images/AAPLPayout1.png)     
+`Payout diagram for a December, 2026 call, strike of 245. Current AAPL trade price, as of 6/28/26, is ~284. The blue lines indicate potential payouts in December. The pink curve, however, shows an estimate of what the profit-loss curve will be a few days from now, on 7/2/26. As time passes, the pink curve will morph into the blue one, indicating the effect of time decay.`
+
 As for 2), you could also buy call options with a $310 (out-of-the-money) strike and a relatively near expiration date, such as July 17, 2026. This will be much cheaper than following path 1) above. However, there won't be any profit unless AAPL makes a STRONG and FAST move and gets above $310 by expiration. Though this is a low probability event, you'll be paid quite handsomely if the strong, fast move does materialize.
+
+![](../images/AAPLPayout2.png)     
+`Payout diagram for a July 17, 2026 310 strike call. Again, current date is 6/28/26. As you can see, profit potential relative to risk is enormous, though the current odds of AAPL's price surpassing 310 by 7/17/26 are quite low. Again, the pink curve is for 7/2/26. If AAPL makes a strong bull move next week, it can still be quite profitable. This is one illustration of why insider trading is illegal.`
 
 Think of puts as going in a bearish direction. You buy them expecting the underlying stock to drop. As with calls, you could either do a virtual short position, buy lottery tickets, or position yourself somewhere in between.
 
-### Options from the Seller's Perspective
+#### Options from the Seller's Perspective
 
 The seller has pretty much the mirror set of choices from those I outlined for the buyer:
 1. Take the opposite side of the trade from the person taking a virtual long/short position
 2. Sell lottery tickets (or insurance policies)
 
-If you sell a far out-of-the-money put option for AAPL, say one with a strike price of $230 while the stock is currently trading at $284, the odds of making a small profit from your option sale are pretty high. _HOWEVER_, if AAPL sees a huge decline in the next few weeks (from the date of writing this), you can lose quite a lot, much more than the profit you might have made.
+If you sell an out-of-the-money put option for AAPL, say an August 21 250 strike put, while the stock is currently trading at $284, the odds of making a small profit from your option sale are pretty high. _HOWEVER_, if AAPL sees a huge decline in the next few weeks (from the date of writing this), you can lose quite a lot, much more than the profit you might have made.
+
+![](../images/AAPLPayout3.png)     
+`Payout diagram for sold 8/21/26 250 strike AAPL put option. The 250 strike put has a delta of .17. As long as AAPL's price is above 247.50 at expiration time, you'll have made a profit. If price drops below that, you might get assigned, i.e. be compelled to purchase 100 shares of AAPL for $250, but there are worse stocks to own. Eventually, it'll go up again, unless something crazy happens in the world. Note that rough odds of AAPL's price dropping below 250 are currently about 17% -- read further into this document to learn more about that.`
 
 The main argument *FOR* selling options is time decay, also called theta decay. If the stock remains at the same price until expiration (which seldom happens, of course), the option becomes cheaper and cheaper to buy back. Hopefully for the seller, the decay will offset any moves made by the stock. Options sellers often practice a sophisticated technique called "delta hedging", which permits them to enjoy the fruits of time decay, while not being too affected by relatively small stock moves.
 
-#### A Note on "Naked" Options
+##### A Note on "Naked" Options
 
 Your broker won't allow you to sell a put option unless you have the money to purchase 100 shares of the stock, at the strike price. Potentially, you could lose ALL that money, if the stock drops all the way to zero. However, you can't lose MORE than that.
 
@@ -110,6 +128,9 @@ If you're new to options, you probably still have a number of unanswered questio
 
 ### Odds of an Option Ending Up In the Money
 
+![](../images/AAPLOptionsChain.png)     
+`August 21, 2026 option chain for AAPL, viewed on 6/28/26.`
+
 An easy way to get a rough estimate is to look at an option contract's delta value, often seen in option chains. For contracts that are close to at-the-money (i.e. strike is close to the stock's current trading price), delta is close to .50. This equates with a roughly 50/50 chance that the option will be in the money at expiration. Meanwhile, an out-of-the-money option with a delta of .20 has a roughly 20% of chance of being in the money at expiration. This option will always be substantially cheaper than the one with a delta of .50.
 
 The delta value should only be treated as a *rough* estimate of probability, though. It will shift around as the price of the underlying stock changes. And if a stock is in a strong uptrend or downtrend, a delta of .50 doesn't really imply equal odds of going up or down from here.
@@ -118,12 +139,54 @@ A more accurate thing about delta is that it describes by how much an option con
 
 ### Multi-Leg Option Positions
 
-Let's say that I want to use options to bet that XYZ, currently trading at $100, will stay above $95 over the next 45 days. I could sell a put option at $95, but that exposes me to a high potential loss. If I want to limit that loss, I could also *purchase* a put option with a strike of $90. This position is called a short put spread, or a bull credit spread. The basic idea that is that I'm taking in more money on the *short leg*, the sold $95 put, than I'm spending on the *long leg*, the purchased $90 put.
+#### Credit Spreads
 
-The point of the long leg is to serve as insurance for my position. If price drops below $90, the most I can lose is $500. That is, the difference between 100 shares at $95 and 100 shares of stock at $90.
+Let's say that I want to use options to bet that XYZ, currently trading at $55, will stay above $50 over the next 45 days. I could sell a put option at $50, but that exposes me to a high potential loss. If I want to limit that loss, I could also *purchase* a put option with a strike of $45. This position is called a short put spread, or a bull credit spread. The basic idea that is that I'm taking in more money on the *short leg*, the sold $50 put, than I'm spending on the *long leg*, the purchased $45 put. Let's say that the total credit for the whole spread is $100.
 
-Think about it like this: the buyer of the $95 put contract sells me 100 shares of XYZ for $9500, then my $90 put contract lets me sell them for $9000. However, my broker gets to take a convenient shortcut: they _LOAN_ me the $9500, then I give them the $9000 I made by exercising the long option (which the broker forces me to). Then I give them an additional $500. Indeed, I need to have had that $500 in my account *BEFORE* opening the put spread.
+The point of the long leg is to serve as insurance for my position. If price drops below $45, the most I can lose is $400 ($500 minus $100 of credit received). That is, the $500 is the difference between 100 shares at $50 and 100 shares of stock at $45.
+
+Think about it like this: the buyer of the $50 put contract sells me 100 shares of XYZ for $5000, then my $45 put contract lets me sell them for $4500. However, my broker gets to take a convenient shortcut: they _LOAN_ me the $5000, then I give them the $4500 I made by exercising the long option (which the broker forces me to). Then I give them an additional $500, the balance of the loan. Indeed, I need to have had that $500 in my account *BEFORE* opening the put spread. This will eventually make sense if you think about it carefully.
+
+![](../images/BullPutSpread.png)      
+`Payoff diagram for put credit spread / bull put spread. Notice the limit to maximum loss.`
 
 At any time before anything gets exercised, I can buy back the whole spread. It will be worth the price difference between my sold contract (short leg) and purchased one (long leg). Credit spread traders often buy them back after a certain amount of profit.
 
-Another possibility is a long put spread, AKA a bear debit spread. If I think that XYZ is likely to drop a lot from its current price of $100, I might *BUY* a put with a strike of $100, then *SELL* a put with a strike of $90. The credit
+#### Debit Spreads
+
+Another possibility is a long put spread, AKA a bear debit spread. If I think that XYZ is likely to drop a lot from its current price of $55, I might *BUY* a put with a strike of $50, then *SELL* a put with a strike of $45. The credit received from the sold (short) put pays for some of the cost of the bought put, but puts a cap on potential profit for the whole spread.
+
+![](../images/BearPutSpread.png)      
+`Payoff diagram for put debit spread / bear put spread. Notice the limit to maximum gain.`
+
+### The Greeks
+
+Each individual option contract has its own set of Greek values. In a multi-leg position, those of each option will combine to form a set of Greeks that apply to the whole position.
+
+#### Delta
+
+Delta is arguably the most important of the Greeks. It indicates by how many dollars the value of an option position (including multi-leg ones) will move for each positive one-dollar move in the price of the underlying stock. If delta is negative, then the position's value will move in the other direction.
+
+It's important to understand that an option's delta is never fixed. As an option position moves towards being in the money, delta increases. As an option moves towards expiration (assume that underlying stock price is held fixed), its delta will slide towards 1.0 or 0, depending on whether its in or out of the money.
+
+Some traders try to "neutralize" delta by opening positions whose separate deltas cancel each other out. This can be helpful for strategies that rely on time decay as a source of profit. As you might expect, a position with "zeroed" delta seldom stays that way for long. Delta will soon creep in a positive or negative direction.
+
+Options that are at-the-money have a delta of .50. The deeper into the money you go on the option chain, the more delta approaches 1.0. The further out of the money you go, the more it approaches zero.
+
+> Remember: a long stock position always has a delta of 1, a short position a delta of -1
+
+#### Theta
+
+Arguably the second-most important Greek. This variable indicates by how much time decay will affect a position's total value, between the current moment and one day from now. Those in long positions usually want to avoid the effects of theta decay, while those in short positions usually want to profit from it. Theta is highest in options close to the money, and diminishes as one moves up or down the option chain.
+
+Theta grows as an option approaches expiration, the rate of decay accelerating. This is why options buyers tend to hope for quick and decisive moves in price, while options sellers prefer the opposite.
+
+> Remember: a stock position has a theta of 0
+
+#### Gamma
+
+Gamma is kind of a derivative of delta. If delta indicates by how much an option price will change for a dollar move in the underlying, gamma indicates by how much _delta_ will change for that same dollar move. Gamma is highest in options closest to being at the money, and diminishes as one moves up or down the option chain.
+
+Gamma will grow as an option approaches expiration, which means that moves in the underlying stock's price will have a more pronounced effect on the value of an options position. In many cases, those using option-selling strategies will try to exit their positions well before expiration, avoiding what's called "gamma exposure". Just as there are ways to neutralize the delta of a position, there are also ways to neutralize gamma.
+
+> Remember: a stock position has a gamme of 0
