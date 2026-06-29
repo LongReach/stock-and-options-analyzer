@@ -107,11 +107,15 @@ If you sell an out-of-the-money put option for AAPL, say an August 21 250 strike
 
 The main argument *FOR* selling options is time decay, also called theta decay. If the stock remains at the same price until expiration (which seldom happens, of course), the option becomes cheaper and cheaper to buy back. Hopefully for the seller, the decay will offset any moves made by the stock. Options sellers often practice a sophisticated technique called "delta hedging", which permits them to enjoy the fruits of time decay, while not being too affected by relatively small stock moves.
 
+##### A Note on How Credit Works
+
+When you sell an option, you immediately receive the credit, i.e. the money that you sold it for. However, that money remains "frozen" in your account, unusable until you either buy back the option, it expires worthless, or it gets exercised. Your broker also requires you to have sufficient cash to buy 100 shares of stock at the strike price, if a put, or to buy 100 shares of stock at current market price (or just to have it) and sell it at the strike price, if a call.
+
 ##### A Note on "Naked" Options
 
 Your broker won't allow you to sell a put option unless you have the money to purchase 100 shares of the stock, at the strike price. Potentially, you could lose ALL that money, if the stock drops all the way to zero. However, you can't lose MORE than that.
 
-If you sell a call option, your potential losses are theoretically unlimited, should your option become deep in the money. That's why naked option selling isn't recommended for beginners. However, there are ways to set a maximum loss on an options position. This document will explore them later.
+If you sell a call option, your potential losses are theoretically unlimited, should your option become deep in the money. That's why naked option selling isn't recommended for beginners, nor will most brokers permit it. However, there are ways to set a maximum loss on an options position. This document will explore them later.
 
 ### Concluding "The Basics"
 
@@ -124,7 +128,7 @@ If you're new to options, you probably still have a number of unanswered questio
 * Aren't there more sophisticated strategies than simply buying or selling an option?
 * What are all these other numbers I see in option chain tables? Delta, theta, gamma, vega, implied volatility, etc.?
 
-## More Advanced Concepts
+## Intermediate Concepts
 
 ### Odds of an Option Ending Up In the Money
 
@@ -139,18 +143,22 @@ A more accurate thing about delta is that it describes by how much an option con
 
 ### Multi-Leg Option Positions
 
+Below are listed several basic options strategies. However, there are many more. See [this page](https://www.tradingblock.com/option-strategies). The first twenty listed -- up to but not including Calendar Spread -- are easy enough for a beginner to understand the logic of. The remaining ones are less intuitive, due to the use of different expiration dates within a position.
+
 #### Credit Spreads
 
-Let's say that I want to use options to bet that XYZ, currently trading at $55, will stay above $50 over the next 45 days. I could sell a put option at $50, but that exposes me to a high potential loss. If I want to limit that loss, I could also *purchase* a put option with a strike of $45. This position is called a short put spread, or a bull credit spread. The basic idea that is that I'm taking in more money on the *short leg*, the sold $50 put, than I'm spending on the *long leg*, the purchased $45 put. Let's say that the total credit for the whole spread is $100.
+Let's say that you want to use options to bet that XYZ, currently trading at $55, will stay above $50 over the next 45 days. You could sell a put option at $50, but that exposes you to a high potential loss. If you want to limit that loss, you could also *purchase* a put option with a strike of $45. This position is called a short put spread, or a bull credit spread. The basic idea that is that you're taking in more money on the *short leg*, the sold $50 put, than you're spending on the *long leg*, the purchased $45 put. Let's say that the total credit for the whole spread is $100.
 
-The point of the long leg is to serve as insurance for my position. If price drops below $45, the most I can lose is $400 ($500 minus $100 of credit received). That is, the $500 is the difference between 100 shares at $50 and 100 shares of stock at $45.
+The point of the long leg is to serve as insurance for you position. If price drops below $45, the most you can lose is $400 ($500 minus $100 of credit received). That is, the $500 is the difference between 100 shares at $50 and 100 shares of stock at $45.
 
-Think about it like this: the buyer of the $50 put contract sells me 100 shares of XYZ for $5000, then my $45 put contract lets me sell them for $4500. However, my broker gets to take a convenient shortcut: they _LOAN_ me the $5000, then I give them the $4500 I made by exercising the long option (which the broker forces me to). Then I give them an additional $500, the balance of the loan. Indeed, I need to have had that $500 in my account *BEFORE* opening the put spread. This will eventually make sense if you think about it carefully.
+Think about it like this: the buyer of the $50 put contract sells you 100 shares of XYZ for $5000, then you $45 put contract lets you sell them for $4500. However, your broker gets to take a convenient shortcut: they _LOAN_ you the $5000, then you give them the $4500 you made by exercising the long option (which the broker forces you to). Then you give them an additional $500, the balance of the loan. Indeed, you need to have had that $500 in your account *BEFORE* opening the put spread. 
+
+This will eventually make sense if you think about it carefully.
 
 ![](../images/BullPutSpread.png)      
 `Payoff diagram for put credit spread / bull put spread. Notice the limit to maximum loss.`
 
-At any time before anything gets exercised, I can buy back the whole spread. It will be worth the price difference between my sold contract (short leg) and purchased one (long leg). Credit spread traders often buy them back after a certain amount of profit.
+At any time before anything gets exercised, you can buy back the whole spread. It will be worth the price difference between your sold contract (short leg) and the purchased one (long leg). Credit spread traders often buy them back after a certain amount of profit.
 
 #### Debit Spreads
 
@@ -159,13 +167,24 @@ Another possibility is a long put spread, AKA a bear debit spread. If I think th
 ![](../images/BearPutSpread.png)      
 `Payoff diagram for put debit spread / bear put spread. Notice the limit to maximum gain.`
 
+#### Iron Condors
+
+An iron condor combines two vertical spreads (both with same expirations), a call credit spread and a put credit spread, into a single position. As long as the underlying stock price is between the strike of the short put and the strike of the short call at the time of expiration, the position will be profitable. There's a good chance that it will even be profitable at some point before expiration. Because it's impossible to lose on both sides of an iron condor, your broker will only require you to hold in reserve cash equivalent to the maximum possible loss on one side.
+
+Iron condors are usually executed as a "delta neutral" strategy, meaning that they're initially unaffected by stock price movements in either direction, and profit from time decay. Of course, condors seldom stay delta neutral for long, but they can be rebalanced.
+
 ### The Greeks
 
-Each individual option contract has its own set of Greek values. In a multi-leg position, those of each option will combine to form a set of Greeks that apply to the whole position.
+![](../images/MeetTheSpartans.jpg)    
+`Not really that Greek. From Meet the Spartans (2008)`
+
+Each individual option contract has its own set of "Greek" values, called delta, theta, gamma, vega, and rho. The first four of these are standard to just about any options chain you can find online, or from your broker's software. In a multi-leg position, the Greeks of each option will combine to form a set of Greeks that apply to the whole position.
+
+It's inadvisable to trade options without understanding at least delta and theta. The same with implied volatility, explained below.
 
 #### Delta
 
-Delta is arguably the most important of the Greeks. It indicates by how many dollars the value of an option position (including multi-leg ones) will move for each positive one-dollar move in the price of the underlying stock. If delta is negative, then the position's value will move in the other direction.
+Delta is arguably the most important of the Greeks. It indicates by how many dollars the value of an option position (including multi-leg ones) will move for each positive one-dollar move in the price of the underlying stock. If delta for your position is positive, then the position benefits from the underlying stock's price going up; if negative, from going down. If zero, the position is unaffected either way, at least until a big move changes delta one way or the other.
 
 It's important to understand that an option's delta is never fixed. As an option position moves towards being in the money, delta increases. As an option moves towards expiration (assume that underlying stock price is held fixed), its delta will slide towards 1.0 or 0, depending on whether its in or out of the money.
 
@@ -177,16 +196,43 @@ Options that are at-the-money have a delta of .50. The deeper into the money you
 
 #### Theta
 
-Arguably the second-most important Greek. This variable indicates by how much time decay will affect a position's total value, between the current moment and one day from now. Those in long positions usually want to avoid the effects of theta decay, while those in short positions usually want to profit from it. Theta is highest in options close to the money, and diminishes as one moves up or down the option chain.
+Arguably the second-most important Greek. This variable indicates by how much time decay will affect a position's total value, between the current moment and one day from now. Those in long positions usually want to avoid the effects of theta decay, while those in short positions usually want to profit from it. If theta is positive for an overall position, this means that the position profits from theta decay. Otherwise, the value will be negative.
 
-Theta grows as an option approaches expiration, the rate of decay accelerating. This is why options buyers tend to hope for quick and decisive moves in price, while options sellers prefer the opposite.
+Theta is highest in options close to the money, and diminishes as one moves up or down the option chain. Theta also grows as an option approaches expiration, the rate of decay accelerating. This is why options buyers tend to hope for quick and decisive moves in price, while options sellers prefer the opposite.
 
 > Remember: a stock position has a theta of 0
 
 #### Gamma
 
-Gamma is kind of a derivative of delta. If delta indicates by how much an option price will change for a dollar move in the underlying, gamma indicates by how much _delta_ will change for that same dollar move. Gamma is highest in options closest to being at the money, and diminishes as one moves up or down the option chain.
+Gamma is kind of a derivative of delta. If delta indicates by how much an option price will change for a dollar move in the underlying, gamma indicates by how much _delta_ will change for that same dollar move. Gamma is highest in options closest to being at the money, and diminishes as one moves up or down the option chain. If gamma is positive for a position, this means that the position benefits from directional moves. If negative, it means that the position benefits from underlying stock price staying in one place.
 
 Gamma will grow as an option approaches expiration, which means that moves in the underlying stock's price will have a more pronounced effect on the value of an options position. In many cases, those using option-selling strategies will try to exit their positions well before expiration, avoiding what's called "gamma exposure". Just as there are ways to neutralize the delta of a position, there are also ways to neutralize gamma.
 
 > Remember: a stock position has a gamme of 0
+
+#### Vega
+
+This Greek indicates by how much an option's price will change for a 1% change in implied volatility (see below). If vega for a position is positive, that position will benefit from an increase in implied volatility; if negative, it will lose value.
+
+#### Implied Volatility
+
+Implied volatility isn't really one of the Greeks, but a value that measures by how much a stock's price is expected to fluctuate in the future. As you might expect, IV is typically higher at times of high uncertainty (as with oil-related stocks at the time of the 2026 US-Iran-Israel war). A stock's IV is calculated, via a mathematical formula, from options prices for that stock. Options tend to get more expensive at times of higher uncertainty, as investors and hedge funds look for ways to protect their positions.
+
+A stock's IV can be used to calculate the **expected move** for a stock. In Python, the formula is:
+
+```
+expected_move = stock_price * iv * math.sqrt(float(days_ahead) / 365.0) * float(standard_devs)
+```
+
+`stock_price`: current stock price
+`iv`: stock's current IV
+`days_ahead`: we're interested in the expected move over this number of days
+
+As for `standard_devs`, if 1 standard deviation is used, that means that the options market expects the stock price to have a 68% chance of staying between `stock_price - expected_move` and `stock_price + expected_move`. If two standard deviations are used, then price has a 95% chance of falling into that range.
+
+Of course, IV doesn't *predict* anything; it merely reflects the option market's current expectations, which can change.
+
+Option traders are typically less interested in IV itself, other than for calculating the expected move, and more interested in **IV rank**. This value indicates, as a percentage, where current IV sits within its range of the past year. IV rank is often a factor in deciding which options strategy makes the most sense:
+
+Lower IV rank: traders typically go for option **buying** strategies. If IV expands, this will make their positions more profitable.
+Higher IV rank: traders typically go for option **selling** strategies. If IV contracts, as it often does after momentary spikes, this will make their positions more profitable.
