@@ -29,13 +29,13 @@ cd CodingProjects\Python\TWS2025
 conda activate options_2025_1
 python -m scripts.cache_data --help
 
-To build data cache for tradable ETFs
+To build data cache for price data
 ------------------------
-python -m scripts.cache_data --file .\data\tradeable.txt
+python -m scripts.cache_data --file .\data\optionable.txt --db .\data\market_data.h5
 
 To build data cache for iv_finder tool
 ------------------------
-python -m scripts.cache_data --file .\data\optionable.txt --db .\data\iv_data.h5 --info-type iv
+python -m scripts.cache_data --file .\data\optionable.txt --db .\data\iv_data.h5 --info-type iv --limited
 
 To see cache contents:
 python -m scripts.cache_data --db .\data\iv_data.h5 --info-type iv --show
@@ -327,6 +327,34 @@ async def remove_single_stock(
     stock_manager.clear_data(symbol, bar_size, info_type, remove_from_cache=True)
 
 
+async def remove_multiple_stocks(
+    stock_manager: StockDataManager,
+    file_path: str,
+    bar_size_str: str,
+    info_type_str: str,
+):
+    """
+    Removes a single stock from cache.
+
+    :param stock_manager:  --
+    :param file_path: path to file containing list of stocks to remove
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    """
+    print(f"Removing multiple stocks from cache, given in file {file_path}")
+    symbols: List[str] = []
+    try:
+        with open(file_path, "r") as file:
+            for line in file:
+                symbol = line.strip()
+                symbols.append(symbol)
+    except FileNotFoundError:
+        print(f"Could not find file {file_path}")
+
+    for symbol in symbols:
+        await remove_single_stock(stock_manager, symbol, bar_size_str, info_type_str)
+
+
 async def main(parser: argparse.ArgumentParser):
     """Top-level function, unpacks arguments and calls functions that do the work"""
     args = parser.parse_args()
@@ -347,15 +375,19 @@ async def main(parser: argparse.ArgumentParser):
     try:
         if args.show:
             await show_cache_contents(stock_manager, args.bar_size, args.info_type)
+        elif args.remove:
+            bar_size = args.bar_size or "1d"
+            info_type = args.info_type or "tr"
+            if args.symbol:
+                await remove_single_stock(stock_manager, args.symbol, bar_size, info_type)
+            elif args.file:
+                await remove_multiple_stocks(stock_manager, args.file, bar_size, info_type)
         elif args.symbol:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
-            if args.remove:
-                await remove_single_stock(stock_manager, args.symbol, bar_size, info_type)
-            else:
-                await cache_single_stock(
-                    stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update, args.limited
-                )
+            await cache_single_stock(
+                stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update, args.limited
+            )
         elif args.file:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
@@ -398,7 +430,7 @@ parser.add_argument("--info-only", help="Don't do any scraping, just show info",
 parser.add_argument(
     "--show", help="Show what data is in cache. Use --bar-size or --info-type to narrow it down.", action="store_true"
 )
-parser.add_argument("--remove", help="Remove symbol from cache. Requires --symbol.", action="store_true")
+parser.add_argument("--remove", help="Remove symbol(s) from cache. Requires --symbol for single symbol, --file for list of symbols to remove.", action="store_true")
 parser.add_argument(
     "--update",
     help="Forces the getting of most recent data. Works when caching single or multiple stocks.",
