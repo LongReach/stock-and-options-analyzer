@@ -1,5 +1,5 @@
 from typing import Dict, List, Tuple, Optional, Set, Any, Self
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum, auto, IntEnum
 from threading import Lock
 from logging import getLogger
@@ -486,3 +486,11 @@ class PositionsInfo:
     def get_positions(self) -> List[PositionDescriptor]:
         """Return all position descriptors"""
         return [desc for symbol, desc in self.position_map.items()]
+
+
+class EarningsInfo:
+    """Holds earnings date information for a stock, both upcoming and past."""
+
+    def __init__(self):
+        self.upcoming: List[date] = []  # Future earnings dates, soonest first
+        self.past: List[date] = []      # Past earnings dates, most recent first

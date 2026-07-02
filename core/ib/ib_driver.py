@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import math
+import xml.etree.ElementTree as ET
 
 from _decimal import Decimal
 
@@ -17,7 +18,7 @@ from logging import getLogger
 import threading
 import time
 from typing import Optional, Dict, List, Tuple, Union, Set
-from datetime import datetime
+from datetime import datetime, date
 
 from core.common import (
     HistoricalData,
@@ -30,6 +31,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    EarningsInfo,
 )
 from core.utils import (
     wait_for_condition,
@@ -46,6 +48,7 @@ from core.ib.ib_driver_requests import (
     IBDriverException,
     OrderRequest,
     PositionsRequest,
+    FundamentalDataRequest,
 )
 from core.base_driver import BaseDriver
 from core.ib.ib_wrapper import IBWrapper, CallbackID
@@ -59,6 +62,7 @@ HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
 POSITIONS_DATA_TIMEOUT = 30.0
+FUNDAMENTAL_DATA_TIMEOUT = 15.0
 
 
 class IBDriver(IBWrapper, BaseDriver):
@@ -101,6 +105,7 @@ class IBDriver(IBWrapper, BaseDriver):
         # Maps order ID to OrderRequest object
         self._request_order_objects: Dict[int, OrderRequest] = {}
         self._request_positions_object: PositionsRequest = PositionsRequest()
+        self._request_fundamental_data_objects: Dict[int, FundamentalDataRequest] = {}
 
         # Maps head timestamp request ID to symbol, request info type
         self._head_timestamp_map: Dict[int, Tuple[str, RequestedInfoType]] = {}
@@ -139,6 +144,7 @@ class IBDriver(IBWrapper, BaseDriver):
         self.set_callback(CallbackID.POSITION, self.position_cb)
         self.set_callback(CallbackID.POSITION_END, self.position_end_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
+        self.set_callback(CallbackID.FUNDAMENTAL_DATA_CB, self._fundamental_data_cb)
 
         self._logger = getLogger(__file__)
 
@@ -779,6 +785,111 @@ class IBDriver(IBWrapper, BaseDriver):
 
         return positions_request.positions_info, ret_error_str
 
+    async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
+        """
+        Fetches past and upcoming earnings dates for a stock using IB fundamental data.
+
+        Requires a fundamental data subscription in IB (Reuters/Refinitiv).
+
+        :param ticker: stock ticker, e.g. AAPL
+        :return: (EarningsInfo, error string or None)
+        """
+        async with self._lock:
+            req_id = self._next_id()
+            req_obj = self._request_fundamental_data_objects[req_id] = FundamentalDataRequest()
+
+        contract = self._make_contract(ticker)
+        req_obj.data_fetch_complete = False
+        self.reqFundamentalData(req_id, contract, "CalendarReport", [])
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=FUNDAMENTAL_DATA_TIMEOUT)
+        ret_error_str = None
+        earnings_info = EarningsInfo()
+
+        if req_obj.has_error():
+            ret_error_str = f"Error getting earnings dates. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = f"Timed out getting earnings dates for {ticker}."
+            self._logger.error(ret_error_str)
+            self.cancelFundamentalData(req_id)
+        else:
+            earnings_info = self._parse_earnings_xml(req_obj.xml_data)
+            self._logger.info(f"get_earnings_dates() finished for {ticker}: {len(earnings_info.upcoming)} upcoming, {len(earnings_info.past)} past")
+
+        async with self._lock:
+            self._request_fundamental_data_objects.pop(req_id, None)
+
+        return earnings_info, ret_error_str
+
+    @staticmethod
+    def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
+        """
+        Parse the XML returned by IB's CalendarReport fundamental data request.
+
+        IB's XML schema can vary slightly by data vendor and subscription type.
+        The parser tries several common patterns in order.
+        """
+        earnings_info = EarningsInfo()
+        today = date.today()
+
+        if not xml_data:
+            return earnings_info
+
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            return earnings_info
+
+        raw_date_strings: List[str] = []
+
+        # Pattern 1: <Event evtype="Earnings"><EvDate>YYYY-MM-DD</EvDate></Event>
+        for event in root.iter("Event"):
+            evtype = event.get("evtype", "") or event.get("type", "")
+            if "earnings" in evtype.lower():
+                for tag in ("EvDate", "Date", "date"):
+                    el = event.find(tag)
+                    if el is not None and el.text:
+                        raw_date_strings.append(el.text.strip())
+                        break
+
+        # Pattern 2: <EarningsDate date="YYYY-MM-DD"/> or <EarningsDate>YYYY-MM-DD</EarningsDate>
+        if not raw_date_strings:
+            for el in root.iter("EarningsDate"):
+                date_str = el.get("date") or (el.text or "").strip()
+                if date_str:
+                    raw_date_strings.append(date_str)
+
+        # Pattern 3: <Calendar type="Earnings"><Date>YYYY-MM-DD</Date></Calendar>
+        if not raw_date_strings:
+            for cal in root.iter("Calendar"):
+                if "earnings" in cal.get("type", "").lower():
+                    for tag in ("Date", "date"):
+                        el = cal.find(tag)
+                        if el is not None and el.text:
+                            raw_date_strings.append(el.text.strip())
+                            break
+
+        date_formats = ("%Y-%m-%d", "%Y%m%d", "%m/%d/%Y")
+        for raw in raw_date_strings:
+            parsed: Optional[date] = None
+            for fmt in date_formats:
+                try:
+                    parsed = datetime.strptime(raw, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if parsed is None:
+                continue
+            if parsed >= today:
+                earnings_info.upcoming.append(parsed)
+            else:
+                earnings_info.past.append(parsed)
+
+        earnings_info.upcoming.sort()
+        earnings_info.past.sort(reverse=True)
+        return earnings_info
+
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
         """
@@ -1273,6 +1384,13 @@ class IBDriver(IBWrapper, BaseDriver):
             order_obj.order_info.avg_fill_price = price
         order_obj.data_fetch_complete = True
 
+    def _fundamental_data_cb(self, req_id: int, data: str):
+        """Called when IB sends back fundamental data XML in response to reqFundamentalData()."""
+        req_obj = self._request_fundamental_data_objects.get(req_id)
+        if req_obj:
+            req_obj.xml_data = data
+            req_obj.data_fetch_complete = True
+
     def _error_cb(
         self,
         req_id: int,
@@ -1311,6 +1429,8 @@ class IBDriver(IBWrapper, BaseDriver):
                 req_obj = self._request_option_objects.get(req_id)
             if not req_obj:
                 req_obj = self._request_order_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_fundamental_data_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
