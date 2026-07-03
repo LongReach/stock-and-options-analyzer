@@ -790,11 +790,14 @@ class IBDriver(IBWrapper, BaseDriver):
         """
         Fetches past and upcoming earnings dates for a stock using IB fundamental data.
 
-        Requires a fundamental data subscription in IB (Reuters/Refinitiv).
+        IMPORTANT: Requires a fundamental data subscription in IB (Reuters/Refinitiv). This subscription is called
+        Wall Street Horizons, which you have to pay for. I haven't, so this code is untested.
 
         :param ticker: stock ticker, e.g. AAPL
         :return: (EarningsInfo, error string or None)
         """
+        raise IBDriverException(f"This is not tested code! Not guaranteed to work.")
+
         async with self._lock:
             req_id = self._next_id()
             req_obj = self._request_fundamental_data_objects[req_id] = FundamentalDataRequest()
@@ -827,6 +830,9 @@ class IBDriver(IBWrapper, BaseDriver):
     def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
         """
         Parse the XML returned by IB's RESC (Analyst Estimates) fundamental data request.
+
+        TODO: this is untested code and will probably require refactoring if ever used. See get_earnings_dates()
+            for more info.
 
         Past dates come from FYActual/ActValue[@updated], which is the actual earnings
         announcement timestamp. Upcoming dates are derived from FYEstimate FYPeriod
