@@ -800,7 +800,7 @@ class IBDriver(IBWrapper, BaseDriver):
 
         contract = self._make_contract(ticker)
         req_obj.data_fetch_complete = False
-        self.reqFundamentalData(req_id, contract, "CalendarReport", [])
+        self.reqFundamentalData(req_id, contract, "ReportsFinSummary", [])
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=FUNDAMENTAL_DATA_TIMEOUT)
         ret_error_str = None
@@ -825,7 +825,7 @@ class IBDriver(IBWrapper, BaseDriver):
     @staticmethod
     def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
         """
-        Parse the XML returned by IB's CalendarReport fundamental data request.
+        Parse the XML returned by IB's ReportsFinSummary fundamental data request.
 
         IB's XML schema can vary slightly by data vendor and subscription type.
         The parser tries several common patterns in order.
@@ -843,24 +843,31 @@ class IBDriver(IBWrapper, BaseDriver):
 
         raw_date_strings: List[str] = []
 
-        # Pattern 1: <Event evtype="Earnings"><EvDate>YYYY-MM-DD</EvDate></Event>
-        for event in root.iter("Event"):
-            evtype = event.get("evtype", "") or event.get("type", "")
-            if "earnings" in evtype.lower():
-                for tag in ("EvDate", "Date", "date"):
-                    el = event.find(tag)
-                    if el is not None and el.text:
-                        raw_date_strings.append(el.text.strip())
-                        break
+        # Pattern 1 (ReportsFinSummary): <FiscalPeriod><StatementDate>YYYY-MM-DD</StatementDate></FiscalPeriod>
+        for period in root.iter("FiscalPeriod"):
+            stmt_date_el = period.find("StatementDate")
+            if stmt_date_el is not None and stmt_date_el.text:
+                raw_date_strings.append(stmt_date_el.text.strip())
 
-        # Pattern 2: <EarningsDate date="YYYY-MM-DD"/> or <EarningsDate>YYYY-MM-DD</EarningsDate>
+        # Pattern 2: <Event evtype="Earnings"><EvDate>YYYY-MM-DD</EvDate></Event>
+        if not raw_date_strings:
+            for event in root.iter("Event"):
+                evtype = event.get("evtype", "") or event.get("type", "")
+                if "earnings" in evtype.lower():
+                    for tag in ("EvDate", "Date", "date"):
+                        el = event.find(tag)
+                        if el is not None and el.text:
+                            raw_date_strings.append(el.text.strip())
+                            break
+
+        # Pattern 3: <EarningsDate date="YYYY-MM-DD"/> or <EarningsDate>YYYY-MM-DD</EarningsDate>
         if not raw_date_strings:
             for el in root.iter("EarningsDate"):
                 date_str = el.get("date") or (el.text or "").strip()
                 if date_str:
                     raw_date_strings.append(date_str)
 
-        # Pattern 3: <Calendar type="Earnings"><Date>YYYY-MM-DD</Date></Calendar>
+        # Pattern 4: <Calendar type="Earnings"><Date>YYYY-MM-DD</Date></Calendar>
         if not raw_date_strings:
             for cal in root.iter("Calendar"):
                 if "earnings" in cal.get("type", "").lower():
