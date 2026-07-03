@@ -96,6 +96,14 @@ class EarningsManager:
         """Return the full cached DataFrame for a ticker, or None if not present."""
         return self._load_ticker(ticker.upper())
 
+    def get_cached_tickers(self) -> List[str]:
+        """Return sorted list of ticker symbols currently stored in the cache."""
+        try:
+            with pd.HDFStore(self._db_path, mode="r") as store:
+                return sorted(k.lstrip("/") for k in store.keys())
+        except Exception:
+            return []
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
