@@ -11,6 +11,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    EarningsInfo,
 )
 from core.utils import BarSize
 
@@ -221,3 +222,12 @@ class BaseDriver(ABC):
     @abstractmethod
     async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
         """Gets info about positions currently held in the account."""
+
+    @abstractmethod
+    async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
+        """
+        Gets past and upcoming earnings dates for a stock.
+
+        :param ticker: stock ticker, e.g. AAPL
+        :return: (EarningsInfo, error string or None)
+        """

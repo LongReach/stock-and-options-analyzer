@@ -1,6 +1,8 @@
 import asyncio
+import calendar
 import copy
 import math
+import xml.etree.ElementTree as ET
 
 from _decimal import Decimal
 
@@ -17,7 +19,7 @@ from logging import getLogger
 import threading
 import time
 from typing import Optional, Dict, List, Tuple, Union, Set
-from datetime import datetime
+from datetime import datetime, date
 
 from core.common import (
     HistoricalData,
@@ -30,6 +32,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    EarningsInfo,
 )
 from core.utils import (
     wait_for_condition,
@@ -46,6 +49,7 @@ from core.ib.ib_driver_requests import (
     IBDriverException,
     OrderRequest,
     PositionsRequest,
+    FundamentalDataRequest,
 )
 from core.base_driver import BaseDriver
 from core.ib.ib_wrapper import IBWrapper, CallbackID
@@ -59,6 +63,7 @@ HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
 POSITIONS_DATA_TIMEOUT = 30.0
+FUNDAMENTAL_DATA_TIMEOUT = 30.0
 
 
 class IBDriver(IBWrapper, BaseDriver):
@@ -101,6 +106,7 @@ class IBDriver(IBWrapper, BaseDriver):
         # Maps order ID to OrderRequest object
         self._request_order_objects: Dict[int, OrderRequest] = {}
         self._request_positions_object: PositionsRequest = PositionsRequest()
+        self._request_fundamental_data_objects: Dict[int, FundamentalDataRequest] = {}
 
         # Maps head timestamp request ID to symbol, request info type
         self._head_timestamp_map: Dict[int, Tuple[str, RequestedInfoType]] = {}
@@ -139,6 +145,7 @@ class IBDriver(IBWrapper, BaseDriver):
         self.set_callback(CallbackID.POSITION, self.position_cb)
         self.set_callback(CallbackID.POSITION_END, self.position_end_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
+        self.set_callback(CallbackID.FUNDAMENTAL_DATA_CB, self._fundamental_data_cb)
 
         self._logger = getLogger(__file__)
 
@@ -779,6 +786,116 @@ class IBDriver(IBWrapper, BaseDriver):
 
         return positions_request.positions_info, ret_error_str
 
+    async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
+        """
+        Fetches past and upcoming earnings dates for a stock using IB fundamental data.
+
+        IMPORTANT: Requires a fundamental data subscription in IB (Reuters/Refinitiv). This subscription is called
+        Wall Street Horizons, which you have to pay for. I haven't, so this code is untested.
+
+        :param ticker: stock ticker, e.g. AAPL
+        :return: (EarningsInfo, error string or None)
+        """
+        raise IBDriverException(f"This is not tested code! Not guaranteed to work.")
+
+        async with self._lock:
+            req_id = self._next_id()
+            req_obj = self._request_fundamental_data_objects[req_id] = FundamentalDataRequest()
+
+        contract = self._make_contract(ticker)
+        req_obj.data_fetch_complete = False
+        self.reqFundamentalData(req_id, contract, "RESC", [])
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=FUNDAMENTAL_DATA_TIMEOUT)
+        ret_error_str = None
+        earnings_info = EarningsInfo()
+
+        if req_obj.has_error():
+            ret_error_str = f"Error getting earnings dates. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = f"Timed out getting earnings dates for {ticker}."
+            self._logger.error(ret_error_str)
+            self.cancelFundamentalData(req_id)
+        else:
+            earnings_info = self._parse_earnings_xml(req_obj.xml_data)
+            self._logger.info(f"get_earnings_dates() finished for {ticker}: {len(earnings_info.upcoming)} upcoming, {len(earnings_info.past)} past")
+
+        async with self._lock:
+            self._request_fundamental_data_objects.pop(req_id, None)
+
+        return earnings_info, ret_error_str
+
+    @staticmethod
+    def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
+        """
+        Parse the XML returned by IB's RESC (Analyst Estimates) fundamental data request.
+
+        TODO: this is untested code and will probably require refactoring if ever used. See get_earnings_dates()
+            for more info.
+
+        Past dates come from FYActual/ActValue[@updated], which is the actual earnings
+        announcement timestamp. Upcoming dates are derived from FYEstimate FYPeriod
+        endMonth/endCalYear (fiscal quarter-end date — the announcement follows a few weeks later).
+        """
+        earnings_info = EarningsInfo()
+        today = date.today()
+
+        if not xml_data:
+            return earnings_info
+
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            return earnings_info
+
+        seen: set = set()
+
+        def add(d: date):
+            if d not in seen:
+                seen.add(d)
+                if d >= today:
+                    earnings_info.upcoming.append(d)
+                else:
+                    earnings_info.past.append(d)
+
+        # Past earnings: announcement date from ActValue[@updated] inside FYActual[@type="EPS"]
+        for fy_actual in root.iter("FYActual"):
+            if fy_actual.get("type") != "EPS":
+                continue
+            for period in fy_actual.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                act_val = period.find("ActValue")
+                if act_val is not None:
+                    updated = act_val.get("updated", "")
+                    if updated:
+                        try:
+                            add(datetime.strptime(updated[:10], "%Y-%m-%d").date())
+                        except ValueError:
+                            pass
+
+        # Upcoming earnings: fiscal quarter-end date from FYEstimate[@type="EPS"]
+        for fy_est in root.iter("FYEstimate"):
+            if fy_est.get("type") != "EPS":
+                continue
+            for period in fy_est.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                end_month = period.get("endMonth")
+                end_year = period.get("endCalYear")
+                if end_month and end_year:
+                    try:
+                        year, month = int(end_year), int(end_month)
+                        last_day = calendar.monthrange(year, month)[1]
+                        add(date(year, month, last_day))
+                    except (ValueError, OverflowError):
+                        pass
+
+        earnings_info.upcoming.sort()
+        earnings_info.past.sort(reverse=True)
+        return earnings_info
+
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
         """
@@ -1273,6 +1390,13 @@ class IBDriver(IBWrapper, BaseDriver):
             order_obj.order_info.avg_fill_price = price
         order_obj.data_fetch_complete = True
 
+    def _fundamental_data_cb(self, req_id: int, data: str):
+        """Called when IB sends back fundamental data XML in response to reqFundamentalData()."""
+        req_obj = self._request_fundamental_data_objects.get(req_id)
+        if req_obj:
+            req_obj.xml_data = data
+            req_obj.data_fetch_complete = True
+
     def _error_cb(
         self,
         req_id: int,
@@ -1311,6 +1435,8 @@ class IBDriver(IBWrapper, BaseDriver):
                 req_obj = self._request_option_objects.get(req_id)
             if not req_obj:
                 req_obj = self._request_order_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_fundamental_data_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string

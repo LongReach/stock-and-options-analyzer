@@ -22,9 +22,10 @@
   + [Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data](#interactive-brokers-sometimes-fails-to-return-historical-data-timing-out-even-though-it-has-the-data)
   + [Interactive Brokers responds to historical data request with error about no data](#interactive-brokers-responds-to-historical-data-request-with-error-about-no-data)
   + [Errors about Interactive Brokers market data subscriptions](#errors-about-interactive-brokers-market-data-subscriptions)
+  + [Can't get options data on weekend/after hours](#cant-get-options-data-on-weekendafter-hours)
+  + [Can't get earnings dates from IB](#cant-get-earnings-dates-from-ib)
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
-
 
 ## For Potential Employers
 
@@ -70,11 +71,9 @@ If you want to trade stocks or options, it's a good idea to practice with a pape
 
 ## Setup
 
-_(Note to self: some of this is a bit too basic for a README. Clean it up later.)_
+Obviously, you have to have an Interactive Brokers account to use this software -- at least until another brokerage is supported. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite. And if you want to be able to get earnings dates from IB, that requires yet another subscription, to Wall Street Horizons. That one costs about $50 / month.
 
-Obviously, you have to have an Interactive Brokers account to use this software -- at least until another brokerage is supported. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite.
-
-I created a `conda` environment for this project. First step was to install the Interactive Brokers API, as detailed in their [online guide](https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/). Once I ran `python setup.py install`, the Python packages were installed in my environment. I suppose you can use `venv`, if you prefer that.
+I created a `conda` environment for this project. First step was to install the Interactive Brokers API, as detailed in their [online guide](https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/). Once I ran `python setup.py install`, the Python packages were installed in my environment. Or you can use `venv`, if you prefer that.
 
 The online docs don't mention it, but I had to run `conda install setuptools` prior to running `setup.py`.
 
@@ -82,8 +81,6 @@ The next step was to install the Gateway software and configure it. Note that th
 
 ![](./images/IBGateway.png)    
 `Above: Gateway`
-
-In PyCharm, I set the interpreter type to "custom environment", then I chose my `conda` environment. 
 
 For a command line interface, I use Anaconda's PowerShell Prompt. It works well with `git`, too. I use it like so:
 
@@ -187,3 +184,7 @@ self.reqMarketDataType(1 if live else 2)
 ```
 
 The `2` requests "frozen" data.
+
+### Can't get earnings dates from IB
+
+You need a paid subscription to Wall Street Horizons, the API version. It costs about $50 per month. However, there are workarounds, found elsewhere in this codebase.

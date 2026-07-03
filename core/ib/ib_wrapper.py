@@ -41,6 +41,7 @@ class CallbackID(IntEnum):
     POSITION = 14
     POSITION_END = 15
     ERROR_CB = 16
+    FUNDAMENTAL_DATA_CB = 17
 
 
 class IBWrapper(EWrapper, EClient):
@@ -390,6 +391,19 @@ class IBWrapper(EWrapper, EClient):
         for the position() data."""
         self._verify_callback(CallbackID.POSITION_END)
         self._callback_map[CallbackID.POSITION_END]()
+
+    def fundamentalData(self, req_id: int, data: str):
+        """
+        Called by TWS when fundamental data has arrived.
+
+        Response for reqFundamentalData()
+
+        :param req_id: request ID
+        :param data: XML string containing the requested fundamental data
+        """
+        super().fundamentalData(req_id, data)
+        self._verify_callback(CallbackID.FUNDAMENTAL_DATA_CB)
+        self._callback_map[CallbackID.FUNDAMENTAL_DATA_CB](req_id, data)
 
     def error(
         self,

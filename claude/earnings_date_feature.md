@@ -14,4 +14,6 @@ In the `scripts/examples/` folder, please make a script that exercises `earnings
 
 ### Phase Two
 
-To be written later.
+I don't like that `yfinance` limits the amount of data that I can pull at any one time. I just realized that I have the right subscription to get earnings dates from Interactive Brokers, so let's try that approach. Please modify the classes `IBDriver` and `BaseDriver` to support this functionality. As in Phase One, I'd like to be able to get both past and future earnings dates.
+
+In the `scripts/examples/` folder, please make a script called `ib_earnings_example.py`. This will exercise the new code. 
