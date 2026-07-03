@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import copy
 import math
 import xml.etree.ElementTree as ET
@@ -62,7 +63,7 @@ HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
 POSITIONS_DATA_TIMEOUT = 30.0
-FUNDAMENTAL_DATA_TIMEOUT = 15.0
+FUNDAMENTAL_DATA_TIMEOUT = 30.0
 
 
 class IBDriver(IBWrapper, BaseDriver):
@@ -800,7 +801,7 @@ class IBDriver(IBWrapper, BaseDriver):
 
         contract = self._make_contract(ticker)
         req_obj.data_fetch_complete = False
-        self.reqFundamentalData(req_id, contract, "ReportsFinSummary", [])
+        self.reqFundamentalData(req_id, contract, "RESC", [])
 
         timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=FUNDAMENTAL_DATA_TIMEOUT)
         ret_error_str = None
@@ -825,10 +826,11 @@ class IBDriver(IBWrapper, BaseDriver):
     @staticmethod
     def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
         """
-        Parse the XML returned by IB's ReportsFinSummary fundamental data request.
+        Parse the XML returned by IB's RESC (Analyst Estimates) fundamental data request.
 
-        IB's XML schema can vary slightly by data vendor and subscription type.
-        The parser tries several common patterns in order.
+        Past dates come from FYActual/ActValue[@updated], which is the actual earnings
+        announcement timestamp. Upcoming dates are derived from FYEstimate FYPeriod
+        endMonth/endCalYear (fiscal quarter-end date — the announcement follows a few weeks later).
         """
         earnings_info = EarningsInfo()
         today = date.today()
@@ -841,57 +843,48 @@ class IBDriver(IBWrapper, BaseDriver):
         except ET.ParseError:
             return earnings_info
 
-        raw_date_strings: List[str] = []
+        seen: set = set()
 
-        # Pattern 1 (ReportsFinSummary): <FiscalPeriod><StatementDate>YYYY-MM-DD</StatementDate></FiscalPeriod>
-        for period in root.iter("FiscalPeriod"):
-            stmt_date_el = period.find("StatementDate")
-            if stmt_date_el is not None and stmt_date_el.text:
-                raw_date_strings.append(stmt_date_el.text.strip())
+        def add(d: date):
+            if d not in seen:
+                seen.add(d)
+                if d >= today:
+                    earnings_info.upcoming.append(d)
+                else:
+                    earnings_info.past.append(d)
 
-        # Pattern 2: <Event evtype="Earnings"><EvDate>YYYY-MM-DD</EvDate></Event>
-        if not raw_date_strings:
-            for event in root.iter("Event"):
-                evtype = event.get("evtype", "") or event.get("type", "")
-                if "earnings" in evtype.lower():
-                    for tag in ("EvDate", "Date", "date"):
-                        el = event.find(tag)
-                        if el is not None and el.text:
-                            raw_date_strings.append(el.text.strip())
-                            break
-
-        # Pattern 3: <EarningsDate date="YYYY-MM-DD"/> or <EarningsDate>YYYY-MM-DD</EarningsDate>
-        if not raw_date_strings:
-            for el in root.iter("EarningsDate"):
-                date_str = el.get("date") or (el.text or "").strip()
-                if date_str:
-                    raw_date_strings.append(date_str)
-
-        # Pattern 4: <Calendar type="Earnings"><Date>YYYY-MM-DD</Date></Calendar>
-        if not raw_date_strings:
-            for cal in root.iter("Calendar"):
-                if "earnings" in cal.get("type", "").lower():
-                    for tag in ("Date", "date"):
-                        el = cal.find(tag)
-                        if el is not None and el.text:
-                            raw_date_strings.append(el.text.strip())
-                            break
-
-        date_formats = ("%Y-%m-%d", "%Y%m%d", "%m/%d/%Y")
-        for raw in raw_date_strings:
-            parsed: Optional[date] = None
-            for fmt in date_formats:
-                try:
-                    parsed = datetime.strptime(raw, fmt).date()
-                    break
-                except ValueError:
-                    continue
-            if parsed is None:
+        # Past earnings: announcement date from ActValue[@updated] inside FYActual[@type="EPS"]
+        for fy_actual in root.iter("FYActual"):
+            if fy_actual.get("type") != "EPS":
                 continue
-            if parsed >= today:
-                earnings_info.upcoming.append(parsed)
-            else:
-                earnings_info.past.append(parsed)
+            for period in fy_actual.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                act_val = period.find("ActValue")
+                if act_val is not None:
+                    updated = act_val.get("updated", "")
+                    if updated:
+                        try:
+                            add(datetime.strptime(updated[:10], "%Y-%m-%d").date())
+                        except ValueError:
+                            pass
+
+        # Upcoming earnings: fiscal quarter-end date from FYEstimate[@type="EPS"]
+        for fy_est in root.iter("FYEstimate"):
+            if fy_est.get("type") != "EPS":
+                continue
+            for period in fy_est.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                end_month = period.get("endMonth")
+                end_year = period.get("endCalYear")
+                if end_month and end_year:
+                    try:
+                        year, month = int(end_year), int(end_month)
+                        last_day = calendar.monthrange(year, month)[1]
+                        add(date(year, month, last_day))
+                    except (ValueError, OverflowError):
+                        pass
 
         earnings_info.upcoming.sort()
         earnings_info.past.sort(reverse=True)
