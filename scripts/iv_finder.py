@@ -1,7 +1,8 @@
 import asyncio
-from argparse import ArgumentParser
+import textwrap
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from logging import basicConfig, INFO, getLogger
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 from enum import IntEnum
 
 import pandas
@@ -10,21 +11,22 @@ import traceback
 
 from core.common import RequestedInfoType, ScrapeLevel
 from core.base_driver import BaseDriver
+from core.earnings_manager import EarningsManager
 from core.ib.ib_driver import IBDriver, BarSize
 from core.stock_data_manager import StockDataManager
 from core.stock_data import StockDataException
 from core.utils import get_datetime, get_datetime_as_str, current_datetime, calculate_expected_move, bar_size_to_time
 from core.option_data_manager import OptionDataManager
 
-"""
-Utility for finding stocks with high or low IV rank. It's strongly recommended, before using, to build a data
-cache with the cache_data tool. 
+r"""
+Utility for finding stocks with high or low IV rank.
 
-Run like:
+Setup and usage:
+------------------------
 d:
 cd CodingProjects\Python\TWS2025
 conda activate options_2025_1
-python -m scripts.iv_finder --help
+python -m scripts.iv_finder --help    # full instruction manual with examples
 """
 
 CLIENT_ID = 20
@@ -50,13 +52,24 @@ def calculate_iv_rank(df: pandas.DataFrame) -> Tuple[float, float]:
     return rank, latest_iv
 
 
-async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bool, no_scrape: bool):
+async def find_stocks(
+    stock_manager: StockDataManager,
+    earnings_manager: EarningsManager,
+    iv_rank: float,
+    above: bool,
+    earnings_window: int,
+    earnings_after: bool,
+    no_scrape: bool,
+):
     """
     Find high or low IV stocks and print a list sorted by IV rank.
 
     :param stock_manager: StockDataManager instance, must be connected to broker
+    :param earnings_manager: EarningsManager instance
     :param iv_rank: desired IV rank to be above or below
     :param above: if True, want stocks with IV rank above iv_rank. Otherwise, the opposite.
+    :param earnings_window: in days from now
+    :param earnings_after: if True, earning should fall AFTER earnings window. If False, BEFORE.
     :param no_scrape: if True, used cached data only
     """
     stock_manager.set_log_to_stdout(False)
@@ -75,20 +88,41 @@ async def find_stocks(stock_manager: StockDataManager, iv_rank: float, above: bo
             print(f"Error finding IV rank with {key}, is: {error_msg}")
             continue
 
-        if above and rank >= iv_rank:
-            found_map[key] = (rank, latest_iv)
-        if not above and rank <= iv_rank:
-            found_map[key] = (rank, latest_iv)
+        days_to_earnings = earnings_manager.get_next_date(symbol, in_days=True)
+
+        # Filter out any that fail to meet criteria about earnings and IV rank
+        # If not earnings date can be found (e.g. ETFs don't have earnings), don't consider that criteria
+
+        if above and rank < iv_rank:
+            continue
+        if not above and rank > iv_rank:
+            continue
+        if days_to_earnings is not None:
+            if earnings_after and days_to_earnings < earnings_window:
+                continue
+            if not earnings_after and days_to_earnings > earnings_window:
+                continue
+
+        found_map[key] = (rank, latest_iv)
 
     # Sort by IV rank
     found_map = dict(sorted(found_map.items(), key=lambda item: item[1][0], reverse=above))
 
-    print(f"Stocks with IV rank {'above' if above else 'below'} {iv_rank}:")
+    stock_list: List[str] = []
+
+    print(f"\nStocks with IV rank {'above' if above else 'below'} {iv_rank}:")
     print("----------------------------------------")
     for key, info in found_map.items():
         symbol, bar_size, info_type = stock_manager.get_key_elements(key)
+        stock_list.append(symbol)
         rank, iv = info
-        print(f"{symbol}: rank is {rank:.2f}, IV is {iv:.2f}")
+        days_to_earnings = earnings_manager.get_next_date(symbol, in_days=True)
+        earnings_str = ""
+        if days_to_earnings is not None:
+            earnings_str = f", earnings are in {days_to_earnings} days"
+        print(f"{symbol}: rank is {rank:.2f}, IV is {iv:.2f}{earnings_str}")
+
+    print(f"\nSymbol list is: {",".join(stock_list)}")
 
 
 async def get_single_stock_data(
@@ -251,11 +285,38 @@ async def main(parser: ArgumentParser):
     options_manager = OptionDataManager()
     options_manager.add_driver(data_driver)
 
+    earnings_manager = EarningsManager()
+    earnings_manager.set_tickers_from_file("data/optionable.txt")
+
     try:
-        if args.above >= 0:
-            await find_stocks(stock_manager, args.above, True, no_scrape=args.info_only)
-        elif args.below >= 0:
-            await find_stocks(stock_manager, args.below, False, no_scrape=args.info_only)
+        if args.above >= 0 or args.below >= 0 or args.earnings_before >= 0 or args.earnings_after >= 0:
+            iv_rank_should_be_above = True
+            iv_rank = 0.0
+            if args.above >= 0:
+                iv_rank = args.above
+                iv_rank_should_be_above = True
+            elif args.below >= 0:
+                iv_rank = args.below
+                iv_rank_should_be_above = False
+
+            earnings_window = 0
+            after = True
+            if args.earnings_before >= 0:
+                earnings_window = args.earnings_before
+                after = False
+            elif args.earnings_after >= 0:
+                earnings_window = args.earnings_after
+                after = True
+
+            await find_stocks(
+                stock_manager,
+                earnings_manager,
+                iv_rank,
+                above=iv_rank_should_be_above,
+                earnings_window=earnings_window,
+                earnings_after=after,
+                no_scrape=args.info_only,
+            )
         elif args.move:
             if args.symbol is None:
                 print("No symbol given.")
@@ -288,7 +349,51 @@ async def main(parser: ArgumentParser):
         data_driver.disconnect()
 
 
-parser = ArgumentParser(description="Tool for finding high or low IV stocks")
+parser = ArgumentParser(
+    prog="python -m scripts.iv_finder",
+    formatter_class=RawDescriptionHelpFormatter,
+    description=textwrap.dedent(
+        """\
+        Find stocks with high or low IV rank, inspect a single symbol's option chain,
+        or estimate a stock's expected move.
+
+        It is strongly recommended, before using, to build a data cache with the
+        cache_data tool (see the first example below). Requires IB Gateway or TWS
+        running locally (defaults to the paper/sim account).
+        """
+    ),
+    epilog=textwrap.dedent(
+        """\
+        Examples:
+          # First, build the IV data cache this tool reads from
+          python -m scripts.cache_data --file .\\data\\optionable.txt --db .\\data\\iv_data.h5 --info-type iv --limited
+
+          # List stocks with IV rank above 50%
+          python -m scripts.iv_finder --above 50
+
+          # List stocks with IV rank below 25% whose earnings are more than 30 days out
+          python -m scripts.iv_finder --below 25 --earnings-after 30
+
+          # Filter by earnings alone (ignore IV): stocks with earnings within 7 days
+          python -m scripts.iv_finder --earnings-before 7
+
+          # Inspect a single symbol's put/call chains near 45 DTE
+          python -m scripts.iv_finder --symbol SPY --dte 45
+
+          # Inspect a specific expiration and delta
+          python -m scripts.iv_finder --symbol SPY --date 20250627 --delta 0.30
+
+          # Show the expected move for a symbol
+          python -m scripts.iv_finder --symbol SPY --dte 45 --move
+
+        Notes:
+          * --above / --below take an IV rank in percent (0-100); give one, not both.
+          * --earnings-after / --earnings-before filter by days until earnings.
+          * --date (YYYYMMDD) overrides --dte when both are given.
+          * --info-only uses cached data only and performs no scraping.
+        """
+    ),
+)
 parser.add_argument(
     "--above",
     help="IV rank to be above, in percent",
@@ -302,6 +407,20 @@ parser.add_argument(
     required=False,
     default=-1.0,
     type=float,
+)
+parser.add_argument(
+    "--earnings-after",
+    help="Only stocks with earnings further away than X days in the future will be shown",
+    required=False,
+    default=-1,
+    type=int,
+)
+parser.add_argument(
+    "--earnings-before",
+    help="Only stocks with earnings nearer than X days in the future will be shown",
+    required=False,
+    default=-1,
+    type=int,
 )
 parser.add_argument(
     "--symbol",

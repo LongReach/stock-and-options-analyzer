@@ -7,6 +7,7 @@ from enum import IntEnum
 import pandas
 from datetime import timedelta
 import argparse
+import textwrap
 import traceback
 
 from core.common import RequestedInfoType, ScrapeLevel
@@ -16,29 +17,15 @@ from core.stock_data_manager import StockDataManager
 from core.stock_data import StockData
 from core.utils import str_to_bar_size, get_datetime_as_str, current_datetime, get_bars_between_times, bar_size_to_time
 
-"""
+r"""
 Utility for collecting price (or other) data for a particular security, in bar form, then caching it to disk.
-Building the cache from scratch can take a long time, on the order of half and hour, and often requires 
-multiple runs of this program, due to data-throttling timeouts from Interactive Brokers. However, once the
-cache exists, updating it is relatively quick.
 
-Run like:
+Setup and usage:
 ------------------------
 d:
 cd CodingProjects\Python\TWS2025
 conda activate options_2025_1
-python -m scripts.cache_data --help
-
-To build data cache for price data
-------------------------
-python -m scripts.cache_data --file .\data\optionable.txt --db .\data\market_data.h5
-
-To build data cache for iv_finder tool
-------------------------
-python -m scripts.cache_data --file .\data\optionable.txt --db .\data\iv_data.h5 --info-type iv --limited
-
-To see cache contents:
-python -m scripts.cache_data --db .\data\iv_data.h5 --info-type iv --show
+python -m scripts.cache_data --help    # full instruction manual with examples
 """
 
 CLIENT_ID = 13
@@ -402,7 +389,44 @@ async def main(parser: argparse.ArgumentParser):
         data_driver.disconnect()
 
 
-parser = argparse.ArgumentParser(description="Tool for caching market data on disk")
+parser = argparse.ArgumentParser(
+    prog="python -m scripts.cache_data",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    description=textwrap.dedent(
+        """\
+        Collect price (or other) data for a security, in bar form, and cache it to disk.
+
+        Building the cache from scratch can take a long time, on the order of half an
+        hour, and often requires multiple runs of this program, due to data-throttling
+        timeouts from Interactive Brokers. However, once the cache exists, updating it
+        is relatively quick.
+
+        Requires IB Gateway or TWS running locally (defaults to the paper/sim account).
+        """
+    ),
+    epilog=textwrap.dedent(
+        """\
+        Examples:
+          # Build data cache for price data
+          python -m scripts.cache_data --file .\\data\\optionable.txt --db .\\data\\market_data.h5
+
+          # Build data cache for the iv_finder tool
+          python -m scripts.cache_data --file .\\data\\optionable.txt --db .\\data\\iv_data.h5 --info-type iv --limited
+
+          # Cache a single symbol
+          python -m scripts.cache_data --symbol SPY --bar-size 1d --db .\\data\\market_data.h5
+
+          # See what is currently in a cache
+          python -m scripts.cache_data --db .\\data\\iv_data.h5 --info-type iv --show
+
+        Notes:
+          * bar-size accepts values like 1m, 2m, 5m, 15m, 1h, 4h, 1d, 1w, 1mo (default: 1d).
+          * info-type accepts tr (trades), iv, hv, al (default: tr).
+          * Use --symbol for one ticker or --file for a list; --file is required to
+            cache/remove multiple tickers at once.
+        """
+    ),
+)
 parser.add_argument("--symbol", help="Ticker symbol", required=False, default=None, type=str)
 parser.add_argument(
     "--file",
@@ -430,7 +454,11 @@ parser.add_argument("--info-only", help="Don't do any scraping, just show info",
 parser.add_argument(
     "--show", help="Show what data is in cache. Use --bar-size or --info-type to narrow it down.", action="store_true"
 )
-parser.add_argument("--remove", help="Remove symbol(s) from cache. Requires --symbol for single symbol, --file for list of symbols to remove.", action="store_true")
+parser.add_argument(
+    "--remove",
+    help="Remove symbol(s) from cache. Requires --symbol for single symbol, --file for list of symbols to remove.",
+    action="store_true",
+)
 parser.add_argument(
     "--update",
     help="Forces the getting of most recent data. Works when caching single or multiple stocks.",

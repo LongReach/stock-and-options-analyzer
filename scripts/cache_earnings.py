@@ -1,12 +1,11 @@
 """
 Caches Nasdaq earnings calendar data for a list of stocks of interest.
 
-Run like:
-    python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt
-    python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt --start 20240101 --end 20261231
+Run `python -m scripts.cache_earnings --help` for the full instruction manual.
 """
 
 import argparse
+import textwrap
 from datetime import date, timedelta
 
 from core.earnings_manager import EarningsManager
@@ -39,6 +38,7 @@ def show_contents(earnings_manager: EarningsManager):
     for t in tickers:
         print(f"  {t}")
 
+
 def show_data(earnings_manager: EarningsManager, symbol: str):
     """
     Pretty-prints the data cached by EarningsManager for a particular stock. If data can't be found, prints a message
@@ -67,6 +67,7 @@ def show_data(earnings_manager: EarningsManager, symbol: str):
     print(f"{symbol} — {len(df)} entries")
     print("=" * 80)
     print(display.to_string())
+
 
 def main(parser: argparse.ArgumentParser):
     today = date.today()
@@ -99,12 +100,46 @@ def main(parser: argparse.ArgumentParser):
         print("Nothing to do.")
 
 
-parser = argparse.ArgumentParser(description="Cache Nasdaq earnings calendar data to HDF5")
+parser = argparse.ArgumentParser(
+    prog="python -m scripts.cache_earnings",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    description=textwrap.dedent(
+        """\
+        Cache Nasdaq earnings calendar data to an HDF5 file.
+
+        Scrapes earnings dates for a list of tickers over a date range and stores them
+        for use by other tools (e.g. the earnings filters in iv_finder).
+        """
+    ),
+    epilog=textwrap.dedent(
+        """\
+        Examples:
+          # Scrape earnings for a list of tickers (default range: 2 years back to 1 year ahead)
+          python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt
+
+          # Scrape a specific date range
+          python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt --start 20240101 --end 20261231
+
+          # List every ticker currently in the cache
+          python -m scripts.cache_earnings --db data/earnings_data.h5 --show
+
+          # Show cached earnings entries for a single symbol
+          python -m scripts.cache_earnings --db data/earnings_data.h5 --show --symbol SPY
+
+        Notes:
+          * --start / --end take dates in YYYYMMDD format.
+          * --file is required to scrape; --show reads the existing cache instead.
+          * --symbol only applies together with --show.
+        """
+    ),
+)
 parser.add_argument("--db", required=True, help="Path to .h5 database file")
 parser.add_argument("--file", default=None, required=False, help="Path to text file with one ticker per line")
 parser.add_argument("--start", default=None, help="Start date in YYYYMMDD format (default: 2 years ago)")
 parser.add_argument("--end", default=None, help="End date in YYYYMMDD format (default: 1 year from now)")
 parser.add_argument("--show", help="Show contents of cache. Can be paired with --symbol.", action="store_true")
-parser.add_argument("--symbol", default=None, help="If given, show earnings info for particular symbol. Must be paired with --show.")
+parser.add_argument(
+    "--symbol", default=None, help="If given, show earnings info for particular symbol. Must be paired with --show."
+)
 
 main(parser)
