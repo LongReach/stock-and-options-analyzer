@@ -134,6 +134,7 @@ async def get_single_stock_data(
     no_scrape: bool,
     delta: Optional[float],
     strike: Optional[float],
+    move: bool = False,
 ):
     """
     Print data of potential options trades for a particular security.
@@ -146,6 +147,7 @@ async def get_single_stock_data(
     :param no_scrape: if given, no data will be pulled from online, only cache.
     :param delta: if given, desired delta. Otherwise, get wide chain of options.
     :param strike: if given, desired strike. If not given, strikes will be chosen by delta.
+    :param move: if True, print the expected move (IV and ATM straddle methods) instead of option chains.
     :return:
     """
     stock_manager.set_log_to_stdout(False)
@@ -190,6 +192,17 @@ async def get_single_stock_data(
         f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
     )
 
+    if move:
+        print("Please wait for ATM straddle move...")
+        atm_straddle_move, best_strike, error_msg = await options_manager.get_atm_straddle_move(
+            symbol, best_expiration_date_str
+        )
+        if error_msg:
+            print(f"Error getting ATM straddle: {error_msg}")
+            return
+        print(f"ATM straddle move, one standard deviation: {atm_straddle_move}, using strikes at {best_strike}")
+        print(f"ATM straddle move, two standard deviations: {atm_straddle_move * 2.0}")
+
     # Get both put and call chains, then print them
     sides = [("P", "put"), ("C", "call")]
     for side in sides:
@@ -213,58 +226,6 @@ async def get_single_stock_data(
         )
         df = option_data.get_dataframe(drop_columns=["date", "expiration"])
         print(f"The {contract_type} chain is:\n{df}")
-
-
-async def find_move(stock_manager: StockDataManager, options_manager: OptionDataManager, symbol: str, dte: int):
-    """
-    Finds and prints expected move of stock, using both IV and ATM straddle methods.
-
-    :param stock_manager: StockManager instance. Connection to brokerage must be established.
-    :param options_manager: OptionsDataManager instance. Same about connection.
-    :param symbol: ticker symbol, e.g. SPY
-    :param dte: days to expiration
-    """
-    stock_manager.set_log_to_stdout(False)
-
-    rank, latest_iv, error_msg = await stock_manager.get_iv_rank(symbol, cache_only=False, acceptable_recency=2)
-    if error_msg is not None:
-        print(f"Error finding IV rank for {symbol}, is: {error_msg}")
-        return
-
-    price, error_msg = await stock_manager.get_most_recent_price(symbol)
-    if error_msg is not None:
-        print(f"Error getting underlying price for symbol {symbol}")
-        return
-
-    print(f"\nInfo for {symbol}:\n----------------------------------------------")
-    print(f"Current price: {price}")
-    print(f"IV rank is {rank}, IV is {latest_iv}")
-    expirations = await options_manager.get_expirations(symbol, int(dte / 2), dte * 2)
-    print(f"Nearby expirations are: {expirations}")
-    if len(expirations) == 0:
-        print(f"Could not find options contracts with appropriate expirations for {symbol}")
-        return
-
-    best_expiration_dt, best_dte, error_msg = await options_manager.get_best_expiration(symbol, dte)
-    if error_msg:
-        print(f"Error finding best expiration: {error_msg}")
-        return
-
-    best_expiration_date_str = get_datetime_as_str(best_expiration_dt)
-    expected_move = calculate_expected_move(price, latest_iv, best_dte)
-    print(
-        f"Expected move for {best_dte} DTE option expiring on {best_expiration_date_str} (~{dte} days) is {expected_move:.2f}, between {price - expected_move:.2f} and {price + expected_move:.2f}"
-    )
-
-    print("Please wait for ATM straddle move...")
-    atm_straddle_move, best_strike, error_msg = await options_manager.get_atm_straddle_move(
-        symbol, best_expiration_date_str
-    )
-    if error_msg:
-        print(f"Error getting ATM straddle: {error_msg}")
-        return
-    print(f"ATM straddle move, one standard deviation: {atm_straddle_move}, using strikes at {best_strike}")
-    print(f"ATM straddle move, two standard deviations: {atm_straddle_move * 2.0}")
 
 
 async def main(parser: ArgumentParser):
@@ -317,15 +278,6 @@ async def main(parser: ArgumentParser):
                 earnings_after=after,
                 no_scrape=args.info_only,
             )
-        elif args.move:
-            if args.symbol is None:
-                print("No symbol given.")
-            else:
-                dte = args.dte
-                if args.date is not None:
-                    date_dt = get_datetime(args.date)
-                    dte = (date_dt - current_datetime()).days
-                await find_move(stock_manager, options_manager, args.symbol, dte)
         elif args.symbol is not None:
             await get_single_stock_data(
                 stock_manager,
@@ -336,7 +288,10 @@ async def main(parser: ArgumentParser):
                 no_scrape=args.info_only,
                 delta=args.delta,
                 strike=args.strike,
+                move=args.move,
             )
+        elif args.move:
+            print("No symbol given.")
         else:
             print("No --above or --below argument given")
     except asyncio.CancelledError:
@@ -388,7 +343,8 @@ parser = ArgumentParser(
 
         Notes:
           * --above / --below take an IV rank in percent (0-100); give one, not both.
-          * --earnings-after / --earnings-before filter by days until earnings.
+          * --earnings-after / --earnings-before filter by days until earnings, and
+            may be used on their own (without --above/--below) to filter by earnings only.
           * --date (YYYYMMDD) overrides --dte when both are given.
           * --info-only uses cached data only and performs no scraping.
         """
