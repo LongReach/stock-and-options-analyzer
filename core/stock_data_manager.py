@@ -279,6 +279,7 @@ class StockDataManager:
                 # The start datetime precedes the datetime of the earliest available bar offered by the broker, so
                 # adjust it to match reality.
                 start_dt = head_timestamp_dt
+                start_date = get_datetime_as_str(start_dt)
 
         # Scrape data that's older than already-loaded data
         if start_dt is not None and start_dt < oldest_dt:
