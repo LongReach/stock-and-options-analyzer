@@ -1,5 +1,4 @@
 import asyncio
-from tokenize import group
 from typing import Optional, Dict, List, Tuple, Callable, Any
 from enum import Enum, auto
 from logging import getLogger
@@ -13,8 +12,7 @@ from core.common import (
     HistoricalData,
     OrderPurpose,
 )
-from core.utils import wait_for_condition
-from core.ib_driver import IBDriver
+from core.base_driver import BaseDriver
 
 
 class OrderGroup:
@@ -99,7 +97,7 @@ class Position:
     to the cash reserve (or subtracted, if a loss).
     """
 
-    ib_driver: IBDriver = None
+    data_driver: BaseDriver = None
     logger = getLogger(__file__)
     next_id = 1
 
@@ -442,7 +440,7 @@ class Position:
                 group.earlier_tp_orders.append(group.take_profit_order)
 
         action = OrderAction.SELL if direction == PositionDirection.LONG else OrderAction.BUY
-        take_profit_order, error_str = await self.ib_driver.place_order(
+        take_profit_order, error_str = await self.data_driver.place_order(
             self.security_descriptor.to_string(),
             action=action,
             quantity=tp_num_shares,
@@ -730,7 +728,7 @@ class Position:
         await self._to_state_cancel(self.position_direction)
 
         action = OrderAction.SELL if self.position_direction == PositionDirection.LONG else OrderAction.BUY
-        exit_order, error_str = await self.ib_driver.place_order(
+        exit_order, error_str = await self.data_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
             action=action,
             quantity=num_shares,
@@ -788,7 +786,7 @@ class Position:
                 return
 
             try:
-                await self.ib_driver.cancel_order(order_info)
+                await self.data_driver.cancel_order(order_info)
             except Exception as e:
                 self.logger.warning(f"Exception while canceling order: {e}")
                 pass
@@ -854,7 +852,7 @@ class Position:
             price = stop_loss_order.avg_fill_price
 
         action = OrderAction.SELL if direction == PositionDirection.LONG else OrderAction.BUY
-        stop_loss_order, error_str = await self.ib_driver.change_order(
+        stop_loss_order, error_str = await self.data_driver.change_order(
             stop_loss_order,
             action=action,
             quantity=shares_left,
@@ -894,7 +892,7 @@ class Position:
         else:
             new_price = price
 
-        adjusted_order, error_str = await self.ib_driver.change_order(
+        adjusted_order, error_str = await self.data_driver.change_order(
             order_info,
             action=action,
             quantity=order_info.shares_remaining,
@@ -915,7 +913,7 @@ class Position:
         num_shares = int(max_loss / (_entry - _stop))
         cost = float(num_shares) * _entry
         entry_order_type = OrderType.MARKET if market_order else OrderType.STOP
-        entry_order, error_str = await self.ib_driver.place_order(
+        entry_order, error_str = await self.data_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
             action=OrderAction.BUY,
             quantity=num_shares,
@@ -925,7 +923,7 @@ class Position:
         )
         if error_str is not None:
             raise PositionException(f"Error activating order: {error_str}")
-        stop_loss_order, error_str = await self.ib_driver.place_order(
+        stop_loss_order, error_str = await self.data_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
             action=OrderAction.SELL,
             quantity=num_shares,
@@ -945,7 +943,7 @@ class Position:
         num_shares = int(max_loss / (_stop - _entry))
         cost = float(num_shares) * _entry
         entry_order_type = OrderType.MARKET if market_order else OrderType.STOP
-        entry_order, error_str = await self.ib_driver.place_order(
+        entry_order, error_str = await self.data_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
             action=OrderAction.SELL,
             quantity=num_shares,
@@ -955,7 +953,7 @@ class Position:
         )
         if error_str is not None:
             raise PositionException(f"Error activating order: {error_str}")
-        stop_loss_order, error_str = await self.ib_driver.place_order(
+        stop_loss_order, error_str = await self.data_driver.place_order(
             symbol_full=self.security_descriptor.to_string(),
             action=OrderAction.BUY,
             quantity=num_shares,

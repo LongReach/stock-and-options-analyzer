@@ -1,0 +1,48 @@
+# Instructions for Claude
+
+## Brief Description of Goals
+
+I'd like to be able to get earnings dates, future and past, for stocks of my choosing. It probably makes the most sense to attempt this project using `yfinance` as a data source.
+
+## More Detailed Instructions
+
+### Phase One
+
+In the `core/` folder, please add a source file called `earnings.py`. This will contain the "API" for accessing earning datas via `yfinance`.
+
+In the `scripts/examples/` folder, please make a script that exercises `earnings.py` and prints a list of earnings dates for some stock specified in the arguments. Please use `argparse`, as I do for other scripts.
+
+### Phase Two
+
+I don't like that `yfinance` limits the amount of data that I can pull at any one time. I just realized that I have the right subscription to get earnings dates from Interactive Brokers, so let's try that approach. Please modify the classes `IBDriver` and `BaseDriver` to support this functionality. As in Phase One, I'd like to be able to get both past and future earnings dates.
+
+In the `scripts/examples/` folder, please make a script called `ib_earnings_example.py`. This will exercise the new code.
+
+### Phase Three
+
+Please make a new git branch called `earnings_2`. It must be based on the branch `devel`.
+
+Please delete the files `earnings.py` and `earnings_example.py`.
+
+Create a file called `earnings_manager.py` in `core/`, and one called `cache_earnings.py` in `scripts/`. The former will contain a class called `EarningsManager`. This class, once instantiated, will receive a list of stocks of interest. Then, from 'https://api.nasdaq.com/api/calendar/earnings?date=', it will scrape calendar data in a date range specified by the class's user. Whenever an earnings date is found for a stock of interest, it will be cached into an `.h5` file, with the key being the ticker symbol for that stock. `EarningsManager` will have a function for specifying the path to the database `.h5` file.
+
+Other data that can be scraped from the Nasdaq calendar should be stored in the cache as well. This might include:
+* Company Name
+* EPS
+* % Surprise
+* Market Cap
+* Fiscal Quarter Ending
+* Consensus EPS Forecast
+* Number of Ests
+
+Ultimately, `EarningsManager` will perform these functions for its clients:
+* Scrape the Nasdaq calendar and cache the dates
+* Allow clients to collect, from the cache, past earnings dates for a particular stock, or future ones. The list of dates will be sorted.
+
+We do not care about the dates for any stock that's not a stock of interest given to `EarningsManager`.
+
+The script `cache_earnings.py` will be conceptually similar to `cache_data.py`, except it will exercise `EarningsManager`. Please use `argparse`. As arguments, the script will take:
+* Path to .h5 file that serves as the database
+* Path to a text file containing list of stocks of interest
+* An optional start date, in `YYYYMMDD` format. If not given, use a date two years in the past.
+* An optional end date, in `YYYYMMDD` format. If not given, use a date one year in the future.

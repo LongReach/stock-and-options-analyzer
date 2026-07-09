@@ -31,10 +31,10 @@ def main():
     print()
 
     # Get second item by raw index, should be Orange
-    print(f"Fruit at raw index 1 {fruit_df.iloc[1]["Fruit"]}")
+    print(f"Fruit at raw index 1 {fruit_df.iloc[1]['Fruit']}")
 
     # Get last item by raw index, should be Grape
-    print(f"Fruit at raw index -1 {fruit_df.iloc[-1]["Fruit"]}")
+    print(f"Fruit at raw index -1 {fruit_df.iloc[-1]['Fruit']}")
 
     # Get index at raw index 0, should be 1
     print(f"Index at raw index 0 is {fruit_df.index[0]}")
@@ -77,6 +77,25 @@ def main():
 
     # Want lizard
     print(f"\nShould be lizard: {selection.loc[4]}")
+
+    stock_df_1 = pd.DataFrame(
+        {
+            "open": [50.0, 53.0, 53.5, 53.25],
+            "close": [52.75, 53.1, 53.25, 53.75],
+        },
+        index=["051926", "052026", "052126", "052226"],
+    )
+    stock_df_2 = pd.DataFrame(
+        {
+            "open": [53.5, 53.25, 54.0],
+            "close": [53.25, 53.75, 54.3],
+        },
+        index=["052126", "052226", "052626"],
+    )
+    combined_stock_dfs = pd.concat([stock_df_1, stock_df_2])
+    print("\nCombined stock price dataframes, with duplicates, are:\n", combined_stock_dfs)
+    combined_stock_dfs.drop_duplicates(inplace=True)
+    print("\nCombined stock price dataframes, without duplicates, are:\n", combined_stock_dfs)
 
 
 main()

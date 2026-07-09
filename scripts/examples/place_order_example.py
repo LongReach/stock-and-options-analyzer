@@ -1,10 +1,6 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from time import sleep
-from typing import List, Tuple, Dict, Optional
-from ibapi.common import BarData
-from datetime import datetime
+from typing import Tuple, Optional
 
 from core.common import (
     HistoricalData,
@@ -15,8 +11,8 @@ from core.common import (
     OrderStatus,
     PositionsInfo,
 )
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.base_driver import BaseDriver
+from core.ib.ib_driver import IBDriver, BarSize
 
 """
 An example of how to place an order with IB. This script should be used while the TWS desktop application
@@ -31,7 +27,7 @@ ACTION = OrderAction.SELL
 ORDER_TYPE = OrderType.STOP
 
 
-async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Optional[Tuple[OrderInfo, OrderInfo]]:
+async def make_orders(data_driver: BaseDriver, price_data: HistoricalData) -> Optional[Tuple[OrderInfo, OrderInfo]]:
     bar_highs = [bar.high for bar in price_data.bar_data]
     highest_recent_price = max(bar_highs)
     bar_lows = [bar.low for bar in price_data.bar_data]
@@ -44,7 +40,7 @@ async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Option
         entry_price = lowest_recent_price - 5.0
         stop_out_price = entry_price + (highest_recent_price - lowest_recent_price)
 
-    order_info, error_str = await ib_driver.place_order(
+    order_info, error_str = await data_driver.place_order(
         symbol_full=TICKER,
         action=ACTION,
         quantity=5,
@@ -60,7 +56,7 @@ async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Option
     print(f"Order info is: {order_info.get_info_str()}")
 
     stop_action = OrderAction.SELL if ACTION == OrderAction.BUY else OrderAction.BUY
-    stop_order_info, error_str = await ib_driver.place_order(
+    stop_order_info, error_str = await data_driver.place_order(
         symbol_full=TICKER,
         action=stop_action,
         quantity=5,
@@ -79,12 +75,12 @@ async def make_orders(ib_driver: IBDriver, price_data: HistoricalData) -> Option
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="place_order_example.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=False)
     try:
-        ib_driver.connect()
+        data_driver.connect()
 
         # Get some recent bars of trading data, then work out the highest price recently achieved
-        price_data, error_str = await ib_driver.get_historical_data(
+        price_data, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=4,
             live_data=False,
@@ -95,10 +91,10 @@ async def main():
             print(f"Failed to get price data for {TICKER}. Error is: {error_str}")
             return
 
-        result = await make_orders(ib_driver, price_data)
+        result = await make_orders(data_driver, price_data)
 
         async def _get_positions():
-            position_info, _error_str = await ib_driver.get_positions()
+            position_info, _error_str = await data_driver.get_positions()
             if _error_str:
                 print(f"Positions gotten, error is {_error_str}")
             return position_info
@@ -130,7 +126,7 @@ async def main():
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    ib_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

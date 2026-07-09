@@ -1,47 +1,39 @@
 import asyncio
 import math
 from asyncio import CancelledError
-from typing import Optional, List, Union, Tuple, Any, Dict
+from typing import Optional, List, Union, Tuple
 import logging
-import pandas as pd
-from ibapi.contract import ContractDetails
-from pandas import DataFrame, read_pickle, DatetimeIndex
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from pandas.core.resample import maybe_warn_args_and_kwargs
-
-from core.common import HistoricalData, OptionInfo
+from core.common import OptionInfo
 from core.cache import TTLCache
 from core.utils import (
     BarSize,
-    bar_size_to_str,
-    str_to_bar_size,
-    bar_size_to_time,
     get_datetime,
-    get_datetime_as_str,
     current_datetime,
     get_full_symbol_name,
+    get_best_strike,
 )
 from core.options_data import OptionData, OptionDataException
-from core.ib_driver import IBDriver
+from core.base_driver import BaseDriver
 
 _logger = logging.getLogger(__name__)
 
 
 class OptionDataManager:
     """
-    Wraps IBDriver, providing functions that simplify collecting options data or placing options orders.
+    Wraps a BaseDriver, providing functions that simplify collecting options data or placing options orders.
     """
 
     def __init__(self):
         self._logger = logging.getLogger(__name__)
-        self._ib_driver: Optional[IBDriver] = None
+        self._data_driver: Optional[BaseDriver] = None
         self._opt_info_cache: TTLCache[OptionInfo] = TTLCache(maxsize=100, ttl=120.0)
 
-    def add_driver(self, ib_driver: IBDriver):
-        self._ib_driver = ib_driver
-        if not ib_driver.is_connected():
-            self._ib_driver.connect()
+    def add_driver(self, data_driver: BaseDriver):
+        self._data_driver = data_driver
+        if not data_driver.is_connected():
+            self._data_driver.connect()
 
     async def get_expirations(self, ticker: str, min_days_away: int, max_days_away: int) -> List[str]:
         """
@@ -55,7 +47,7 @@ class OptionDataManager:
             f"Getting expirations for {ticker}, min_days_away={min_days_away}, max_days_away={max_days_away}"
         )
         # This is the CD for the stock, not any option
-        options_chain_info, error_str = await self._ib_driver.get_options_chain_info(ticker, primary_exchange="NYSE")
+        options_chain_info, error_str = await self._data_driver.get_options_chain_info(ticker, primary_exchange=None)
         if error_str:
             raise OptionDataException(error_str)
 
@@ -72,22 +64,34 @@ class OptionDataManager:
         return out_expirations
 
     async def get_strikes(
-        self, ticker: str, expiration: str, right: str, num_below: int, num_above: int
+        self,
+        ticker: str,
+        expiration: str,
+        right: str,
+        num_below: Optional[int] = None,
+        num_above: Optional[int] = None,
+        min_strike: Optional[float] = None,
+        max_strike: Optional[float] = None,
     ) -> Tuple[List[float], int]:
         """
         Gets all strikes for a particular stock at a particular expiration date.
         :param ticker: underlying stock/ETF
         :param expiration: IB-style date
         :param right: "C" or "P"
-        :param num_below: number of strikes above at-the-money price
-        :param num_above: number of strikes below at-the-money price
+        :param num_below: number of strikes below at-the-money price, or None if all strikes
+        :param num_above: number of strikes above at-the-money price, or None if all strikes
+        :param min_strike: if given, lowest allowed strike price to return
+        :param max_strike: if given, highest allowed strike price to return
         :return: (list of strikes, index of which strike is closest to ATM)
         """
-        self._logger.info(
-            f"Getting strikes for {ticker}, expiration={expiration}, right={right}, num_below={num_below}, num_above={num_above}"
-        )
+        info_str = f"Getting strikes for {ticker}, expiration={expiration}, right={right}"
+        if num_below:
+            info_str += f", num_below={num_below}"
+        if num_above:
+            info_str += f", num_above={num_above}"
+        self._logger.info(info_str)
 
-        option_info_list, error_str = await self._ib_driver.get_option_info(
+        option_info_list, error_str = await self._data_driver.get_option_info(
             ticker,
             is_call=(right == "C"),
             expiration=expiration,
@@ -101,7 +105,7 @@ class OptionDataManager:
 
         underlying_price = await self._get_underlying_price(ticker)
 
-        # Closest to being at the money
+        # Will reference closest to being at the money
         closest_strike_idx: int = 0
         best_dist = 1000000
         for idx, strike in enumerate(strikes):
@@ -109,13 +113,38 @@ class OptionDataManager:
                 best_dist = math.fabs(strike - underlying_price)
                 closest_strike_idx = idx
 
-        # Go from lowest allowed strike to highest
-        lowest_idx = closest_strike_idx - num_below
-        if lowest_idx < 0:
+        # Constrain results to how many strikes to go below/above
+        if num_below:
+            lowest_idx = closest_strike_idx - num_below
+            if lowest_idx < 0:
+                lowest_idx = 0
+        else:
             lowest_idx = 0
-        highest_idx = closest_strike_idx + num_above
-        if highest_idx > len(strikes):
+        if num_above:
+            highest_idx = closest_strike_idx + num_above
+            if highest_idx > len(strikes):
+                highest_idx = len(strikes)
+        else:
             highest_idx = len(strikes)
+        strikes = strikes[lowest_idx:highest_idx]
+        closest_strike_idx = closest_strike_idx - lowest_idx
+
+        # Now, we take into account lowest and highest desired strike price
+        lowest_idx = 0
+        if min_strike:
+            for idx, strike in enumerate(strikes):
+                if strike >= min_strike:
+                    lowest_idx = idx
+                    break
+
+        highest_idx = len(strikes)
+        if max_strike:
+            # Note the different logic of this loop
+            for idx in range(len(strikes) - 1, -1, -1):
+                strike = strikes[idx]
+                if strike > max_strike:
+                    highest_idx = idx
+
         return strikes[lowest_idx:highest_idx], closest_strike_idx - lowest_idx
 
     async def get_option_chain(
@@ -154,7 +183,7 @@ class OptionDataManager:
         option_info_list: List[OptionInfo] = []
 
         for single_strike in strike_list:
-            temp_list, error_str = await self._ib_driver.get_option_info(
+            temp_list, error_str = await self._data_driver.get_option_info(
                 ticker,
                 is_call=(right == "C"),
                 expiration=expiration,
@@ -213,13 +242,13 @@ class OptionDataManager:
         if cached_oi is not None:
             return cached_oi
 
-        option_info, error_msg = await self._ib_driver.get_option_info_single(
+        option_info, error_msg = await self._data_driver.get_option_info_single(
             ticker=ticker, expiration=expiration, strike=strike, is_call=(right == "C")
         )
         if error_msg is not None:
             raise OptionDataException(f"Could not get option info: {error_msg}")
 
-        option_info, error_msg = await self._ib_driver.get_greeks(option_info)
+        option_info, error_msg = await self._data_driver.get_greeks(option_info)
         if error_msg is not None:
             raise OptionDataException(f"Could not get Greeks: {error_msg}")
 
@@ -228,9 +257,80 @@ class OptionDataManager:
 
         return option_info
 
-    async def _get_underlying_price(self, ticker: str):
-        """Get the latest trading price (within a minute) for ticker"""
-        ret_tup, error_str = await self._ib_driver.get_most_recent_data(ticker, BarSize.ONE_MINUTE)
+    async def get_best_expiration(self, symbol: str, desired_dte: int) -> Tuple[Optional[datetime], int, Optional[str]]:
+        """
+        Gets the best options expiration date that fits a desired DTE
+
+        :param symbol: ticker of security
+        :param desired_dte: preferred days to expiration
+        :return: (best fit options expiration date, days to that date, error message)
+        """
+        expirations = await self.get_expirations(symbol, int(desired_dte / 2), desired_dte * 2)
+        if len(expirations) == 0:
+            return None, 0, f"Could not find options contracts with appropriate expirations for {symbol}"
+        expiration_dts: List[datetime] = [get_datetime(exp) for exp in expirations]
+
+        # Find which of the available expiration dates is closest to desired DTE. Return date, actual DTE of contract.
+        best_diff = 1000000
+        best_exp = None
+        for exp in expiration_dts:
+            days_to_exp = (exp - current_datetime()).days
+            if abs(days_to_exp - desired_dte) < best_diff:
+                best_diff = abs(days_to_exp - desired_dte)
+                best_exp = exp
+
+        return best_exp, (best_exp - current_datetime()).days, None
+
+    async def get_atm_straddle_move(
+        self, symbol: str, expiration: str, standard_deviations: int = 1
+    ) -> Tuple[float, float, Optional[str]]:
+        """
+        Return ATM straddle move for security. Well-known formula of taking prices for ATM put and ATM call
+        and adding them together.
+
+        :param symbol: ticker
+        :param expiration: expiration date, IB-style
+        :param standard_deviations: number of standard deviations
+        :return: (expected move, best strike, error message)
+        """
+        price = await self._get_underlying_price(symbol, bar_size=BarSize.ONE_DAY)
+
+        put_strikes, _ = await self.get_strikes(symbol, expiration, "P", 4, 4)
+        if len(put_strikes) == 0:
+            return 0, 0, "No put strikes found"
+        best_put_strike = get_best_strike(put_strikes, price)
+
+        call_strikes, _ = await self.get_strikes(symbol, expiration, "C", 4, 4)
+        if len(call_strikes) == 0:
+            return 0, 0, "No call strikes found"
+        best_call_strike = get_best_strike(call_strikes, price)
+
+        try:
+            put_option_data = await self.get_option_chain(symbol, expiration, "P", best_put_strike)
+        except:
+            return 0, 0, "Failed to get put option data"
+
+        df = put_option_data.get_dataframe()
+        if len(df) == 0:
+            return 0, 0, "Put option chain empty for some reason"
+        put_price = df.iloc[0]["price"]
+
+        try:
+            call_option_data = await self.get_option_chain(symbol, expiration, "C", best_call_strike)
+        except:
+            return 0, 0, "Failed to get call option data"
+
+        df = call_option_data.get_dataframe()
+        if len(df) == 0:
+            return 0, 0, "Call option chain empty for some reason"
+        call_price = df.iloc[0]["price"]
+
+        atm_straddle_move = put_price + call_price
+        return atm_straddle_move * 1.25 * float(standard_deviations), best_put_strike, None
+
+    async def _get_underlying_price(self, ticker: str, bar_size: BarSize = BarSize.ONE_MINUTE):
+        """Get the latest trading price (within a minute by default) for ticker"""
+        ret_tup, error_str = await self._data_driver.get_most_recent_data(ticker, bar_size)
         if not ret_tup or error_str:
             raise OptionDataException(f"Couldn't get underlying price, error is: {error_str}")
         underlying_price = ret_tup[0]["close"]
@@ -261,7 +361,7 @@ class OptionDataManager:
         """
 
         # This limits the number of requests active with IB at once
-        MAX_TO_RETRIEVE_AT_ONCE = 15
+        MAX_TO_RETRIEVE_AT_ONCE = 10
         MAX_ERRORS = 5
 
         # Keep tracks of which entries in contract_details_list we've made tasks for
@@ -272,26 +372,34 @@ class OptionDataManager:
         ignore_strikes_above: float = 1000000000.0
         error_count = 0
 
+        # Note: deltas are negative for puts
+        delta_multiplier = 1.0 if right == "C" else -1.0
+
+        # The idea: once we get info about an options contract, including its delta, and we find out that
+        # the delta is higher or lower than desired, then we don't need to fetch data for contracts above/below
+        # that option's strike.
+
         def _set_ignorable_strikes(_option_info: OptionInfo):
             """Helper function to set values of ignore_strikes_below, ignore_strikes_above"""
             nonlocal ignore_strikes_above, ignore_strikes_below
             _strike = _option_info.strike
+            _delta = _option_info.delta * delta_multiplier
             if right == "C":
-                if _strike > underlying_price and _option_info.delta < min_delta:
+                if _strike > underlying_price and _delta < min_delta:
                     ignore_strikes_above = _strike
-                if _strike <= underlying_price and _option_info.delta > max_delta:
+                if _strike <= underlying_price and _delta > max_delta:
                     ignore_strikes_below = _strike
             else:
-                if _strike < underlying_price and _option_info.delta < min_delta:
+                if _strike < underlying_price and _delta < min_delta:
                     ignore_strikes_below = _strike
-                if _strike >= underlying_price and _option_info.delta > max_delta:
+                if _strike >= underlying_price and _delta > max_delta:
                     ignore_strikes_above = _strike
 
         def _test_for_ignorable(_option_info: OptionInfo):
             """Returns True if we don't need info for a particular options contract due to strike being too high or low"""
             return not (ignore_strikes_below <= _option_info.strike <= ignore_strikes_above)
 
-        # Loop until we've processed all ContractDetails and task queue is empty
+        # Loop until we've processed all OptionInfos and task queue is empty
         while current_idx < len(option_info_list) or len(task_queue) > 0:
 
             # Create new tasks as needed, keeping the queue of active tasks as full as possible
@@ -300,7 +408,7 @@ class OptionDataManager:
                 if not _test_for_ignorable(option_info):
                     task_name = option_info.full_name
                     self._logger.debug(f"Creating retrieval task for {task_name}")
-                    task = asyncio.create_task(self._ib_driver.get_greeks(option_info), name=task_name)
+                    task = asyncio.create_task(self._data_driver.get_greeks(option_info), name=task_name)
                     task_queue.append(task)
                 current_idx += 1
 
@@ -325,8 +433,11 @@ class OptionDataManager:
                             else:
                                 self._logger.debug(f"Task done for {option_info.full_name}")
                                 _set_ignorable_strikes(option_info)
+                                # Debugging
+                                # print(f"option {option_info.strike}/{option_info.delta}")
                                 if ignore_strikes_below <= option_info.strike <= ignore_strikes_above:
-                                    option_data.add_data(option_info)
+                                    if min_delta <= option_info.delta * delta_multiplier <= max_delta:
+                                        option_data.add_data(option_info)
 
                         if error_found:
                             if error_count >= MAX_ERRORS:

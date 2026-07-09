@@ -1,25 +1,25 @@
 import asyncio
+import calendar
 import copy
 import math
+import xml.etree.ElementTree as ET
 
 from _decimal import Decimal
 
-from core.utils import current_datetime, lock_with_timeout
+from core.utils import current_datetime
 from ibapi.contract import Contract, ContractDetails
-from ibapi.client import EClient
 from ibapi.order import *
 from ibapi.order_cancel import OrderCancel
 from ibapi.order_state import OrderState
-from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
+from ibapi.common import BarData, TickerId
 from ibapi.execution import Execution
 from ibapi.ticktype import TickType
-from ibapi.wrapper import EWrapper, OrderId
-from logging import getLogger, basicConfig
+from ibapi.wrapper import OrderId
+from logging import getLogger
 import threading
 import time
 from typing import Optional, Dict, List, Tuple, Union, Set
-from enum import Enum, auto
-from datetime import datetime, timedelta
+from datetime import datetime, date
 
 from core.common import (
     HistoricalData,
@@ -32,7 +32,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
-    PositionDescriptor,
+    EarningsInfo,
 )
 from core.utils import (
     wait_for_condition,
@@ -40,9 +40,8 @@ from core.utils import (
     get_datetime_as_str,
     BarSize,
     is_trading_hours,
-    get_full_symbol_name,
 )
-from core.ib_driver_requests import (
+from core.ib.ib_driver_requests import (
     ContractDetailsRequest,
     OptionChainInfoRequest,
     OptionRequest,
@@ -50,8 +49,10 @@ from core.ib_driver_requests import (
     IBDriverException,
     OrderRequest,
     PositionsRequest,
+    FundamentalDataRequest,
 )
-from core.ib_wrapper import IBWrapper, CallbackID
+from core.base_driver import BaseDriver
+from core.ib.ib_wrapper import IBWrapper, CallbackID
 
 GATEWAY_LIVE_PORT = 4001
 GATEWAY_SIM_PORT = 4002
@@ -62,9 +63,10 @@ HISTORICAL_DATA_TIMEOUT = 10.0
 OPTIONS_DATA_TIMEOUT = 8.0
 ORDER_DATA_TIMEOUT = 30.0
 POSITIONS_DATA_TIMEOUT = 30.0
+FUNDAMENTAL_DATA_TIMEOUT = 30.0
 
 
-class IBDriver(IBWrapper):
+class IBDriver(IBWrapper, BaseDriver):
     """
     This class wraps the Interactive Brokers API, providing an async interface that's more intuitive and easier
     to use. It hides the threaded-ness of EClient and the need for callers to think about IB's callback-based communication
@@ -104,11 +106,12 @@ class IBDriver(IBWrapper):
         # Maps order ID to OrderRequest object
         self._request_order_objects: Dict[int, OrderRequest] = {}
         self._request_positions_object: PositionsRequest = PositionsRequest()
+        self._request_fundamental_data_objects: Dict[int, FundamentalDataRequest] = {}
 
-        # Maps head timestamp request ID to symbol
-        self._head_timestamp_map: Dict[int, str] = {}
-        # Maps symbol to head timestamp
-        self._symbol_to_head_timestamp: Dict[str, str] = {}
+        # Maps head timestamp request ID to symbol, request info type
+        self._head_timestamp_map: Dict[int, Tuple[str, RequestedInfoType]] = {}
+        # Maps symbol, request info type to head timestamp
+        self._symbol_to_head_timestamp: Dict[Tuple[str, RequestedInfoType], str] = {}
 
         # For synchronizing changes to self._request_objects maps
         self._lock = asyncio.Lock()
@@ -121,7 +124,8 @@ class IBDriver(IBWrapper):
             BarSize.ONE_HOUR: "1 hour",
             BarSize.FOUR_HOURS: "4 hours",
             BarSize.ONE_DAY: "1 day",
-            BarSize.ONE_WEEK: "7 days",
+            BarSize.ONE_WEEK: "1W",
+            BarSize.ONE_MONTH: "1M",
         }
 
         self.set_callback(CallbackID.HISTORICAL_DATA_CB, self._historical_data_cb)
@@ -141,8 +145,14 @@ class IBDriver(IBWrapper):
         self.set_callback(CallbackID.POSITION, self.position_cb)
         self.set_callback(CallbackID.POSITION_END, self.position_end_cb)
         self.set_callback(CallbackID.ERROR_CB, self._error_cb)
+        self.set_callback(CallbackID.FUNDAMENTAL_DATA_CB, self._fundamental_data_cb)
 
         self._logger = getLogger(__file__)
+
+    @staticmethod
+    def create(sim_account: bool, client_id: int = 0, gateway_connection: bool = True) -> "BaseDriver":
+        """Factory method that creates and returns an IBDriver instance as a BaseDriver reference."""
+        return IBDriver(sim_account, client_id, gateway_connection)
 
     def connect(self) -> bool:
         """Attempts to connect to TWS. Returns True if successful."""
@@ -174,6 +184,8 @@ class IBDriver(IBWrapper):
             self._logger.error("Couldn't connect to IB server.")
             return False
 
+        self._set_market_data_type(is_trading_hours())
+
         return True
 
     def disconnect(self):
@@ -196,6 +208,7 @@ class IBDriver(IBWrapper):
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
         regular_trading_hours_only: bool = True,
+        primary_exchange: Optional[str] = None,
     ) -> Tuple[HistoricalData, Optional[str]]:
         """
         Requests historical data from TWS, and waits for it to arrive before returning results.
@@ -208,14 +221,18 @@ class IBDriver(IBWrapper):
         :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param num_bars: how many bars of data to collect. If not given (0), then start_date will be used to determine
         :param bar_size: daily, hourly, weekly, etc.
-        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 14:00:00 US/Eastern'.
+        :param end_date: if given, should mark end of last bar in range. If str, format is like '20250523 16:00:00 US/Eastern'.
         :param start_date: if given, should mark start of first bar in range. If str, format is like '20250523 09:30:00 US/Eastern'.
         :param live_data: if True, data will continue to flow in
         :param request_info_type: type of info to get, e.g. TRADES or IMPLIED_VOLATILITY
         :param regular_trading_hours_only: if True, premarket or extended hours data will not be included
+        :param primary_exchange: if given, primary exchange to use; if None, use default (SMART)
         :return: (HistoricalData, error str -- if any encountered)
         :raises IBDriverException: if data request can't be fulfilled
         """
+        if bar_size == BarSize.ONE_MONTH:
+            raise IBDriverException(f"Month candles not supported for historical data request (for now)")
+
         async with self._lock:
             req_id = self._next_id()
             ticker_desc = SecurityDescriptor(symbol_full)
@@ -248,6 +265,7 @@ class IBDriver(IBWrapper):
                 live_data,
                 request_info_type,
                 regular_trading_hours_only,
+                primary_exchange,
             )
         except Exception as e:
             raise IBDriverException(f"Failure with historical data request, exception was {e}")
@@ -261,6 +279,8 @@ class IBDriver(IBWrapper):
         elif timed_out:
             ret_error_str = "Timed out getting historical data."
             self._logger.error(ret_error_str)
+            # Better cancel request
+            self.cancelHistoricalData(req_id)
         else:
             self._logger.info("get_historical_data() finished")
 
@@ -318,28 +338,33 @@ class IBDriver(IBWrapper):
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
 
-    async def get_head_timestamp(self, ticker: str) -> Optional[datetime]:
+    async def get_head_timestamp(
+        self,
+        ticker: str,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[datetime]:
         """
         Returns the head timestamp for a particular ticker, i.e. the earliest datetime for which
         IB has data.
         """
         async with self._lock:
             req_id_for_head_timestamp = self._next_id()
-            self._head_timestamp_map[req_id_for_head_timestamp] = ticker
+            self._head_timestamp_map[req_id_for_head_timestamp] = (ticker, info_type)
 
-        new_contract = self._make_contract(ticker, primary_exchange="NYSE")
+        new_contract = self._make_contract(ticker, primary_exchange=primary_exchange)
         try:
-            self._request_head_timestamp(req_id_for_head_timestamp, new_contract)
+            self._request_head_timestamp(req_id_for_head_timestamp, new_contract, info_type)
         except Exception as e:
             raise IBDriverException(f"Failure with head timestamp request, exception was {e}")
 
         def _head_timestamp_available():
-            return self._symbol_to_head_timestamp.get(ticker) is not None
+            return self._symbol_to_head_timestamp.get((ticker, info_type)) is not None
 
         timed_out = not await wait_for_condition(_head_timestamp_available, timeout=HISTORICAL_DATA_TIMEOUT)
         result = None
         if not timed_out:
-            result = get_datetime(self._symbol_to_head_timestamp[ticker])
+            result = get_datetime(self._symbol_to_head_timestamp[(ticker, info_type)])
 
         async with self._lock:
             self._head_timestamp_map.pop(req_id_for_head_timestamp, None)
@@ -453,7 +478,9 @@ class IBDriver(IBWrapper):
 
         return option_info, ret_error_str
 
-    async def get_greeks(self, option_info: OptionInfo) -> Tuple[Optional[OptionInfo], Optional[str]]:
+    async def get_greeks(
+        self, option_info: OptionInfo, primary_exchange: Optional[str] = None
+    ) -> Tuple[Optional[OptionInfo], Optional[str]]:
         """
         Gets all the useful information for a particular option (price, strike, expiration, Greeks, volume, open
         interest, etc.)
@@ -461,6 +488,7 @@ class IBDriver(IBWrapper):
         For more info, see: https://www.interactivebrokers.com/campus/ibkr-api-page/twsapi-doc/#available-tick-types
 
         :param option_info: info about option for which Greeks are wanted
+        :param primary_exchange: if given, primary exchange to use; if None, use default
         :return: (OptionInfo or None, error string or None)
         """
         underlying_name = option_info.get_underlying_name()
@@ -469,7 +497,7 @@ class IBDriver(IBWrapper):
 
         contract_details_list, error_msg = await self._get_contract_details(
             ticker=underlying_name,
-            primary_exchange=None,
+            primary_exchange=primary_exchange,
             is_option=True,
             is_call=option_info.is_call,
             strike=option_info.strike,
@@ -500,7 +528,7 @@ class IBDriver(IBWrapper):
 
         option_contract = contract_details.contract
 
-        await self._set_market_data_type(is_trading_hours())
+        self._set_market_data_type(is_trading_hours())
         # 100 and 101 are for volume and open interest, respectively
         self.reqMktData(req_id, option_contract, "100,101", False, False, [])
 
@@ -758,6 +786,116 @@ class IBDriver(IBWrapper):
 
         return positions_request.positions_info, ret_error_str
 
+    async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
+        """
+        Fetches past and upcoming earnings dates for a stock using IB fundamental data.
+
+        IMPORTANT: Requires a fundamental data subscription in IB (Reuters/Refinitiv). This subscription is called
+        Wall Street Horizons, which you have to pay for. I haven't, so this code is untested.
+
+        :param ticker: stock ticker, e.g. AAPL
+        :return: (EarningsInfo, error string or None)
+        """
+        raise IBDriverException(f"This is not tested code! Not guaranteed to work.")
+
+        async with self._lock:
+            req_id = self._next_id()
+            req_obj = self._request_fundamental_data_objects[req_id] = FundamentalDataRequest()
+
+        contract = self._make_contract(ticker)
+        req_obj.data_fetch_complete = False
+        self.reqFundamentalData(req_id, contract, "RESC", [])
+
+        timed_out = not await wait_for_condition(lambda: req_obj.data_fetch_complete, timeout=FUNDAMENTAL_DATA_TIMEOUT)
+        ret_error_str = None
+        earnings_info = EarningsInfo()
+
+        if req_obj.has_error():
+            ret_error_str = f"Error getting earnings dates. Error code is {req_obj.last_error_code}, error string is {req_obj.last_error_string}"
+            self._logger.error(ret_error_str)
+        elif timed_out:
+            ret_error_str = f"Timed out getting earnings dates for {ticker}."
+            self._logger.error(ret_error_str)
+            self.cancelFundamentalData(req_id)
+        else:
+            earnings_info = self._parse_earnings_xml(req_obj.xml_data)
+            self._logger.info(f"get_earnings_dates() finished for {ticker}: {len(earnings_info.upcoming)} upcoming, {len(earnings_info.past)} past")
+
+        async with self._lock:
+            self._request_fundamental_data_objects.pop(req_id, None)
+
+        return earnings_info, ret_error_str
+
+    @staticmethod
+    def _parse_earnings_xml(xml_data: str) -> EarningsInfo:
+        """
+        Parse the XML returned by IB's RESC (Analyst Estimates) fundamental data request.
+
+        TODO: this is untested code and will probably require refactoring if ever used. See get_earnings_dates()
+            for more info.
+
+        Past dates come from FYActual/ActValue[@updated], which is the actual earnings
+        announcement timestamp. Upcoming dates are derived from FYEstimate FYPeriod
+        endMonth/endCalYear (fiscal quarter-end date — the announcement follows a few weeks later).
+        """
+        earnings_info = EarningsInfo()
+        today = date.today()
+
+        if not xml_data:
+            return earnings_info
+
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            return earnings_info
+
+        seen: set = set()
+
+        def add(d: date):
+            if d not in seen:
+                seen.add(d)
+                if d >= today:
+                    earnings_info.upcoming.append(d)
+                else:
+                    earnings_info.past.append(d)
+
+        # Past earnings: announcement date from ActValue[@updated] inside FYActual[@type="EPS"]
+        for fy_actual in root.iter("FYActual"):
+            if fy_actual.get("type") != "EPS":
+                continue
+            for period in fy_actual.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                act_val = period.find("ActValue")
+                if act_val is not None:
+                    updated = act_val.get("updated", "")
+                    if updated:
+                        try:
+                            add(datetime.strptime(updated[:10], "%Y-%m-%d").date())
+                        except ValueError:
+                            pass
+
+        # Upcoming earnings: fiscal quarter-end date from FYEstimate[@type="EPS"]
+        for fy_est in root.iter("FYEstimate"):
+            if fy_est.get("type") != "EPS":
+                continue
+            for period in fy_est.findall("FYPeriod"):
+                if period.get("periodType") != "Q":
+                    continue
+                end_month = period.get("endMonth")
+                end_year = period.get("endCalYear")
+                if end_month and end_year:
+                    try:
+                        year, month = int(end_year), int(end_month)
+                        last_day = calendar.monthrange(year, month)[1]
+                        add(date(year, month, last_day))
+                    except (ValueError, OverflowError):
+                        pass
+
+        earnings_info.upcoming.sort()
+        earnings_info.past.sort(reverse=True)
+        return earnings_info
+
     @staticmethod
     def get_full_symbol_from_contract_details(contract_details: ContractDetails) -> str:
         """
@@ -788,16 +926,19 @@ class IBDriver(IBWrapper):
         live_data: bool = False,
         request_info_type: RequestedInfoType = RequestedInfoType.TRADES,
         regular_trading_hours_only: bool = True,
+        primary_exchange: Optional[str] = None,
     ):
         """
         Sends request for historical data to TWS.
 
         For more info, see: https://interactivebrokers.github.io/tws-api/historical_bars.html
         """
+        # For debugging
+        # print(f"**** bar size: {bar_size}, num bars: {num_bars}, end date: '{end_date_time}', start date: '{start_date_time}', live data: {live_data}, request type: {request_info_type}, regular hours: {regular_trading_hours_only}")
         ticker_desc = self._request_bardata_objects[req_id].ticker_desc
         new_contract = self._make_contract(
             ticker_desc.ticker,
-            primary_exchange=None,
+            primary_exchange=primary_exchange,
             is_option=ticker_desc.is_opt,
             is_call=ticker_desc.is_call(),
             strike=ticker_desc.strike,
@@ -829,6 +970,8 @@ class IBDriver(IBWrapper):
                 duration_str = str(num_bars) + " D"
             elif bar_size == BarSize.ONE_WEEK:
                 duration_str = str(num_bars) + " W"
+            elif bar_size == BarSize.ONE_MONTH:
+                duration_str = str(num_bars) + " M"
             else:
                 duration_str = str(num_bars) + " D"
         else:
@@ -837,17 +980,28 @@ class IBDriver(IBWrapper):
             start_dt = get_datetime(start_date_time)
             diff = end_dt - start_dt
             if diff.days > 0:
-                if diff.days > 30:
+                if bar_size == BarSize.ONE_MONTH:
+                    months = int(math.ceil(diff.days / 30))
+                    duration_str = f"{months} W"
+                elif bar_size == BarSize.ONE_WEEK:
                     weeks = int(math.ceil(diff.days / 7))
                     duration_str = f"{weeks} W"
                 else:
-                    duration_str = f"{diff.days} D"
+                    if diff.days > 30:
+                        weeks = int(math.ceil(diff.days / 7))
+                        duration_str = f"{weeks} W"
+                    else:
+                        duration_str = f"{diff.days} D"
             else:
-                duration_str = f"{diff.seconds} S"
+                if bar_size == BarSize.ONE_DAY:
+                    duration_str = f"1 D"
+                else:
+                    duration_str = f"{diff.seconds} S"
 
         self._logger.info(
             f"Sending historical data request for: {ticker_desc.symbol_full}, id={req_id}, bar_size={bar_size_str}, duration={duration_str}"
         )
+        self._set_market_data_type(is_trading_hours())
         # Request Historical Data
         #     reqId: ID of request
         #     contract: Contract object
@@ -965,7 +1119,7 @@ class IBDriver(IBWrapper):
         if req_obj:
             req_obj.data_fetch_complete = True
 
-    def _request_head_timestamp(self, req_id: int, contract: Contract):
+    def _request_head_timestamp(self, req_id: int, contract: Contract, info_type: RequestedInfoType):
         """Requests head timestamp (datetime of earliest bar) from TWS"""
         # Request Head Timestamp
         #     reqId: ID of request
@@ -973,7 +1127,8 @@ class IBDriver(IBWrapper):
         #     whatToShow: kind of info (e.g. 'BID', 'ASK', 'OPTION_IMPLIED_VOLATILITY', 'TRADES'). Some choices won't return volume data.
         #     useRTH: 1 for regular trading hours only, 0 otherwise
         #     formatDate: 1 for human-readable string, 2 for system format
-        self.reqHeadTimeStamp(req_id, contract, "TRADES", 1, 1)
+        what_to_show = str(info_type.value)
+        self.reqHeadTimeStamp(req_id, contract, what_to_show, 1, 1)
 
     def _head_timestamp_cb(self, req_id: int, start: str):
         """
@@ -981,10 +1136,11 @@ class IBDriver(IBWrapper):
         :param req_id: applicable request
         :param start: the earliest timestamp
         """
-        symbol = self._head_timestamp_map.get(req_id)
-        if not symbol:
+        result = self._head_timestamp_map.get(req_id)
+        if not result:
             return
-        self._symbol_to_head_timestamp[symbol] = start
+        symbol, info_type = result
+        self._symbol_to_head_timestamp[(symbol, info_type)] = start
 
     def _contract_details_cb(self, req_id: int, contract_details: ContractDetails):
         """Called when a ContractDetails object has arrived"""
@@ -1234,6 +1390,13 @@ class IBDriver(IBWrapper):
             order_obj.order_info.avg_fill_price = price
         order_obj.data_fetch_complete = True
 
+    def _fundamental_data_cb(self, req_id: int, data: str):
+        """Called when IB sends back fundamental data XML in response to reqFundamentalData()."""
+        req_obj = self._request_fundamental_data_objects.get(req_id)
+        if req_obj:
+            req_obj.xml_data = data
+            req_obj.data_fetch_complete = True
+
     def _error_cb(
         self,
         req_id: int,
@@ -1272,6 +1435,8 @@ class IBDriver(IBWrapper):
                 req_obj = self._request_option_objects.get(req_id)
             if not req_obj:
                 req_obj = self._request_order_objects.get(req_id)
+            if not req_obj:
+                req_obj = self._request_fundamental_data_objects.get(req_id)
             if req_obj:
                 req_obj.last_error_code = error_code
                 req_obj.last_error_string = error_string
@@ -1338,7 +1503,7 @@ class IBDriver(IBWrapper):
             the_contract.primaryExchange = primary_exchange
         return the_contract
 
-    async def _set_market_data_type(self, live: bool = True):
+    def _set_market_data_type(self, live: bool = True):
         """Call before calling reqMktData() to set whether live or frozen data"""
         self.reqMarketDataType(1 if live else 2)
 

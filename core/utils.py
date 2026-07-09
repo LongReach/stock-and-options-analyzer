@@ -1,10 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Union, Optional
+from typing import Union, Optional, List
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from enum import Enum, auto
 import traceback
+import math
+import pandas_market_calendars as mcal
 
 from core.common import BarSize, CoreException, LOCAL_TIMEZONE, MARKETS_TIMEZONE
 
@@ -18,6 +20,7 @@ def bar_size_to_str(bar_size: BarSize) -> str:
         BarSize.FOUR_HOURS: "4h",
         BarSize.ONE_DAY: "1d",
         BarSize.ONE_WEEK: "1w",
+        BarSize.ONE_MONTH: "1M",
     }
     try:
         return conversion_map[bar_size]
@@ -34,6 +37,7 @@ def str_to_bar_size(bar_size_str: str) -> BarSize:
         "4h": BarSize.FOUR_HOURS,
         "1d": BarSize.ONE_DAY,
         "1w": BarSize.ONE_WEEK,
+        "1M": BarSize.ONE_MONTH,
     }
     try:
         return conversion_map[bar_size_str]
@@ -50,11 +54,16 @@ def bar_size_to_time(bar_size: BarSize) -> timedelta:
         BarSize.FOUR_HOURS: timedelta(hours=4),
         BarSize.ONE_DAY: timedelta(days=1),
         BarSize.ONE_WEEK: timedelta(weeks=1),
+        BarSize.ONE_MONTH: timedelta(days=30),
     }
     try:
         return conversion_map[bar_size]
     except:
         raise CoreException(f"Couldn't convert {bar_size.name} to timedelta")
+
+
+def get_bars_between_times(start_dt: datetime, end_dt: datetime, bar_size: BarSize) -> int:
+    return int((end_dt - start_dt) / bar_size_to_time(bar_size))
 
 
 async def wait_for_condition(condition, timeout: float, check_interval: float = 0.1):
@@ -70,7 +79,11 @@ async def wait_for_condition(condition, timeout: float, check_interval: float = 
     while asyncio.get_event_loop().time() - start_time < timeout:
         if condition():
             return True
-        await asyncio.sleep(check_interval)
+        try:
+            await asyncio.sleep(check_interval)
+        except asyncio.CancelledError as ex:
+            # Happens if user control-Cs out of program
+            raise ex from None
     return False
 
 
@@ -118,23 +131,31 @@ def get_datetime(ib_date: str) -> datetime:
     return dt
 
 
-def get_datetime_as_str(dt: Union[datetime, str]) -> str:
+def get_datetime_as_str(dt: Union[datetime, str], date_only: bool = False) -> str:
     """
     Given a datetimte, return it as an IB-style datetime string, e.g. "20250523 09:30:00 US/Eastern"
     """
     if isinstance(dt, str):
         dt = get_datetime(dt)
-    return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
+    if date_only:
+        return f"{dt.year:04}{dt.month:02}{dt.day:02}"
+    else:
+        return f"{dt.year:04}{dt.month:02}{dt.day:02} {dt.hour:02}:{dt.minute:02}:{dt.second:02} US/Eastern"
+
+
+_nyse = mcal.get_calendar("NYSE")
 
 
 def is_trading_hours() -> bool:
-    """Returns True if it's trading hours right now"""
+    """Returns True if it's currently within NYSE trading hours"""
     current_dt = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
-    if 10 <= current_dt.hour < 16:
-        return True
-    if current_dt.hour == 9 and current_dt.minute >= 30:
-        return True
-    return False
+    today_str = current_dt.strftime("%Y-%m-%d")
+    schedule = _nyse.schedule(start_date=today_str, end_date=today_str)
+    if schedule.empty:
+        return False
+    market_open = schedule.iloc[0]["market_open"].to_pydatetime()
+    market_close = schedule.iloc[0]["market_close"].to_pydatetime()
+    return market_open <= current_dt <= market_close
 
 
 def current_datetime():
@@ -195,3 +216,33 @@ def get_full_symbol_name(
         return f"{ticker}-{'C' if is_call else 'P'}-{expiration}"
 
     return f"{ticker}-{'C' if is_call else 'P'}-{expiration}-{strike}"
+
+
+def calculate_expected_move(price: float, iv: float, dte: int, standard_devs: int = 1):
+    """
+    Calculates expected move for a stock/ETF. This is a standard formula, kept here for easy finding.
+
+    :param price: current price
+    :param iv: current implied volatility
+    :param dte: days to expiration
+    :param standard_devs: standard deviations
+    :return: expected move
+    """
+    return price * iv * math.sqrt(float(dte) / 365.0) * float(standard_devs)
+
+
+def get_best_strike(strike_list: List[float], desired_strike: float):
+    """
+    Given a list of available strikes, return the one closest to desired strike price.
+    :param strike_list: list of valid strikes
+    :param desired_strike: the desired strike, often some price of the stock
+    :return: strike that's best fit
+    """
+    best_dist = math.fabs(strike_list[0] - desired_strike)
+    best_idx = 0
+    for idx, strike in enumerate(strike_list):
+        dist = math.fabs(strike - desired_strike)
+        if dist < best_dist:
+            best_dist = dist
+            best_idx = idx
+    return strike_list[best_idx]

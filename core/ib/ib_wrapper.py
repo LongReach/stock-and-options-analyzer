@@ -1,40 +1,15 @@
-import asyncio
-import copy
-import math
-
 from _decimal import Decimal
 from ibapi.contract import Contract, ContractDetails
 from ibapi.client import EClient
 from ibapi.order import *
-from ibapi.common import BarData, SetOfString, SetOfFloat, intMaxString, TickerId
+from ibapi.common import BarData, SetOfString, SetOfFloat, TickerId
 from ibapi.ticktype import TickType
 from ibapi.wrapper import EWrapper, OrderId, OrderState, Execution
-from logging import getLogger, basicConfig
-import threading
-import time
-from typing import Optional, Dict, List, Tuple, Union, Set, Callable, Any
-from enum import Enum, auto, IntEnum
-from datetime import datetime, timedelta
+from logging import getLogger
+from typing import Optional, Dict, Callable, Any
+from enum import IntEnum
 
-from core.common import (
-    HistoricalData,
-    RequestedInfoType,
-    SecurityDescriptor,
-    OptionChainInfo,
-    OptionInfo,
-)
-from core.utils import (
-    wait_for_condition,
-    get_datetime,
-    get_datetime_as_str,
-    BarSize,
-    is_trading_hours,
-)
-from core.ib_driver_requests import (
-    ContractDetailsRequest,
-    OptionChainInfoRequest,
-    OptionRequest,
-    BarDataRequest,
+from core.ib.ib_driver_requests import (
     IBDriverException,
 )
 
@@ -66,6 +41,7 @@ class CallbackID(IntEnum):
     POSITION = 14
     POSITION_END = 15
     ERROR_CB = 16
+    FUNDAMENTAL_DATA_CB = 17
 
 
 class IBWrapper(EWrapper, EClient):
@@ -415,6 +391,19 @@ class IBWrapper(EWrapper, EClient):
         for the position() data."""
         self._verify_callback(CallbackID.POSITION_END)
         self._callback_map[CallbackID.POSITION_END]()
+
+    def fundamentalData(self, req_id: int, data: str):
+        """
+        Called by TWS when fundamental data has arrived.
+
+        Response for reqFundamentalData()
+
+        :param req_id: request ID
+        :param data: XML string containing the requested fundamental data
+        """
+        super().fundamentalData(req_id, data)
+        self._verify_callback(CallbackID.FUNDAMENTAL_DATA_CB)
+        self._callback_map[CallbackID.FUNDAMENTAL_DATA_CB](req_id, data)
 
     def error(
         self,

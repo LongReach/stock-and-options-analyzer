@@ -139,3 +139,11 @@ class PositionsRequest(DataRequest):
     def __init__(self):
         super().__init__()
         self.positions_info = PositionsInfo()
+
+
+class FundamentalDataRequest(DataRequest):
+    """For tracking a fundamental data request and capturing the raw XML response."""
+
+    def __init__(self):
+        super().__init__()
+        self.xml_data: str = ""

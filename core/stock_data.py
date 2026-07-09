@@ -1,13 +1,14 @@
-from typing import Optional, List, Union, Tuple, Any, Dict
+from typing import Any, Dict, Tuple, Optional
 import logging
 import pandas as pd
-from pandas import DataFrame, read_pickle, DatetimeIndex
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from core.utils import BarSize, bar_size_to_str, str_to_bar_size, non_naive_datetime
+from core.utils import BarSize, bar_size_to_str, non_naive_datetime, current_datetime, get_datetime
 from core.common import RequestedInfoType
 
 _logger = logging.getLogger(__name__)
+
+DB_PATH = "data/market_data.h5"
 
 
 class StockDataException(Exception):
@@ -22,6 +23,8 @@ class StockData:
     Indexed by: human-readable date-time
     """
 
+    far_future_date = get_datetime("22000101")
+
     def __init__(
         self,
         symbol: str,
@@ -31,7 +34,40 @@ class StockData:
         self._symbol = symbol
         self._bar_size = bar_size
         self._info_type = info_type
-        self.clear()
+        self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
+        self._loaded_from_cache: bool = False
+        # Permits quick lookup of data range for cached data
+        self._metadata_df: pd.DataFrame = pd.DataFrame(
+            {
+                "earliest_date": [current_datetime()],
+                "latest_date": [current_datetime()],
+                "bars": [0],
+                "head_date": [self.far_future_date],
+            }
+        )
+
+    @property
+    def head_date(self) -> Optional[datetime]:
+        """
+        Accessor for head_date, the earliest timestamp for which data is available from broker. Returns None if not set
+        with meaningful value. This is saved with metadata.
+        """
+        try:
+            # For older files, might not be present
+            head_dt = self._metadata_df.iloc[0]["head_date"]
+        except:
+            return None
+        if head_dt == self.far_future_date:
+            return None
+        return head_dt
+
+    @head_date.setter
+    def head_date(self, val: Optional[datetime]):
+        """Setter for head_date, the earliest timestamp for which data is available from broker"""
+        if val is None:
+            self._metadata_df.at[0, "head_date"] = self.far_future_date
+        else:
+            self._metadata_df.at[0, "head_date"] = val
 
     def add_data(self, bar: Dict[str, Any], date: datetime):
         """
@@ -55,60 +91,127 @@ class StockData:
 
     def finalize_data(self):
         """Call when all data has been added. Puts data into proper order."""
+        # Remove rows with duplicate labels
+        self._price_and_vol_df.drop_duplicates(inplace=True)
         self._price_and_vol_df.sort_values(by="date", inplace=True)
+        self._build_metadata()
 
     def get_data_frame(self):
         """Returns pandas Dataframe"""
         return self._price_and_vol_df
 
-    def load(self, filename: Optional[str] = None) -> bool:
+    def get_metadata(self) -> Tuple[int, datetime, datetime, Optional[datetime]]:
         """
-        Loads data from disk.
-        :param filename: if not given, one will be chosen from symbol and bar size
-        :return: True if data was loaded from disk
-        """
-        if filename:
-            try:
-                self._symbol, self._bar_size, self._info_type = self._infer_characteristics_from_file_name(filename)
-            except:
-                _logger.warning(f"Couldn't infer symbol and bar size from filename {filename}")
-                pass
-        else:
-            filename = self._get_file_name()
+        Returns metadata: (num bars in cache, earliest datetime of cached data, latest datetime, head timestamp)
 
-        path = f"./data/{filename}"
+        TODO: more notes
+        """
+        bars = self._metadata_df.iloc[0]["bars"]
+        earliest_dt = self._metadata_df.iloc[0]["earliest_date"]
+        latest_dt = self._metadata_df.iloc[0]["latest_date"]
         try:
-            _logger.info(f"Attempting to load pickle {path}")
-            self._price_and_vol_df = read_pickle(path)
+            head_dt = self._metadata_df.iloc[0]["head_date"]
+            if head_dt == self.far_future_date:
+                head_dt = None
         except:
-            _logger.warning(f"Couldn't load file {filename}")
+            head_dt = None
+        return bars, earliest_dt, latest_dt, head_dt
+
+    def load_from_db(self, db_path: str = DB_PATH, preserve_existing_data: bool = True) -> bool:
+        """
+        Loads data from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :param preserve_existing_data: if True, keep any data that was already scraped
+        :return: True if data was loaded successfully
+        """
+        original_df = self._price_and_vol_df
+
+        key = self.db_key
+        try:
+            _logger.info(f"Loading from DB {db_path}, key={key}")
+            self._price_and_vol_df = pd.read_hdf(db_path, key=key)
+        except:
+            _logger.warning(f"Couldn't load key {key} from {db_path}")
             return False
 
-        # Go through date, make sure timezone is right for date
         for idx in range(len(self._price_and_vol_df)):
-            # TODO: 0 is index of "date" column, make a constant for it
             self._price_and_vol_df.iloc[idx, 0] = non_naive_datetime(self._price_and_vol_df.iloc[idx]["date"])
+
+        if preserve_existing_data and len(original_df) > 0:
+            self._price_and_vol_df = pd.concat([original_df, self._price_and_vol_df])
+            self.finalize_data()
+
+        self._loaded_from_cache = True
+
+        # Rebuild metadata
+        self._build_metadata()
 
         return True
 
-    def save(self, filename: Optional[str] = None) -> bool:
+    def load_metadata_from_db(self, db_path: str = DB_PATH) -> bool:
         """
-        Saves data to disk.
-        :param filename: if not given, one will be chosen from symbol and bar size
+        Loads metadata from the HDF5 database. It's for quick lookup of basics about cached stock data: earliest
+        bar date, latest bar date, number of bars.
+
+        :param db_path: path to the HDF5 file
+        :return: True if data was loaded successfully
         """
-        filename = self._get_file_name() if filename is None else filename
-        path = f"./data/{filename}"
+        key = self.db_key + "_meta"
         try:
-            _logger.info(f"Attempting to save pickle {path}")
-            self._price_and_vol_df.to_pickle(path)
+            _logger.info(f"Loading metadata from DB {db_path}, key={key}")
+            self._metadata_df = pd.read_hdf(db_path, key=key)
         except:
-            _logger.warning(f"Couldn't save file {filename}")
+            _logger.warning(f"Couldn't load key {key} from {db_path}")
             return False
+
+        return True
+
+    def save_to_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Saves data to the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if data was saved successfully
+        """
+        key = self.db_key
+        try:
+            _logger.info(f"Saving to DB {db_path}, key={key}")
+            self._price_and_vol_df.to_hdf(db_path, key=key, complevel=6, complib="zlib")
+        except:
+            _logger.warning(f"Couldn't save key {key} to {db_path}")
+            return False
+
+        self._save_metadata_to_db(db_path)
+
+        self._loaded_from_cache = True
         return True
 
     def clear(self):
         """Make new, empty dataframe"""
         self._price_and_vol_df: pd.DataFrame = pd.DataFrame(columns=["date", "open", "close", "low", "high", "volume"])
+        self._build_metadata()
+        self._loaded_from_cache = False
+
+    def delete_from_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Removes this series from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if the key was found and removed
+        """
+        self._delete_metadata_from_db(db_path)
+
+        key = self.db_key
+        try:
+            with pd.HDFStore(db_path) as store:
+                if f"/{key}" in store:
+                    store.remove(key)
+                    _logger.info(f"Deleted key {key} from {db_path}")
+                    self.clear()
+                    return True
+                _logger.warning(f"Key {key} not found in {db_path}")
+                return False
+        except Exception:
+            _logger.warning(f"Couldn't delete key {key} from {db_path}")
+            return False
 
     @property
     def symbol(self) -> str:
@@ -121,6 +224,12 @@ class StockData:
     @property
     def info_type(self) -> RequestedInfoType:
         return self._info_type
+
+    @property
+    def db_key(self) -> str:
+        """Returns the HDF5 store key for this series, e.g. 'SPY_1d_tr'"""
+        raw = f"{self._symbol}_{bar_size_to_str(self._bar_size)}_{StockData.get_info_type_str(self._info_type)}"
+        return raw.replace(".", "_")
 
     @staticmethod
     def get_info_type_str(info_type: RequestedInfoType) -> str:
@@ -157,19 +266,47 @@ class StockData:
         else:
             return f"{dt.month:02}/{dt.day:02} {dt.hour:02}:{dt.minute:02}"
 
-    def _get_file_name(self) -> str:
-        """Assigns a filename based on symbol, bar size, and info type, returns in a string"""
-        return f"{self._symbol}-{bar_size_to_str(self._bar_size)}-{StockData.get_info_type_str(self._info_type)}.zip"
+    def _build_metadata(self):
+        """Builds the metadata from self._price_and_vol_df"""
+        num_bars = len(self._price_and_vol_df)
+        earliest_dt = (
+            current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[0]["date"])
+        )
+        latest_dt = current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[-1]["date"])
+        head_dt = self.head_date or self.far_future_date
+        self._metadata_df: pd.DataFrame = pd.DataFrame(
+            {"earliest_date": [earliest_dt], "latest_date": [latest_dt], "bars": [num_bars], "head_date": [head_dt]}
+        )
 
-    def _infer_characteristics_from_file_name(self, filename: str) -> Tuple[str, BarSize, RequestedInfoType]:
-        """Attempts to infer symbol, bar size, and info type from a filename"""
+    def _save_metadata_to_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Saves metadata into DB. It's for quick lookup of basics about cached stock data: earliest bar date, latest
+        bar date, number of bars.
+        """
+        key = self.db_key + "_meta"
         try:
-            # Get part of filename before extension
-            parts = filename.split(".")
-            characteristics_str = parts[0].split("-")
-            symbol_str = characteristics_str[0]
-            bar_size = str_to_bar_size(characteristics_str[1])
-            info_type = StockData.get_info_type(characteristics_str[2])
-            return symbol_str, bar_size, info_type
+            _logger.info(f"Saving metadata to DB {db_path}, key={key}")
+            self._metadata_df.to_hdf(db_path, key=key)
         except:
-            raise StockDataException(f"Couldn't infer symbol/bar size/info y from {filename}")
+            _logger.warning(f"Couldn't save key {key} to {db_path}")
+            return False
+
+        return True
+
+    def _delete_metadata_from_db(self, db_path: str = DB_PATH) -> bool:
+        """
+        Removes metadata from the HDF5 database.
+        :param db_path: path to the HDF5 file
+        :return: True if the key was found and removed, or just not present.
+        """
+        key = self.db_key + "_meta"
+        try:
+            with pd.HDFStore(db_path) as store:
+                if f"/{key}" in store:
+                    store.remove(key)
+                    _logger.info(f"Deleted key {key} from {db_path}")
+                    self.clear()
+                return True
+        except Exception:
+            _logger.warning(f"Couldn't delete key {key} from {db_path}")
+            return False

@@ -1,27 +1,21 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict, Any
+from typing import Dict, Any
 
 import pandas as pd
-from ibapi.common import BarData
-from datetime import datetime, timedelta
 import argparse
-import traceback
 
-from core.common import RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
-from core.stock_data_manager import StockDataManager
-from core.stock_data import StockData
 from core.utils import (
-    str_to_bar_size,
-    get_datetime,
     get_datetime_as_str,
     current_datetime,
 )
 from app.common import PositionColumn, TradeColumn, column_enum_to_str
-from app.dialog import Dialog, MainDialog, PositionDialog, TradeDialog
+from app.dialog import MainDialog, PositionDialog, TradeDialog
 from app.opt_position_tracker import OptionPositionTracker
+
+"""
+Note: this program needs refactoring
+"""
 
 position_tracker: OptionPositionTracker = None
 

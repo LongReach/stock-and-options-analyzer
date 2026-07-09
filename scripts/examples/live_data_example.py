@@ -1,14 +1,9 @@
 import asyncio
 from logging import basicConfig, INFO, getLogger
-import time
-from time import sleep
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 
 from core.common import HistoricalData, RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.base_driver import BaseDriver
+from core.ib.ib_driver import IBDriver, BarSize
 
 """
 An example of how to get recent data bars (price, volatility) from the market, as well as how to get
@@ -16,8 +11,8 @@ live, constantly streaming data.
 """
 
 TICKER = "AAPL"
-# If True, communicate with TWS app instead of Gateway
-USE_GATEWAY = False
+# If False, communicate with TWS app instead of Gateway
+USE_GATEWAY = True
 CLIENT_ID = 14
 
 
@@ -45,11 +40,11 @@ async def wait_for_keypress(stop_event: asyncio.Event):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="live_data_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID, gateway_connection=USE_GATEWAY)
     try:
-        ib_driver.connect()
+        data_driver.connect()
 
-        price_data_five, error_str = await ib_driver.get_historical_data(
+        price_data_five, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -59,7 +54,7 @@ async def main():
         print(f"Five minute bars for {TICKER} (trades) are\n------------------------")
         print_historical_data(price_data_five)
 
-        iv_data, error_str = await ib_driver.get_historical_data(
+        iv_data, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -69,7 +64,7 @@ async def main():
         print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
         print_historical_data(iv_data)
 
-        hv_data, error_str = await ib_driver.get_historical_data(
+        hv_data, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=False,
@@ -79,7 +74,7 @@ async def main():
         print(f"One day bars for {TICKER} (historical volatility) are\n------------------------")
         print_historical_data(hv_data)
 
-        price_data_two, error_str = await ib_driver.get_historical_data(
+        price_data_two, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=True,
@@ -98,7 +93,7 @@ async def main():
 
     await asyncio.gather(task1, task2)
 
-    ib_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

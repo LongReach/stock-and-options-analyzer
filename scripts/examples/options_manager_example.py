@@ -1,18 +1,11 @@
 import asyncio
-import os
-import sys
 from logging import basicConfig, INFO, getLogger
-import time
-from typing import List, Tuple, Dict
-from ibapi.common import BarData
-from datetime import datetime
 
 # module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'core'))
 # sys.path.append(module_path)
 
-from core.common import RequestedInfoType
-from core.ib_driver import IBDriver, BarSize
-from core.utils import get_datetime_as_str
+from core.base_driver import BaseDriver
+from core.ib.ib_driver import IBDriver
 from core.option_data_manager import OptionDataManager
 
 """
@@ -37,12 +30,12 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    ib_driver = IBDriver(sim_account=True, client_id=CLIENT_ID)
+    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     try:
-        ib_driver.connect()
+        data_driver.connect()
         await asyncio.sleep(1.0)
         options_manager = OptionDataManager()
-        options_manager.add_driver(ib_driver)
+        options_manager.add_driver(data_driver)
 
         print(f"Getting expirations for {TICKER}...")
         expirations = await options_manager.get_expirations(TICKER, MIN_DAYS_AWAY, MAX_DAYS_AWAY)
@@ -80,7 +73,7 @@ async def main():
     except Exception as ex:
         print(f"Exception: {ex}")
 
-    ib_driver.disconnect()
+    data_driver.disconnect()
 
 
 asyncio.run(main())

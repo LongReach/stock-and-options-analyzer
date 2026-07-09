@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Optional, Set, Any, Self
-from datetime import datetime
-from enum import Enum, auto
+from datetime import datetime, date
+from enum import Enum, auto, IntEnum
 from threading import Lock
 from logging import getLogger
 from ibapi.common import BarData
@@ -31,6 +31,7 @@ class BarSize(Enum):
     FOUR_HOURS = auto()
     ONE_DAY = auto()
     ONE_WEEK = auto()
+    ONE_MONTH = auto()
 
 
 class RequestedInfoType(Enum):
@@ -84,6 +85,15 @@ class OrderPurpose:
     ENTRY = auto()
     STOP_LOSS = auto()
     TAKE_PROFIT = auto()
+
+
+class ScrapeLevel(IntEnum):
+    """Specifies level of scraping to do"""
+
+    FULL = 0  # both old data and recent data
+    LIMITED = 1  # recent data and data going back only a few hundred bars
+    RECENT = 2  # recent data only
+    NONE = 3  # don't scrape any data
 
 
 class SecurityDescriptor:
@@ -217,9 +227,8 @@ class HistoricalData:
 
     def get_zipped_lists(self) -> List[Tuple[Dict, datetime]]:
         """Returns list of (bar data dict, timestamp for bar)"""
-        with self.lock:
-            bar_data_dicts = self.get_bar_data_as_dicts()
-            return list(zip(bar_data_dicts, self.timestamps))
+        bar_data_dicts = self.get_bar_data_as_dicts()
+        return list(zip(bar_data_dicts, self.timestamps))
 
     def get_bar_data_as_dicts(self):
         """Gets bar data as list of Dicts"""
@@ -477,3 +486,11 @@ class PositionsInfo:
     def get_positions(self) -> List[PositionDescriptor]:
         """Return all position descriptors"""
         return [desc for symbol, desc in self.position_map.items()]
+
+
+class EarningsInfo:
+    """Holds earnings date information for a stock, both upcoming and past."""
+
+    def __init__(self):
+        self.upcoming: List[date] = []  # Future earnings dates, soonest first
+        self.past: List[date] = []      # Past earnings dates, most recent first

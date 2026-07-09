@@ -4,7 +4,7 @@ from enum import Enum, auto
 from asyncio import Event
 
 from core.common import SecurityDescriptor, OrderPurpose
-from core.ib_driver import IBDriver
+from core.base_driver import BaseDriver
 from core.utils import get_exception_traceback
 from guided_missile.position_manager import PositionManager, PositionDirection
 
@@ -41,9 +41,9 @@ class GuidedMissile:
 
     STARTING_CASH = 500000.0
 
-    def __init__(self, ib_driver: IBDriver):
-        self._ib_driver = ib_driver
-        self._position_manager = PositionManager(ib_driver, self.STARTING_CASH)
+    def __init__(self, base_driver: BaseDriver):
+        self._data_driver = base_driver
+        self._position_manager = PositionManager(base_driver, self.STARTING_CASH)
 
         # Maps commands as entered by user to enum
         self.command_map: Dict[str, Command] = {

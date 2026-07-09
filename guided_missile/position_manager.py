@@ -1,9 +1,7 @@
-import asyncio
 from typing import Optional, Dict, List, Tuple
-from enum import Enum, auto
 from logging import getLogger
 
-from core.ib_driver import IBDriver
+from core.base_driver import BaseDriver
 from core.common import (
     SecurityDescriptor,
     BarSize,
@@ -31,9 +29,9 @@ class PositionManager:
     MAX_LOSS = 100.0
     MAX_DATA_STREAMS = 30
 
-    def __init__(self, ib_driver: IBDriver, cash_available: float):
-        self.ib_driver = ib_driver
-        Position.ib_driver = ib_driver
+    def __init__(self, data_driver: BaseDriver, cash_available: float):
+        self.data_driver = data_driver
+        Position.data_driver = data_driver
 
         # Total value of account
         self._account_value: float = cash_available
@@ -244,7 +242,7 @@ class PositionManager:
             )
 
         # Get all positions from brokerage side
-        position_info, error_str = await self.ib_driver.get_positions()
+        position_info, error_str = await self.data_driver.get_positions()
         if error_str is not None:
             return False, f"Failed to get positions, error is: {error_str}"
 
@@ -295,7 +293,7 @@ class PositionManager:
         # TODO: what if transmit is False? Can we transmit from trading tool?
         if direction == PositionDirection.LONG:
             stop_price = price - price * 0.005
-            stop_order, error_str = await self.ib_driver.place_order(
+            stop_order, error_str = await self.data_driver.place_order(
                 security_descriptor.to_string(),
                 action=OrderAction.SELL,
                 order_type=OrderType.STOP,
@@ -304,7 +302,7 @@ class PositionManager:
             )
         else:
             stop_price = price + price * 0.005
-            stop_order, error_str = await self.ib_driver.place_order(
+            stop_order, error_str = await self.data_driver.place_order(
                 security_descriptor.to_string(),
                 action=OrderAction.BUY,
                 order_type=OrderType.STOP,
@@ -395,7 +393,7 @@ class PositionManager:
 
     async def get_position_info(self) -> List[str]:
         """Gets position info directly from the brokerage, as list of printable strings"""
-        positions_info, error_str = await self.ib_driver.get_positions()
+        positions_info, error_str = await self.data_driver.get_positions()
         if error_str is not None:
             return []
         out_lines = []
@@ -427,7 +425,7 @@ class PositionManager:
         :return: (HistoricalData object or None, error str or None)
         """
         try:
-            historical_data, error_str = await self.ib_driver.get_historical_data(
+            historical_data, error_str = await self.data_driver.get_historical_data(
                 security_descriptor.to_string(),
                 num_bars=bars_back,
                 bar_size=self.BAR_SIZE,
