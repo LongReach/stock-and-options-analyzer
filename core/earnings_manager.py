@@ -1,7 +1,7 @@
 import logging
 import time
 from datetime import date, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
 import pandas as pd
 import requests
@@ -29,6 +29,9 @@ class EarningsManager:
     Scrapes Nasdaq earnings calendar data and caches it to an HDF5 file.
     Only records data for tickers configured via set_tickers().
 
+    This is a cheap and free way to get earnings dates. It's slow, but the dates are then cached on disk
+    for quick subsequent access. And it's not necessary to do the scraping/caching process that often.
+
     Storage: one DataFrame per ticker, keyed by the ticker symbol.
     Columns: company_name, eps, surprise_pct, market_cap, fiscal_quarter_ending,
              consensus_eps, num_estimates. Index: earnings date (DatetimeIndex).
@@ -41,6 +44,24 @@ class EarningsManager:
     def set_tickers(self, tickers: List[str]):
         """Set the list of tickers of interest."""
         self._tickers = {t.strip().upper() for t in tickers if t.strip()}
+
+    def set_tickers_from_file(self, file_path: str) -> bool:
+        """
+        Sets of tickers of interest from a text file
+        :param file_path: path to text file containing one symbol per line
+        :return: True if successfully loaded file, else False
+        """
+        tickers = []
+        try:
+            with open(file_path, "r") as f:
+                for line in f:
+                    t = line.strip()
+                    if t:
+                        tickers.append(t)
+        except FileNotFoundError:
+            return False
+        self.set_tickers(tickers)
+        return True
 
     def set_db_path(self, path: str):
         """Set the path to the HDF5 cache file."""
@@ -91,6 +112,18 @@ class EarningsManager:
         if df is None or df.empty:
             return []
         return sorted(ts.date() for ts in df.index if ts.date() >= today)
+
+    def get_next_date(self, ticker: str, in_days: bool = False) -> Optional[Union[date, int]]:
+        """
+        Returns next earnings date if found, or None.
+
+        :param ticker: ticker symbol of stock
+        :param in_days: if True, return earnings data as days from now, rather than direct date
+        """
+        dates = self.get_upcoming_dates(ticker)
+        if len(dates) == 0:
+            return None
+        return (dates[0] - date.today()).days if in_days else dates[0]
 
     def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
         """Return the full cached DataFrame for a ticker, or None if not present."""
