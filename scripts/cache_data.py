@@ -132,7 +132,9 @@ async def show_cache_contents(stock_manager: StockDataManager, bar_size_str: str
         out_line = f"Have entry for {key}, num bars: {num_bars}, earliest data: {earliest_date_str}, latest date: {latest_date_str}"
         if bars_then_to_now > 1:
             out_line += f" (newer data exists)"
-        if head_dt is not None and not StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size):
+        if head_dt is not None and not StockDataManager.is_head_timestamp_preceded_or_matched(
+            earliest_dt, head_dt, bar_size
+        ):
             out_line += f", available data begins at: {get_datetime_as_str(head_dt)} (not matched)"
         elif head_dt is None:
             out_line += ", no head timestamp established"
@@ -250,17 +252,18 @@ async def cache_multiple_stocks(
                         )
                         continue
                 else:
-                    if (
-                        StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size)
-                        and bars_missing_until_now <= acceptable_recency
-                    ):
+                    # Does earliest data we actually have precede/match head timestamp?
+                    head_timestamp_preceded_or_matched = StockDataManager.is_head_timestamp_preceded_or_matched(
+                        earliest_dt, head_dt, bar_size
+                    )
+                    if head_timestamp_preceded_or_matched and bars_missing_until_now <= acceptable_recency:
                         print(
                             f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data beginning on {earliest_dt} and ending on {latest_dt}"
                         )
                         continue
                     else:
                         print(
-                            f"Need data scrape for {symbol}. Head timestamp matched: {StockDataManager.is_head_timestamp_matched(earliest_dt, head_dt, bar_size)}, data recency {bars_missing_until_now}."
+                            f"Need data scrape for {symbol}. Head timestamp {head_dt} preceded/matched by {earliest_dt}: {head_timestamp_preceded_or_matched}, data recency {bars_missing_until_now}."
                         )
 
         scrape_level = ScrapeLevel.LIMITED if limited_scrape else ScrapeLevel.FULL
@@ -392,8 +395,7 @@ async def main(parser: argparse.ArgumentParser):
 parser = argparse.ArgumentParser(
     prog="python -m scripts.cache_data",
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description=textwrap.dedent(
-        """\
+    description=textwrap.dedent("""\
         Collect price (or other) data for a security, in bar form, and cache it to disk.
 
         Building the cache from scratch can take a long time, on the order of half an
@@ -402,10 +404,8 @@ parser = argparse.ArgumentParser(
         is relatively quick.
 
         Requires IB Gateway or TWS running locally (defaults to the paper/sim account).
-        """
-    ),
-    epilog=textwrap.dedent(
-        """\
+        """),
+    epilog=textwrap.dedent("""\
         Examples:
           # Build data cache for price data
           python -m scripts.cache_data --file .\\data\\optionable.txt --db .\\data\\market_data.h5
@@ -424,8 +424,7 @@ parser = argparse.ArgumentParser(
           * info-type accepts tr (trades), iv, hv, al (default: tr).
           * Use --symbol for one ticker or --file for a list; --file is required to
             cache/remove multiple tickers at once.
-        """
-    ),
+        """),
 )
 parser.add_argument("--symbol", help="Ticker symbol", required=False, default=None, type=str)
 parser.add_argument(

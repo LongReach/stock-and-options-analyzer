@@ -819,7 +819,9 @@ class IBDriver(IBWrapper, BaseDriver):
             self.cancelFundamentalData(req_id)
         else:
             earnings_info = self._parse_earnings_xml(req_obj.xml_data)
-            self._logger.info(f"get_earnings_dates() finished for {ticker}: {len(earnings_info.upcoming)} upcoming, {len(earnings_info.past)} past")
+            self._logger.info(
+                f"get_earnings_dates() finished for {ticker}: {len(earnings_info.upcoming)} upcoming, {len(earnings_info.past)} past"
+            )
 
         async with self._lock:
             self._request_fundamental_data_objects.pop(req_id, None)

@@ -493,4 +493,4 @@ class EarningsInfo:
 
     def __init__(self):
         self.upcoming: List[date] = []  # Future earnings dates, soonest first
-        self.past: List[date] = []      # Past earnings dates, most recent first
+        self.past: List[date] = []  # Past earnings dates, most recent first

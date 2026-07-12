@@ -19,6 +19,9 @@ from core.indicators import macd_indicator, rsi_indicator, stochastic_indicator,
 A tool for scanning through weekly charts to find good candidates for vertical spreads trades.
 For now, this is just a prototype, scanning for indications of a likely move in a particular direction.
 It should be run on a Friday, close to the end of a week.
+
+To build the IV data cache this tool reads from:
+python -m scripts.cache_data --file .\data\optionable.txt --info-type tr --bar-size 1w
 """
 
 CLIENT_ID = 21

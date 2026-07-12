@@ -269,16 +269,17 @@ class StockDataManager:
         newest_dt = non_naive_datetime(newest_dt)
 
         # First, focus on obtaining data that's older than currently cached data
-
         if start_date == "":
             start_dt = None
         else:
             start_dt = get_datetime(start_date)
             head_timestamp_dt = await self._data_driver.get_head_timestamp(symbol, info_type)
-            if head_timestamp_dt is not None and self.is_head_timestamp_matched(start_dt, head_timestamp_dt, bar_size):
+            if head_timestamp_dt is not None and self.is_head_timestamp_preceded_or_matched(
+                start_dt, head_timestamp_dt, bar_size
+            ):
                 # The start datetime precedes the datetime of the earliest available bar offered by the broker, so
                 # adjust it to match reality.
-                start_dt = head_timestamp_dt
+                start_dt = self.adjust_timestamp(head_timestamp_dt, bar_size)
                 start_date = get_datetime_as_str(start_dt)
 
         # Scrape data that's older than already-loaded data
@@ -369,22 +370,46 @@ class StockDataManager:
         return symbol, bar_size, info_type
 
     @staticmethod
-    def is_head_timestamp_matched(earliest_data_dt: datetime, head_timestamp_dt: datetime, bar_size: BarSize) -> bool:
+    def is_head_timestamp_preceded_or_matched(
+        test_dt: datetime, head_timestamp_dt: datetime, bar_size: BarSize
+    ) -> bool:
         """
-        Helper function for determining if the oldest data is old enough to match head timestamp (earliest
-        available data from broker). The issue is that head timestamps might not align with weekly or
-        monthly candles.
+        Helper function to determine if given date precedes or matches head timestamp (earliest available data
+        from broker). If weekly or monthly candles are being dealt with, then this function takes into account
+        that the head timestamp might not fall on a weekly boundary.
 
-        :param earliest_data_dt: datetime of earliest data available from broker
-        :param head_timestamp_dt: datetime of earliest data the caller has
+        :param test_dt: datetime to test
+        :param head_timestamp_dt: datetime of earliest data available from broker
         :param bar_size: size of candle
-        :return: True if earliest data goes back far enough
+        :return: If 'preceded' condition met
         """
         if bar_size == BarSize.ONE_MONTH:
             raise StockDataException("Monthly bars not supported (for now)")
         if bar_size == BarSize.ONE_WEEK:
-            return (earliest_data_dt - head_timestamp_dt).days < 7
-        return earliest_data_dt <= head_timestamp_dt
+            # If test date comes less than a week after head timestamp, then test date is considered to precede
+            # or match it.
+            return (test_dt - head_timestamp_dt).days < 7
+        return test_dt <= head_timestamp_dt
+
+    @staticmethod
+    def adjust_timestamp(timestamp_dt: datetime, bar_size: BarSize) -> datetime:
+        """
+        Adjusts timestamp to match weekly or monthly boundary
+
+        :param timestamp_dt: datetime to adjust
+        :param bar_size: size of candle
+        :return: adjusted timestamp
+        """
+        if bar_size == BarSize.ONE_MONTH:
+            raise StockDataException("Monthly bars not supported (for now)")
+        if bar_size == BarSize.ONE_WEEK:
+            # If timestamp does not fall on a Friday, move it forward by some number of days so that it
+            # does fall on a Friday. weekday() is Monday=0 ... Friday=4, so (4 - weekday) % 7 is the
+            # number of days to add (0 when already a Friday).
+            days_to_friday = (4 - timestamp_dt.weekday()) % 7
+            return timestamp_dt + timedelta(days=days_to_friday)
+        # No actual adjustment needed
+        return timestamp_dt
 
     async def get_iv_rank(
         self, symbol: str, cache_only: bool = False, acceptable_recency: int = 0
