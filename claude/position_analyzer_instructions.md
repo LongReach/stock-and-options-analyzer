@@ -38,4 +38,21 @@ The script will also output a final row, with the same columns the per-leg rows,
 
 ## Phase Two
 
+Please add two more filtering arguments, `--position-num` and `--position-type`.
+
+`--position-num` will filter on "Position #", as seen in the reference CSV.
+
+`--position-type` will filter on "Position Type". However, arguments given to the script from the command line will take the following form:
+* IC: maps to "Iron Condor"
+* CS: maps to "Credit Spread"
+* DS: maps to "Debit Spread"
+* L: maps to "Naked Long"
+* S: maps to "Naked Short"
+* CAL: maps to "Calendar"
+* DCAL: maps to "Double Calendar"
+* DIAG: maps to "Diagonal"
+* DDIAG: maps to "Double Diagonal"
+
+## Phase Three
+
 Will be written later.
