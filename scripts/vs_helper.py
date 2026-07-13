@@ -20,7 +20,10 @@ A tool for scanning through weekly charts to find good candidates for vertical s
 For now, this is just a prototype, scanning for indications of a likely move in a particular direction.
 It should be run on a Friday, close to the end of a week.
 
-To build the IV data cache this tool reads from:
+Best to run after building the weekly date cache. Run like so:
+python -m scripts.vs_helper --test-type 1 --bar-size 1w --cache-only
+
+To build the weekly trade data cache this tool reads from:
 python -m scripts.cache_data --file .\data\optionable.txt --info-type tr --bar-size 1w
 """
 
@@ -56,13 +59,13 @@ def test_type_2(price_data_df: pandas.DataFrame) -> int:
 
     score = 0
     # Test one: is %k for stoch below 20 in last four bars?
-    max_val, idx = max(stoch_df.iloc[-4:], "k")
-    score += 1 if max_val <= 20.0 else 0
+    min_val, idx = min(stoch_df.iloc[-4:], "k")
+    score += 1 if min_val <= 20.0 else 0
     # Test two: is there %k crossoover?
     score += 1 if crossover(stoch_df, "k", 20.0, 1.0) else 0
     # Test three: is RSI below 30 in last four bars?
-    max_val, idx = max(rsi_df.iloc[-4:], "rsi")
-    score += 1 if max_val <= 30.0 else 0
+    min_val, idx = min(rsi_df.iloc[-4:], "rsi")
+    score += 1 if min_val <= 30.0 else 0
     # Test four: has MACD histogram crossed zero line?
     score += 1 if crossover(macd_df, "histogram", 0.0, 1.0) else 0
     return score
