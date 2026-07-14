@@ -100,7 +100,7 @@ class SchwabDriver(BaseDriver):
 
     def connect(self) -> bool:
         """
-        Builds the schwab-py AsyncClient. If a valid token file exists (see Phase One), this is silent; otherwise
+        Builds the schwab-py AsyncClient. If a valid token file exists, this is silent; otherwise
         schwab-py opens a browser for the one-time OAuth login. Returns True if the client was created.
         """
         if self.is_connected():

@@ -16,8 +16,11 @@ Credentials come from .env (see schwab_driver.py). Streaming only produces new c
 open; run during regular trading hours to see live updates.
 """
 
-STREAM_SECONDS = 60
-POLL_SECONDS = 3
+# Schwab's CHART_EQUITY stream emits one candle per *completed* minute (no intra-minute updates), and its
+# initial burst backfills recent minutes that overlap the seeded bars. So watch across several minute
+# boundaries to reliably see brand-new candles.
+STREAM_SECONDS = 240
+POLL_SECONDS = 5
 
 
 def print_historical_data(bars: HistoricalData):
@@ -71,20 +74,30 @@ async def demo_streaming(driver: BaseDriver):
     print("  Seeded with recent bars:")
     print_historical_data(bars)
 
-    print("  Watching for live updates (new/updated minute candles will appear below)...")
-    seen_timestamps = {dt for _, dt in bars.get_zipped_lists()}
+    print(
+        f"  Watching for ~{STREAM_SECONDS}s. Schwab emits one candle per completed minute, so expect roughly\n"
+        "  one new [live] line each minute (nothing between minute boundaries is normal)...\n"
+    )
+    # Track the last (close, volume) seen per timestamp so we catch both brand-new candles and updates to
+    # ones we've already printed.
+    seen: dict = {dt: (bar_dict["close"], bar_dict["volume"]) for bar_dict, dt in bars.get_zipped_lists()}
     elapsed = 0
     while elapsed < STREAM_SECONDS:
         await asyncio.sleep(POLL_SECONDS)
         elapsed += POLL_SECONDS
+        printed_this_poll = False
         for bar_dict, dt in bars.get_zipped_lists():
-            if dt not in seen_timestamps:
-                seen_timestamps.add(dt)
+            fingerprint = (bar_dict["close"], bar_dict["volume"])
+            if seen.get(dt) != fingerprint:
+                seen[dt] = fingerprint
+                printed_this_poll = True
                 print(
                     f"  [live] {get_datetime_as_str(dt):<28}"
                     f"O={bar_dict['open']:.2f}  H={bar_dict['high']:.2f}  "
                     f"L={bar_dict['low']:.2f}  C={bar_dict['close']:.2f}  V={bar_dict['volume']:,.0f}"
                 )
+        if not printed_this_poll and elapsed % 30 == 0:
+            print(f"  ...still listening ({elapsed}s / {STREAM_SECONDS}s, {len(bars.bar_data)} bars so far)")
 
     await driver.cancel_historical_data(bars)
     print("  Stream cancelled.\n")
