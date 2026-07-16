@@ -19,6 +19,8 @@ CLIENT_ID = 15
 TICKER = "SPY"
 STRIKE = 770.0
 EXPIRATION = "20260618"
+# Can be either "IB" (Interactive Brokers) or "SCHWAB"
+BROKER = "IB"
 
 
 async def main():

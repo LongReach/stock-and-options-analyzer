@@ -17,6 +17,8 @@ CLIENT_ID = 16
 TICKER = "AAPL"
 MIN_DAYS_AWAY = 5
 MAX_DAYS_AWAY = 70
+# Can be either "IB" (Interactive Brokers) or "SCHWAB"
+BROKER = "IB"
 
 
 def print_df(df):

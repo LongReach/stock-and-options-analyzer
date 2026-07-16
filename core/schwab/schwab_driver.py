@@ -355,7 +355,39 @@ class SchwabDriver(BaseDriver):
         raise NotImplementedError("SchwabDriver.cancel_all_orders() is not implemented yet")
 
     async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
-        raise NotImplementedError("SchwabDriver.get_positions() is not implemented yet")
+        """
+        Fetches the positions currently held across all accounts linked to this token and returns them in the
+        broker-agnostic PositionsInfo form (same as IBDriver.get_positions()).
+
+        Options are keyed by IB-style symbols (e.g. 'SPY-C-20260821-785.0') so they round-trip through the rest
+        of the system unchanged. Short positions are reported with a positive quantity and short_position=True,
+        matching IBDriver's convention.
+
+        :return: (PositionsInfo, error string or None)
+        """
+        if not self.is_connected():
+            return PositionsInfo(), "Not connected to Schwab"
+
+        self._logger.info("get_positions()")
+        try:
+            resp = await self._client.get_accounts(fields=self._client.Account.Fields.POSITIONS)
+        except Exception as e:
+            return PositionsInfo(), f"Schwab positions request failed: {e}"
+
+        if resp.status_code != 200:
+            return PositionsInfo(), f"Schwab positions request failed ({resp.status_code}): {resp.text}"
+
+        positions_info = PositionsInfo()
+        # get_accounts() returns a list of {"securitiesAccount": {...}} wrappers, one per linked account.
+        for account in resp.json():
+            securities_account = account.get("securitiesAccount", {})
+            for position in securities_account.get("positions", []):
+                descriptor, quantity, price, is_short = self._parse_position(position)
+                if descriptor is not None:
+                    positions_info.set_position(descriptor, quantity, price, is_short)
+
+        self._logger.info(f"get_positions() finished, {len(positions_info.get_positions())} position(s)")
+        return positions_info, None
 
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
         raise NotImplementedError("SchwabDriver.get_earnings_dates() is not implemented yet")
@@ -363,6 +395,57 @@ class SchwabDriver(BaseDriver):
     # ---------------------------------------------------
     # Private helpers
     # ---------------------------------------------------
+
+    def _parse_position(self, position: dict) -> Tuple[Optional[SecurityDescriptor], int, float, bool]:
+        """
+        Converts one Schwab position entry into (SecurityDescriptor, quantity, price, is_short).
+
+        Schwab reports long and short holdings in separate quantity fields; we collapse them into a magnitude
+        plus a short flag, IB-style. Returns (None, 0, 0.0, False) for anything we can't describe.
+        """
+        instrument = position.get("instrument", {})
+        symbol = instrument.get("symbol", "")
+        if not symbol:
+            return None, 0, 0.0, False
+
+        long_qty = float(position.get("longQuantity", 0.0))
+        short_qty = float(position.get("shortQuantity", 0.0))
+        is_short = short_qty > 0
+        quantity = int(short_qty if is_short else long_qty)
+        price = float(position.get("averagePrice", 0.0))
+
+        if instrument.get("assetType") == "OPTION":
+            descriptor = self._option_symbol_to_descriptor(symbol)
+        else:
+            # Equities, ETFs (COLLECTIVE_INVESTMENT), etc. -- just the ticker.
+            descriptor = SecurityDescriptor(symbol)
+
+        return descriptor, quantity, price, is_short
+
+    @staticmethod
+    def _option_symbol_to_descriptor(symbol: str) -> SecurityDescriptor:
+        """
+        Parses a Schwab OSI option symbol (e.g. 'SPY   260821C00785000') into an IB-style SecurityDescriptor
+        such as SPY-C-20260821-785.0.
+
+        OSI layout, read from the right: 8 digits of strike (in thousandths), 1 char right (C/P), 6 digits of
+        expiration (yymmdd), and the remaining (space-padded) leading characters are the underlying root.
+        """
+        strike = int(symbol[-8:]) / 1000.0
+        right = symbol[-9]
+        yymmdd = symbol[-15:-9]
+        root = symbol[:-15].strip()
+        expiration = "20" + yymmdd  # OSI years are two digits; Schwab options are all 21st-century.
+        # Build the descriptor from the IB-style string so symbol_full keeps the trimmed strike (e.g. 785.0).
+        return SecurityDescriptor(f"{root}-{right}-{expiration}-{SchwabDriver._strike_str(strike)}")
+
+    @staticmethod
+    def _strike_str(strike: float) -> str:
+        """Formats a strike the IB-style way: trailing zeros trimmed but always at least one decimal (785.0)."""
+        text = f"{strike:.4f}".rstrip("0")
+        if text.endswith("."):
+            text += "0"
+        return text
 
     async def _fetch_history(
         self,

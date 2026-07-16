@@ -47,6 +47,7 @@ POSITION_TYPE_MAP = {
     "S": "Naked Short",
     "CAL": "Calendar",
     "DCAL": "Double Calendar",
+    "TCAL": "Triple Calendar",
     "DIAG": "Diagonal",
     "DDIAG": "Double Diagonal",
 }
@@ -323,6 +324,14 @@ async def main(parser: argparse.ArgumentParser):
     option_manager = OptionDataManager()
     data_driver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
     option_manager.add_driver(data_driver)
+
+    if not data_driver.is_connected():
+        print(
+            "Could not connect to the broker. Make sure IB Gateway or TWS is running and logged in to the "
+            "paper/sim account, then try again."
+        )
+        data_driver.disconnect()
+        return
 
     try:
         _, infos = await collect_leg_data(option_manager, positions_df)
