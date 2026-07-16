@@ -47,7 +47,7 @@ The class `IBDriver` contains the function `get_positions()`. Please make a func
 
 In `scripts/` make a script called `get_schwab_positions.py`. This script will fetch all of the user's current positions from Schwab and pretty-print them. It will also take an optional argument with a file path for a CSV file. Into this file, it will place a table of currently-held positions. The format should be the same as in the file `D:\CodingProjects\Python\TWS2025\data\options_trades_2026.csv`.
 
-#### Step 2
+#### Step 2 (Complete)
 
 If the CSV file already exists, don't change the "Position #" or "Position Type" fields for any rows that are already recorded. It's okay to change "Quantity" and "Trade Price", if the information from the broker is different.
 
@@ -57,7 +57,7 @@ You will find that the file `D:\CodingProjects\Python\TWS2025\data\current_posit
 
 Please update the script, `position_analyzer.py` with a new position type, called "Triple Calendar".
 
-### Phase Four (Don't Implement Yet)
+### Phase Four (Complete)
 
 In `ScnwabDriver`, please provide implementations for the following public functions. They should do what their counterparts in `IBDriver` do.
 
@@ -74,3 +74,5 @@ The new code will be exercised by making modifications to these scripts:
 `scripts/examples/options_manager_example.py`
 
 Notice how each of these files has a constant called `BROKER`. This should be used to determine which driver becomes active. For now, you can set it to "SCHWAB" in each script.
+
+Finally, let's do something similar for `scripts/position_analyzer.py`.

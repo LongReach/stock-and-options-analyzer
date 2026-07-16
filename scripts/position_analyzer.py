@@ -11,6 +11,7 @@ from core.common import SecurityDescriptor, OptionInfo
 from core.options_data import OptionData, OptionDataException
 from core.option_data_manager import OptionDataManager
 from core.ib.ib_driver import IBDriver
+from core.schwab.schwab_driver import SchwabDriver
 from core.utils import current_datetime
 
 r"""
@@ -296,6 +297,11 @@ async def main(parser: argparse.ArgumentParser):
 
     basicConfig(filename="position_analyzer.log", level=INFO)
 
+    # A broker must be chosen explicitly; there's no sensible default.
+    if not args.ib and not args.schwab:
+        print("No broker specified. Pass --ib (Interactive Brokers) or --schwab (Schwab).")
+        return
+
     # Resolve the short --position-type code (e.g. "IC") to the full CSV name (e.g. "Iron Condor").
     position_type = POSITION_TYPE_MAP[args.position_type] if args.position_type else None
 
@@ -322,14 +328,16 @@ async def main(parser: argparse.ArgumentParser):
 
     print("Please wait...")
     option_manager = OptionDataManager()
-    data_driver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+    if args.schwab:
+        data_driver = SchwabDriver.create()
+        connect_hint = "Check your Schwab credentials in .env and the token file, then try again."
+    else:
+        data_driver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+        connect_hint = "Make sure IB Gateway or TWS is running and logged in to the paper/sim account, then try again."
     option_manager.add_driver(data_driver)
 
     if not data_driver.is_connected():
-        print(
-            "Could not connect to the broker. Make sure IB Gateway or TWS is running and logged in to the "
-            "paper/sim account, then try again."
-        )
+        print(f"Could not connect to the broker. {connect_hint}")
         data_driver.disconnect()
         return
 
@@ -360,22 +368,27 @@ def build_parser() -> argparse.ArgumentParser:
             aggregate row summarizes the filtered legs as a whole: net position Greeks, net value,
             and unrealized profit/loss.
 
-            Requires IB Gateway or TWS running locally (defaults to the paper/sim account).
+            A broker must be selected with --ib (Interactive Brokers; requires IB Gateway or TWS
+            running locally, paper/sim account) or --schwab (Charles Schwab; requires credentials
+            in .env).
             """),
         epilog=textwrap.dedent("""\
             Examples:
-              # Analyze every open position in the CSV
-              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv
+              # Analyze every open position in the CSV, using Interactive Brokers for market data
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib
+
+              # Same, but using Schwab for market data
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --schwab
 
               # Narrow to a single underlying
-              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --symbol SPY
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --symbol SPY
 
               # Narrow to a single underlying and expiration
-              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --symbol QQQ --expiration 20260821
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --symbol QQQ --expiration 20260821
 
               # Narrow to one position number, or to all positions of a given type
-              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --position-num 2
-              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --position-type IC
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-num 2
+              python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
 
             Notes:
               * The CSV must have columns: 'Position #', 'Position Type', 'Symbol', 'Quantity',
@@ -388,6 +401,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a CSV containing open positions.",
         required=True,
         type=str,
+    )
+    broker_group = parser.add_mutually_exclusive_group()
+    broker_group.add_argument(
+        "--ib",
+        help="Use Interactive Brokers for market data (requires IB Gateway or TWS running locally).",
+        action="store_true",
+    )
+    broker_group.add_argument(
+        "--schwab",
+        help="Use Charles Schwab for market data (requires Schwab credentials in .env).",
+        action="store_true",
     )
     parser.add_argument(
         "--symbol",

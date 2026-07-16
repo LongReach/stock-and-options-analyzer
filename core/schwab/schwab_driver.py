@@ -1,7 +1,7 @@
 import asyncio
 import math
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 from logging import getLogger
 from typing import Optional, List, Tuple, Union, Dict
@@ -34,6 +34,7 @@ from core.utils import (
     get_datetime_as_str,
     bar_size_to_time,
     current_datetime,
+    is_trading_hours,
 )
 from core.schwab.schwab_driver_requests import SchwabDriverException, LiveStream
 
@@ -53,8 +54,8 @@ class SchwabDriver(BaseDriver):
     All data returned is in the generic form used throughout `core` (HistoricalData, BarData, etc.); Schwab-
     and schwab-py-specific classes are only used inside this module.
 
-    Version One scope: historical/live OHLC bar data. Options, orders, and account/positions endpoints are
-    stubbed and raise NotImplementedError.
+    Implemented: historical/live OHLC bar data, account positions, and options data (chain info, per-contract
+    identity, and Greeks/price). Order-placement endpoints remain stubbed and raise NotImplementedError.
 
     Note on paper trading: unlike IB, Schwab's developer API has no paper/sandbox environment. Market data is
     available, but any future order support would hit real money.
@@ -302,7 +303,39 @@ class SchwabDriver(BaseDriver):
         strike: Optional[float] = None,
         expiration: Optional[str] = None,
     ) -> Tuple[List[OptionInfo], Optional[str]]:
-        raise NotImplementedError("SchwabDriver.get_option_info() is not implemented yet")
+        """
+        Gets identity information (name, right, strike, expiration) for every option matching the given filters.
+        Price and Greeks are NOT fetched here -- call get_greeks() for that, mirroring IBDriver.
+
+        :param ticker: symbol of underlying, e.g. SPY
+        :param primary_exchange: unused (Schwab resolves the venue); accepted for interface compatibility
+        :param is_call: True for calls, False for puts
+        :param strike: if given, restrict to this strike
+        :param expiration: if given (IB-style yyyymmdd), restrict to this expiration
+        :return: (list of OptionInfo objects, error string or None)
+        """
+        if not self.is_connected():
+            return [], "Not connected to Schwab"
+
+        contract_type = self._contract_type(is_call)
+        payload, error_str = await self._request_option_chain(
+            ticker, contract_type, strike=strike, expiration=expiration
+        )
+        if error_str:
+            return [], f"Unable to get option info for {ticker}: {error_str}"
+
+        live = is_trading_hours()
+        out_list: List[OptionInfo] = []
+        for exp_ib, strk, _detail in self._iter_option_details(payload):
+            option_info = OptionInfo()
+            option_info.full_name = f"{ticker}-{'C' if is_call else 'P'}-{exp_ib}-{self._strike_str(strk)}"
+            option_info.is_call = is_call
+            option_info.strike = strk
+            option_info.expiration = exp_ib
+            option_info.set_live(live)
+            out_list.append(option_info)
+
+        return out_list, None
 
     async def get_option_info_single(
         self,
@@ -312,17 +345,108 @@ class SchwabDriver(BaseDriver):
         expiration: str,
         primary_exchange: str = None,
     ) -> Tuple[Optional[OptionInfo], Optional[str]]:
-        raise NotImplementedError("SchwabDriver.get_option_info_single() is not implemented yet")
+        """
+        Gets identity information for a single option contract.
+
+        :param ticker: symbol of underlying
+        :param is_call: True for a call, False for a put
+        :param strike: strike price (must be defined)
+        :param expiration: expiration date, IB-style yyyymmdd (must be defined)
+        :param primary_exchange: unused; accepted for interface compatibility
+        :return: (OptionInfo or None, error string or None)
+        """
+        option_info_list, error_str = await self.get_option_info(
+            ticker=ticker, primary_exchange=primary_exchange, is_call=is_call, strike=strike, expiration=expiration
+        )
+        if error_str:
+            return None, f"Unable to get option info, error is: {error_str}"
+        if len(option_info_list) == 0:
+            return None, f"Could not find matching option for ticker {ticker}, strike {strike}, expiration {expiration}"
+
+        return option_info_list[0], None
 
     async def get_options_chain_info(
         self, ticker: str, primary_exchange: Optional[str] = None
     ) -> Tuple[Optional[OptionChainInfo], Optional[str]]:
-        raise NotImplementedError("SchwabDriver.get_options_chain_info() is not implemented yet")
+        """
+        Gets basic option-chain information (the set of expirations and strikes) for a stock.
+
+        We request only the call side: it spans the same expirations and strike ladder as the puts, and asking
+        for both sides at once returns a payload large enough that Schwab rejects it.
+
+        :param ticker: ticker of underlying stock
+        :param primary_exchange: unused; accepted for interface compatibility
+        :return: (OptionChainInfo or None, error string or None)
+        """
+        if not self.is_connected():
+            return None, "Not connected to Schwab"
+
+        payload, error_str = await self._request_option_chain(ticker, self._contract_type(is_call=True))
+        if error_str:
+            return None, f"Couldn't get options chain for {ticker}, error is {error_str}"
+
+        chain_info = OptionChainInfo()
+        chain_info.underlying = ticker
+        chain_info.multiplier = 100
+        for exp_ib, strk, detail in self._iter_option_details(payload):
+            chain_info.expirations.add(exp_ib)
+            chain_info.strikes.add(strk)
+            if not chain_info.exchange:
+                chain_info.exchange = detail.get("exchangeName", "")
+
+        self._logger.info(
+            f"get_options_chain_info() finished for {ticker}: "
+            f"{len(chain_info.expirations)} expiration(s), {len(chain_info.strikes)} strike(s)"
+        )
+        return chain_info, None
 
     async def get_greeks(
         self, option_info: OptionInfo, primary_exchange: Optional[str] = None
     ) -> Tuple[Optional[OptionInfo], Optional[str]]:
-        raise NotImplementedError("SchwabDriver.get_greeks() is not implemented yet")
+        """
+        Fills in the price, Greeks, implied volatility, volume, and open interest for a particular option and
+        returns the same OptionInfo, populated. Mirrors IBDriver.get_greeks().
+
+        :param option_info: option to fetch data for (must have underlying/right/strike/expiration set)
+        :param primary_exchange: unused; accepted for interface compatibility
+        :return: (populated OptionInfo or None, error string or None)
+        """
+        if not self.is_connected():
+            return None, "Not connected to Schwab"
+
+        underlying_name = option_info.get_underlying_name()
+        if underlying_name is None:
+            return None, "Underlying not defined"
+
+        self._logger.info(f"Getting Greeks and other info for option {option_info.full_name}")
+        payload, error_str = await self._request_option_chain(
+            underlying_name,
+            self._contract_type(option_info.is_call),
+            strike=option_info.strike,
+            expiration=option_info.expiration,
+        )
+        if error_str:
+            return None, f"Could not fetch Greeks for {option_info.full_name}, error is: {error_str}"
+
+        detail = next((d for _exp, _strk, d in self._iter_option_details(payload)), None)
+        if detail is None:
+            return None, f"Could not fetch Greeks, no contract found for {option_info.full_name}"
+
+        option_info.underlying_price = float(payload.get("underlyingPrice", 0.0))
+        option_info.price = self._detail_price(detail)
+        option_info.delta = self._clean_number(detail.get("delta"))
+        option_info.gamma = self._clean_number(detail.get("gamma"))
+        option_info.theta = self._clean_number(detail.get("theta"))
+        option_info.vega = self._clean_number(detail.get("vega"))
+        # Schwab reports volatility as a percentage (e.g. 14.6); IBDriver uses a fraction, so divide by 100.
+        option_info.implied_volatility = self._clean_number(detail.get("volatility")) / 100.0
+        # for_call must match the option's right or these setters no-op.
+        option_info.set_open_interest(int(detail.get("openInterest", 0)), for_call=option_info.is_call)
+        option_info.set_volume(int(detail.get("totalVolume", 0)), for_call=option_info.is_call)
+        option_info.set_greeks_defined()
+
+        self._logger.info("get_greeks() finished")
+        return option_info, None
 
     async def place_order(
         self,
@@ -438,6 +562,84 @@ class SchwabDriver(BaseDriver):
         expiration = "20" + yymmdd  # OSI years are two digits; Schwab options are all 21st-century.
         # Build the descriptor from the IB-style string so symbol_full keeps the trimmed strike (e.g. 785.0).
         return SecurityDescriptor(f"{root}-{right}-{expiration}-{SchwabDriver._strike_str(strike)}")
+
+    def _contract_type(self, is_call: bool):
+        """Returns the schwab-py ContractType enum value for the given right."""
+        options = self._client.Options.ContractType
+        return options.CALL if is_call else options.PUT
+
+    async def _request_option_chain(
+        self,
+        ticker: str,
+        contract_type,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
+    ) -> Tuple[Optional[dict], Optional[str]]:
+        """
+        Issues a Schwab option-chain request and returns the parsed JSON payload (or an error string).
+
+        :param ticker: underlying symbol
+        :param contract_type: schwab-py ContractType enum (CALL/PUT/ALL)
+        :param strike: if given, restrict to this strike
+        :param expiration: if given (IB-style yyyymmdd), restrict to that single expiration date
+        """
+        kwargs = {"contract_type": contract_type}
+        if strike is not None:
+            kwargs["strike"] = strike
+        if expiration is not None:
+            exp_date = self._ib_expiration_to_date(expiration)
+            kwargs["from_date"] = exp_date
+            kwargs["to_date"] = exp_date
+
+        try:
+            resp = await self._client.get_option_chain(ticker, **kwargs)
+        except Exception as e:
+            return None, f"Schwab option chain request failed: {e}"
+
+        if resp.status_code != 200:
+            return None, f"Schwab option chain request failed ({resp.status_code}): {resp.text}"
+        return resp.json(), None
+
+    @staticmethod
+    def _iter_option_details(payload: dict):
+        """
+        Iterates the option contracts in a Schwab option-chain payload, yielding (IB-style expiration, strike,
+        detail dict) tuples across both the call and put expiration maps.
+        """
+        for map_key in ("callExpDateMap", "putExpDateMap"):
+            for exp_key, strike_map in payload.get(map_key, {}).items():
+                # exp_key looks like '2026-08-21:36' (date:days-to-expiration).
+                exp_ib = exp_key.split(":")[0].replace("-", "")
+                for strike_key, detail_list in strike_map.items():
+                    for detail in detail_list:
+                        yield exp_ib, float(strike_key), detail
+
+    @staticmethod
+    def _ib_expiration_to_date(expiration: str) -> date:
+        """Converts an IB-style expiration string 'yyyymmdd' to a datetime.date for Schwab's date filters."""
+        return date(int(expiration[:4]), int(expiration[4:6]), int(expiration[6:8]))
+
+    @staticmethod
+    def _clean_number(value: Optional[float]) -> float:
+        """Coerces a Schwab numeric field to float, mapping missing values and the -999 sentinel to 0.0."""
+        if value is None:
+            return 0.0
+        number = float(value)
+        # Schwab uses -999 to mean 'not available' (e.g. volatility/Greeks on illiquid or 0-DTE contracts).
+        return 0.0 if number <= -999.0 else number
+
+    @staticmethod
+    def _detail_price(detail: dict) -> float:
+        """Picks a representative option price: mark, falling back to last, then the bid/ask midpoint."""
+        mark = detail.get("mark")
+        if mark:
+            return float(mark)
+        last = detail.get("last")
+        if last:
+            return float(last)
+        bid = SchwabDriver._clean_number(detail.get("bid"))
+        ask = SchwabDriver._clean_number(detail.get("ask"))
+        return (bid + ask) / 2.0
 
     @staticmethod
     def _strike_str(strike: float) -> str:
