@@ -1,33 +1,19 @@
 # For Potential Employers
 
-![](./images/WIP.png)
+![](../images/ThreeCoffees.png)
 
 I'm sharing this repository as an example of something I worked during a period that included self-employment, caring for an aging family member, and recovery from a debilitating tendon injury. My life was pretty challenging in 2025/2026, far more so than any corporate job, but it was still important to me to design and write code, as well as learn how to supercharge my working process by using Claude/Copilot.
 
-The code and documentation are not yet as polished as they'd be in a "finished" project, so please bear that in mind. The "secret sauce" elements of my stock/options trading strategy don't appear here, but are kept privately elsewhere. 
+All the code here is devoted to semi-automated ("semi-" for now) stock and options trading. Options trading in particular is complex and requires a fair bit of technical analysis and application of math to be successful at. I have a pretty advanced grasp of concepts such as implied volatility, delta, theta, gamma, and vega, and much of my code here has to do with strategies that take these variables into account in different ways. Options trading is something I would not recommend to anyone who doesn't have a firm understanding of the core concepts and best practices.
 
-The focuses of this codebase include:
-* Providing a convenient `async` API for getting stock/ETF/options data
-* Being able to package this data into forms convenient for analysis and abstracted away from the peculiarities of any particular brokerage
-* Being able to analyze options data for potential and ongoing trades
-* A software application for day trading, called `GuidedMissile`
-* Machine learning: as of right now, those experiments are not part of this codebase, not on GitHub, but they will be
-* Keeping an automatic record of options trades _(needs work)_
+As a whole, this codebase is currently a work under rapid development. Some parts of it are pretty mature; others are rougher. To learn about the features provided, see the [top-level README](../README.md). I do periodic sweeps to keep the documentation up-to-date, but there might be some spots I've missed. 
 
-Options are a lot more complex than stocks, with aspects like implied volatility, delta, theta, and gamma coming into play. Woe to anyone who attempts options trading without a sufficient grasp of these things. No matter how smart you are, you're playing with fire.
+I've been using this software for real, live trading, as well as a fair bit of paper trading. Other than some demo scripts, this isn't "toy" software. I take its performance and correctness seriously. I'm the sole designer and architect here. For better or worse, this is all a product of my vision and no one else's.
 
-This project began as a work entirely my own creation, and certainly on the level of design, architecture, general coding choices, and documentation. However, once I got a Claude account, I began making use of Claude Code to speed up my work. As is de rigueur for software developers these days.
+Much of the foundational programming work was my own. After April, 2026, I found that I no longer needed to write much code of my own. Claude Code did all the tedious stuff for me. Of course, I'm still an expert programmer and have no difficulty checking its work, which I've been doing. Claude, in my estimation, performs just as well as a trained software engineer with ten to fifteen years of professional experience, so my new role has been one of "managing" it. With the two of us as a "team", I can get work that previously would have taken me two weeks or so done in an afternoon. Still, it's worrisome to me to think of a world in which human beings are no longer incentivized to get those ten to fifteen years of coding experience for themselves, and the industry becomes overly dependent on machines and a few aging Gen-Xers/Millennials, i.e. the last two generations to master software engineering in the world preceding the rise of AI chatbots.
 
-## Why do I care about this? (And why should you?)
+Part of my motivation for mastering options trading, frankly, has to do with needing a way to make an income if AI turns the software industry into too onerous of a place to work. While I can _survive_ in an environment where no one feels much sense of security, and everyone fears losing their job in the next round of layoffs, it's not really how I _want_ to live. Maybe it's possible to find a company that won't treat its workers as disposable cannon fodder in this new post-AI reality? I'd like to think so, but optimism about that has been hard to find lately.
 
-I've been fascinated by stock and options trading since my 20s, though the amount of effort I've put into it over the years has varied depending on other demands on my mental energy (such as having a full-time job). As with most people who get into trading, I underestimated the learning curve and lost money. However, I have been getting smarter about it. This is an endeavor that requires both experience and full engagement.
+I'm a talented, experienced, and hard worker, with first-rate written communication skills, but I will only go where I'm appreciated and treated like a human being. That's what I want more than I want to be working alone, but if such a workplace isn't available, then working alone is what I'll stick to. More than money, I care about being happy with what I do eight hours a day. Making software continues to be a lot of fun for me, including in this new world with Claude as my assistant, but corporate dysfunction isn't.
 
-But there are patterns in a sea of seeming noise. Markets are as much driven by human emotion as by fundamentals, at least in the short term, and human emotion (greed, fear) has remained remarkably consistent over time. There's always greedy buying or panicked selling going on somewhere. You just have to find it, recognize a sensible point of entry, and play the odds in a way that manages your risk.
-
-Why should this matter to potential employers? Because this is a demonstration of me doing something I care about, entirely on my own initiative, and with no one else carrying part of the load. While there are other algorithmic (or algorithm-informed) stock and options traders out there that I've learned from, the software in this repository is mine. A lifetime of programming experience and well-honed intuition, going back to when I was nine years old, informs my work here. This isn't a game to me: stock and options trading are a real thing, with real consequences for getting it wrong. I'm playing with live ammunition and so are the people on the other side of trades. This has to be solid, dependable code.
-
-I always say in job interviews that documentation is important to me, but the proof of that is in this codebase. Other than a couple parts that are still works in progress, I've written docstrings for nearly every function and have explained my thinking carefully. Because I'm a skilled and experienced writer, I communicate my goals, understanding, and reasoning to other software engineers in a clear, articulate way. Which means that I can also do that effectively with AI chatbots.
-
-## Use of Claude
-
-Please visit [this folder](../claude/README.md) to see some examples of how I've been using agentic AI in my work. 
+If that missive doesn't put you off from potentially interviewing me, for a Boston-area or remote job, feel free to reach out. I'm a team player and I don't need the work itself to be sexy, just for daily working life to not be actively unhealthy. I just don't need any more workplaces that feature people crying at their desks, punching holes in the wall, having emotional breakdowns on Zoom, showing up drunk to 10am meetings, or being forced to work Saturdays because the poorly-documented spaghetti code broke again.

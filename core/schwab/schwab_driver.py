@@ -58,6 +58,9 @@ class SchwabDriver(BaseDriver):
 
     Note on paper trading: unlike IB, Schwab's developer API has no paper/sandbox environment. Market data is
     available, but any future order support would hit real money.
+
+    Note on implied volatility: it's not possible to get historical implied volatility from Schwab, only IV
+    as it currently stands.
     """
 
     def __init__(self, token_path: str = DEFAULT_TOKEN_PATH):
