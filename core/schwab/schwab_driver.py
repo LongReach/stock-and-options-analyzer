@@ -2,13 +2,11 @@ import asyncio
 import math
 import os
 from datetime import datetime, timezone, timedelta, date
-from decimal import Decimal
 from logging import getLogger
 from typing import Optional, List, Tuple, Union, Dict
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from ibapi.common import BarData
 
 from schwab.auth import easy_client
 from schwab.client import AsyncClient
@@ -17,6 +15,7 @@ from schwab.streaming import StreamClient
 from core.base_driver import BaseDriver
 from core.common import (
     HistoricalData,
+    DataBar,
     RequestedInfoType,
     SecurityDescriptor,
     OptionChainInfo,
@@ -51,7 +50,7 @@ class SchwabDriver(BaseDriver):
     system stays broker-agnostic. Built on top of the third-party `schwab-py` library, whose AsyncClient
     handles the OAuth2 dance and automatically refreshes the 30-minute access token under the hood.
 
-    All data returned is in the generic form used throughout `core` (HistoricalData, BarData, etc.); Schwab-
+    All data returned is in the generic form used throughout `core` (HistoricalData, DataBar, etc.); Schwab-
     and schwab-py-specific classes are only used inside this module.
 
     Implemented: historical/live OHLC bar data, account positions, and options data (chain info, per-contract
@@ -730,32 +729,32 @@ class SchwabDriver(BaseDriver):
             if bar is not None:
                 historical_data.add_data(bar, bar_dt)
 
-    def _candle_to_bar(self, candle: dict) -> Tuple[BarData, datetime]:
-        """Converts a Schwab price-history candle into an (ibapi BarData, datetime) pair."""
+    def _candle_to_bar(self, candle: dict) -> Tuple[DataBar, datetime]:
+        """Converts a Schwab price-history candle into a (DataBar, datetime) pair."""
         bar_dt = self._epoch_millis_to_market_dt(candle["datetime"])
-        bar = BarData()
+        bar = DataBar()
         bar.date = get_datetime_as_str(bar_dt)
         bar.open = float(candle["open"])
         bar.high = float(candle["high"])
         bar.low = float(candle["low"])
         bar.close = float(candle["close"])
-        bar.volume = Decimal(str(candle.get("volume", 0)))
+        bar.volume = float(candle.get("volume", 0))
         return bar, bar_dt
 
-    def _stream_content_to_bar(self, content: dict) -> Tuple[Optional[BarData], Optional[datetime]]:
-        """Converts a CHART_EQUITY stream content dict into an (ibapi BarData, datetime) pair, or (None, None)."""
+    def _stream_content_to_bar(self, content: dict) -> Tuple[Optional[DataBar], Optional[datetime]]:
+        """Converts a CHART_EQUITY stream content dict into a (DataBar, datetime) pair, or (None, None)."""
         millis = content.get("CHART_TIME_MILLIS")
         close = content.get("CLOSE_PRICE")
         if millis is None or close is None:
             return None, None
         bar_dt = self._epoch_millis_to_market_dt(millis)
-        bar = BarData()
+        bar = DataBar()
         bar.date = get_datetime_as_str(bar_dt)
         bar.open = float(content.get("OPEN_PRICE", close))
         bar.high = float(content.get("HIGH_PRICE", close))
         bar.low = float(content.get("LOW_PRICE", close))
         bar.close = float(close)
-        bar.volume = Decimal(str(int(content.get("VOLUME", 0))))
+        bar.volume = float(int(content.get("VOLUME", 0)))
         return bar, bar_dt
 
     @staticmethod

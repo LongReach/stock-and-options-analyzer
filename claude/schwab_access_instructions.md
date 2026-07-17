@@ -76,3 +76,7 @@ The new code will be exercised by making modifications to these scripts:
 Notice how each of these files has a constant called `BROKER`. This should be used to determine which driver becomes active. For now, you can set it to "SCHWAB" in each script.
 
 Finally, let's do something similar for `scripts/position_analyzer.py`.
+
+### Phase Five
+
+I've noticed that the class `BarData`, from IB's API, is being used in different parts of the code. It should only be used by code within `core/ib`. For code outside this folder, please use the `DataBar` class. It's now found in `core/common.py`. Please remove any imports of IB-specific libraries that aren't done from withing `core/ib`.

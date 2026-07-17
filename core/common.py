@@ -3,7 +3,6 @@ from datetime import datetime, date
 from enum import Enum, auto, IntEnum
 from threading import Lock
 from logging import getLogger
-from ibapi.common import BarData
 
 """
 Classes in this file represent data returned by or give to IBDriver. However, they are generic enough
@@ -161,6 +160,18 @@ class SecurityDescriptor:
         return descriptor
 
 
+class DataBar:
+    """Generic representation of a bar of data."""
+
+    def __init__(self):
+        self.date = ""  # IB-style datatime, e.g. "20250523 09:30:00 US/Eastern"
+        self.open = 0.0
+        self.high = 0.0
+        self.low = 0.0
+        self.close = 0.0
+        self.volume = 0.0
+
+
 class HistoricalData:
     """
     Holds multiple bars of historical data returned by IBDriver.
@@ -172,7 +183,7 @@ class HistoricalData:
     next_id = 1
 
     def __init__(self):
-        self.bar_data: List[BarData] = []
+        self.bar_data: List[DataBar] = []
         self.timestamps: List[datetime] = []
         self.lock = Lock()
 
@@ -184,7 +195,7 @@ class HistoricalData:
     def get_id(self) -> int:
         return self._id
 
-    def add_data(self, bar: BarData, bar_dt: datetime):
+    def add_data(self, bar: DataBar, bar_dt: datetime):
         """
         Adds a new bar of data to that received so far. We don't necessarily expect bars to arrive
         in sequential order, so we must take timestamps into account to keep them in order. Also,
@@ -195,7 +206,7 @@ class HistoricalData:
         :param bar_dt: datetime for bar
         """
 
-        def _replace_bar_data(existing: BarData, new: BarData):
+        def _replace_bar_data(existing: DataBar, new: DataBar):
             existing.low = new.low
             existing.high = new.high
             existing.open = new.open
