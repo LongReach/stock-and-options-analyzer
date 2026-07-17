@@ -307,18 +307,15 @@ async def main(parser: ArgumentParser):
 parser = ArgumentParser(
     prog="python -m scripts.iv_finder",
     formatter_class=RawDescriptionHelpFormatter,
-    description=textwrap.dedent(
-        """\
+    description=textwrap.dedent("""\
         Find stocks with high or low IV rank, inspect a single symbol's option chain,
         or estimate a stock's expected move.
 
         It is strongly recommended, before using, to build a data cache with the
         cache_data tool (see the first example below). Requires IB Gateway or TWS
         running locally (defaults to the paper/sim account).
-        """
-    ),
-    epilog=textwrap.dedent(
-        """\
+        """),
+    epilog=textwrap.dedent("""\
         Examples:
           # First, build the IV data cache this tool reads from
           python -m scripts.cache_data --file .\\data\\optionable.txt --db .\\data\\iv_data.h5 --info-type iv --limited
@@ -347,8 +344,7 @@ parser = ArgumentParser(
             may be used on their own (without --above/--below) to filter by earnings only.
           * --date (YYYYMMDD) overrides --dte when both are given.
           * --info-only uses cached data only and performs no scraping.
-        """
-    ),
+        """),
 )
 parser.add_argument(
     "--above",

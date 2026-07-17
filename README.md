@@ -12,18 +12,24 @@
   + [Repackaging as pandas dataframes](#repackaging-as-pandas-dataframes)
 * [Warning!](#warning)
 * [Setup](#setup)
+  + [Interactive Brokers](#interactive-brokers)
 * [First Test](#first-test)
+  + [Schwab](#schwab)
 * [Libraries Here](#libraries-here)
 * [Programs Here](#programs-here)
 * [Troubleshooting](#troubleshooting)
-  + [Error about another client accessing IB from a different IP address](#error-about-another-client-accessing-ib-from-a-different-ip-address)
-  + [No market data during competing live session](#no-market-data-during-competing-live-session)
-  + [Limitations on historical price data for an option](#limitations-on-historical-price-data-for-an-option)
-  + [Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data](#interactive-brokers-sometimes-fails-to-return-historical-data-timing-out-even-though-it-has-the-data)
-  + [Interactive Brokers responds to historical data request with error about no data](#interactive-brokers-responds-to-historical-data-request-with-error-about-no-data)
-  + [Errors about Interactive Brokers market data subscriptions](#errors-about-interactive-brokers-market-data-subscriptions)
-  + [Can't get options data on weekend/after hours](#cant-get-options-data-on-weekendafter-hours)
-  + [Can't get earnings dates from IB](#cant-get-earnings-dates-from-ib)
+  + [Interactive Brokers](#interactive-brokers-1)
+    - [Error about another client accessing IB from a different IP address](#error-about-another-client-accessing-ib-from-a-different-ip-address)
+    - [No market data during competing live session](#no-market-data-during-competing-live-session)
+    - [Limitations on historical price data for an option](#limitations-on-historical-price-data-for-an-option)
+    - [Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data](#interactive-brokers-sometimes-fails-to-return-historical-data-timing-out-even-though-it-has-the-data)
+    - [Interactive Brokers responds to historical data request with error about no data](#interactive-brokers-responds-to-historical-data-request-with-error-about-no-data)
+    - [Errors about Interactive Brokers market data subscriptions](#errors-about-interactive-brokers-market-data-subscriptions)
+    - [Can't get options data on weekend/after hours](#cant-get-options-data-on-weekendafter-hours)
+    - [Can't get earnings dates from IB](#cant-get-earnings-dates-from-ib)
+  + [Schwab](#schwab-1)
+    - [How do I connect?](#how-do-i-connect)
+    - [Why can't I get historical implied volatility data from Schwab?](#why-cant-i-get-historical-implied-volatility-data-from-schwab)
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
@@ -33,11 +39,16 @@ See [this page](./docs/ForPotentialEmployers.md)
 
 ## Description
 
-Central to this project, found in the `core/` folder, is a set of `async` libraries that wrap the APIs of several different brokerages. Or will -- currently, [Interactive Brokers](https://www.interactivebrokers.com/) is the only one supported, but Schwab will soon be included, too. Broker-specific details are kept hidden from library users, who can receive stock/options data or send orders in a "clean", generic form, via a readily understandable interface. It's a bit more than a light wrapper. The user experience will be more or less the same regardless of which brokerage is being used, and that layer can easily be swapped at runtime, as long as the user performs the required setup of "gateway" software provided by the brokerage. 
+What this repository includes:
+* `async` wrappers for the APIs of two major brokerages: Interactive Brokers and Charles Schwab. Both `IBDriver` and `ScnwabDriver` implement the broker-agnostic `BaseDriver` class. Thus, users can write programs to buy, sell, or analyze stock/options positions that will work with multiple brokerages, the specific one to be employed selected at run-time. For now, the feature set for `SchwabDriver` is a little less complete than for `IBDriver`, but I intend to keep both in sync going forward.
+* `StockDataManager`: a class for collecting historical price and implied volatility data from the brokerage of choice and caching it on disk for fast access. No brokerage whose API I've worked with makes it possible to *QUICKLY* get large amounts of historical data. Caching is necessary for any application that depends on a swift analysis of historical data time series.
+* `OptionDataManager`: a class that makes it easier to collect options data, as well as to place options orders. Again, broker-agnostic.
+* `EarningsManager`: a tool that parses the Nasdaq's online earnings calendar to collect earnings dates for stocks of interest and to cache them for quick at-will access.
+* `indicators.py`: a collection of commonly used stock trading indicators, such as MACD, RSI, and EMA.
+* The `GuidedMissile` day-trading app. This is still a work in progress and I don't recommend using it.
+* A collection of other tools, which make use of the core classes above in different ways. For example, `iv_finder` is a command-line scanning tool that finds stocks/ETFs with historically high or low implied volatility, and earnings before or after a specified date. This is handy for finding option chains that fit a particular options strategy.
 
-Users can also find `StockDataManager` and `OptionDataManager`, classes that simplify the collection and management of stock and options data, respectively. `StockDataManager` provides an immense performance boost, in that it caches data scraped from a brokerage locally, so that it can be retrieved more quickly in the future. It would be difficult to develop machine learning applications without this feature. Interactive Brokers, in particular, can be slow and temperamental about returning historical data. Indeed, data throttling seems to be a common practice at all major brokerages. 
-
-Elsewhere in this repository -- see [scripts/](./scripts/README.md) -- are several tools and applications that make use of the core libraries.
+> Note: Despite the overall broker-agnostic design, I've chosen, within my generic code, to use IB-style nomenclature for options contracts and dates. Security specification example: "QQQ-P-20260828-625.0". Date example: "20260513 09:30:00 US/Eastern". I find these readable and generic enough for general-purpose use.
 
 ## Design Inspirations
 
@@ -57,6 +68,8 @@ A few reasons I didn't use it:
 * As the project grew beyond its original scope, I decided to stick with my own library. `ib_async` exposes a bit too much of IB's implementation details for my liking, though this is perfectly natural for a thin wrapper. I wanted my interface to be more broker-agnostic. And I didn't want to have to write a wrapper around a wrapper -- better to just wrap the IB's API directly.
 * I preferred my own approach to dealing with options contracts.
 
+For Schwab, I gave in and chose to use the third-party wrapper, `schwab-py`. This was the recommendation of Claude Code, and it seemed to be the least painful approach.
+
 ### Repackaging as pandas dataframes
 
 It makes good sense to keep historical market data, once obtained, in `pandas` dataframes. These can be easily cached on disk (past market data is unchanging), as well as fed to machine-learning models.
@@ -71,7 +84,11 @@ If you want to trade stocks or options, it's a good idea to practice with a pape
 
 ## Setup
 
-Obviously, you have to have an Interactive Brokers account to use this software -- at least until another brokerage is supported. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite. And if you want to be able to get earnings dates from IB, that requires yet another subscription, to Wall Street Horizons. That one costs about $50 / month.
+### Interactive Brokers
+
+![](./images/IBLogo.png)
+
+You have to have an Interactive Brokers account to use this software, even just to get market data. You also have to be subscribed to the "US Equity and Options Add-On Streaming Bundle (NP)", as well as the bundle that it requires as a prerequisite. And if you want to be able to get earnings dates from IB, that requires yet another subscription, to Wall Street Horizons. That one costs about $50 / month.
 
 I created a `conda` environment for this project. First step was to install the Interactive Brokers API, as detailed in their [online guide](https://www.interactivebrokers.com/campus/ibkr-quant-news/interactive-brokers-python-api-native-a-step-by-step-guide/). Once I ran `python setup.py install`, the Python packages were installed in my environment. Or you can use `venv`, if you prefer that.
 
@@ -121,6 +138,23 @@ reqId: 4, errorCode: 366, errorString: No historical data query found for ticker
 
 To exit the program, close Gateway.
 
+### Schwab
+
+![](./images/SchwabLogo.png)
+
+You need to register with Schwab's Developer Portal. It might take a few days for them to authorize you. Fortunately, you don't have to run any "gateway"-type software, as for Interactive Brokers. The first time you make use of `SchwabDriver`, the connection function will open up a login web page. Once you've logged into your Schwab account, your system will receive a security token that doesn't expire for a few days and is automatically refreshed. Thereafter, security measures won't interfere with being able to use `SchwabDriver` to get information or place orders. At least, not until the main token expires again.
+
+Once you have a Developer Portal account, your next step will be creating a registered application.
+* In the Dashboard, click "Create App".
+* In the API products dropdown — Choose one or both of "Market Data Production" and "Accounts and Trading Production".
+* Create an app name.
+* Enter this app callback URL: https://127.0.0.1:8182
+* The callback URL above is the localhost IP address for your local machine. This IP address is needed so that you can get the first batch of authentication tokens on your local machine.
+
+For more basic setup instructions, see [schwab-py's documentation](https://schwab-py.readthedocs.io/en/latest/getting-started.html). Yes, `SchwabDriver` uses `schwab-py` under the hood.
+
+Once you obtain your **API Key** and **App Secret**, you'll need to store these where your code can find them. They should never be in plain text in the code itself.
+
 ## Libraries Here
 
 See the `core/` [README](./core/README.md).
@@ -131,25 +165,29 @@ See the `scripts/` [README](./scripts/README.md)
 
 ## Troubleshooting
 
-### Error about another client accessing IB from a different IP address
+### Interactive Brokers
+
+![](./images/IBLogo.png)
+
+#### Error about another client accessing IB from a different IP address
 
 You might have the IB app open on your phone (needed for authentication when you log on to a live trading account). Close it.
 
-### No market data during competing live session
+#### No market data during competing live session
 
 Sometimes efforts to get options Greeks will fail because of an error, `No market data during competing live session`. Try closing the Gateway and reopening it.
 
-### Limitations on historical price data for an option
+#### Limitations on historical price data for an option
 
 `No data of type EODChart is available for the exchange 'BEST' and the security type 'Option' and '1 d' and '1 day'`: When getting historical price data for an option, must use a smaller bar size than one-day.
 
-### Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data
+#### Interactive Brokers sometimes fails to return historical data, timing out, even though it HAS the data
 
 This seems to be a throttling issue. If you ask for data for too many securities in too short of a time frame (supposedly more than 60 within the space of ten minutes), IB won't respond. 
 
 The solution, of course, is to store market data that's more than a few days old locally. It's never going to change, so no point to pulling it repeatedly from a remote server.
 
-### Interactive Brokers responds to historical data request with error about no data
+#### Interactive Brokers responds to historical data request with error about no data
 
 Check that your request is formatted in a way that makes sense, e.g.:
 
@@ -159,13 +197,13 @@ INFO:ibapi.utils:REQUEST reqHistoricalData {'reqId': 2, 'contract': 260472607185
 
 In this case, we're trying to get the most recent single 1-day bar of implied volatility data for SPY. It makes sense that the `endDateTime` field is empty and that `durationStr` is '1 D'. Had `durationStr` been in seconds or minutes, it might not have worked. Same with trying to use some odd `endDateTime`, such as one in the middle of the day.
 
-### Errors about Interactive Brokers market data subscriptions
+#### Errors about Interactive Brokers market data subscriptions
 
 You need to go to your account settings on the IB webpage. Subscribe to "US Equity and Options Add-On Streaming Bundle (NP)". You also have to subscribe to the bundle that this one tells you it needs.
 
 IB might cancel your subscriptions if the cash in your account falls below a certain threshold. If that happens, you need to transfer in more cash, then sign up for the subscriptions again. 
 
-### Can't get options data on weekend/after hours
+#### Can't get options data on weekend/after hours
 
 Inside Gateway, you might see an error like:
 ```
@@ -185,6 +223,18 @@ self.reqMarketDataType(1 if live else 2)
 
 The `2` requests "frozen" data.
 
-### Can't get earnings dates from IB
+#### Can't get earnings dates from IB
 
 You need a paid subscription to Wall Street Horizons, the API version. It costs about $50 per month. However, there are workarounds, found elsewhere in this codebase.
+
+### Schwab
+
+![](./images/SchwabLogo.png)
+
+#### How do I connect?
+
+If you've done all the setup, try the program, `scripts/examples/schwab_driver_example.py`. The first time you use it, it should launch a web page for logging into your Schwab account. It might break after that, but run it again and it should just work. Then you'll have the authentication token on your system.
+
+#### Why can't I get historical implied volatility data from Schwab?
+
+Schwab's API simply doesn't offer this. You can get IV as it is at the current moment, but not historical snapshots.

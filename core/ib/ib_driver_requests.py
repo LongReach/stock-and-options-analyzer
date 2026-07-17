@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from core.common import (
     SecurityDescriptor,
     HistoricalData,
+    DataBar,
     OptionChainInfo,
     OptionInfo,
     OrderInfo,
@@ -54,11 +55,21 @@ class BarDataRequest(DataRequest):
         a bar's data might replace an existing bar, i.e. if the bar is actively trading right now
         and we're receiving updates on it.
 
+        The IB-specific BarData is converted to a generic DataBar here so that IB types don't leak into
+        HistoricalData (which lives outside core/ib).
+
         :param bar_data: --
         :param allow_update: TBD
         """
         bar_dt = get_datetime(bar_data.date)
-        self.historical_data.add_data(bar_data, bar_dt)
+        data_bar = DataBar()
+        data_bar.date = bar_data.date
+        data_bar.open = bar_data.open
+        data_bar.high = bar_data.high
+        data_bar.low = bar_data.low
+        data_bar.close = bar_data.close
+        data_bar.volume = bar_data.volume
+        self.historical_data.add_data(data_bar, bar_dt)
 
 
 class ContractDetailsRequest(DataRequest):

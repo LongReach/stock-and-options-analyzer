@@ -6,6 +6,7 @@ from logging import basicConfig, INFO, getLogger
 
 from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver
+from core.schwab.schwab_driver import SchwabDriver
 from core.option_data_manager import OptionDataManager
 
 """
@@ -17,6 +18,15 @@ CLIENT_ID = 16
 TICKER = "AAPL"
 MIN_DAYS_AWAY = 5
 MAX_DAYS_AWAY = 70
+# Can be either "IB" (Interactive Brokers) or "SCHWAB"
+BROKER = "SCHWAB"
+
+
+def create_driver() -> BaseDriver:
+    """Creates the data driver selected by the BROKER constant."""
+    if BROKER == "SCHWAB":
+        return SchwabDriver.create()
+    return IBDriver.create(sim_account=True, client_id=CLIENT_ID)
 
 
 def print_df(df):
@@ -30,7 +40,7 @@ def print_df(df):
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_manager_test.log", level=INFO)
-    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+    data_driver: BaseDriver = create_driver()
     try:
         data_driver.connect()
         await asyncio.sleep(1.0)

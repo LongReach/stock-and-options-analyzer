@@ -1,8 +1,7 @@
-from ibapi.common import BarData
 import pytest
 from typing import List, Dict
 
-from core.common import SecurityDescriptor
+from core.common import SecurityDescriptor, DataBar
 from core.utils import get_datetime, get_datetime_as_str, BarSize
 from core.ib.ib_driver_requests import BarDataRequest
 from core.stock_data import StockData
@@ -112,7 +111,7 @@ def make_bar_request():
     spy_descriptor = SecurityDescriptor("SPY")
     bar_data_request = BarDataRequest(spy_descriptor)
     for bar_info in bar_info_list:
-        bar_data = BarData()
+        bar_data = DataBar()
         bar_data.date = bar_info["date"]
         bar_data.open = bar_info["open"]
         bar_data.close = bar_info["close"]

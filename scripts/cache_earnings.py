@@ -103,16 +103,13 @@ def main(parser: argparse.ArgumentParser):
 parser = argparse.ArgumentParser(
     prog="python -m scripts.cache_earnings",
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    description=textwrap.dedent(
-        """\
+    description=textwrap.dedent("""\
         Cache Nasdaq earnings calendar data to an HDF5 file.
 
         Scrapes earnings dates for a list of tickers over a date range and stores them
         for use by other tools (e.g. the earnings filters in iv_finder).
-        """
-    ),
-    epilog=textwrap.dedent(
-        """\
+        """),
+    epilog=textwrap.dedent("""\
         Examples:
           # Scrape earnings for a list of tickers (default range: 2 years back to 1 year ahead)
           python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt
@@ -130,8 +127,7 @@ parser = argparse.ArgumentParser(
           * --start / --end take dates in YYYYMMDD format.
           * --file is required to scrape; --show reads the existing cache instead.
           * --symbol only applies together with --show.
-        """
-    ),
+        """),
 )
 parser.add_argument("--db", required=True, help="Path to .h5 database file")
 parser.add_argument("--file", default=None, required=False, help="Path to text file with one ticker per line")
