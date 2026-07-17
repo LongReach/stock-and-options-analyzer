@@ -6,9 +6,10 @@ from logging import basicConfig, INFO, getLogger
 
 from core.base_driver import BaseDriver
 from core.ib.ib_driver import IBDriver
+from core.schwab.schwab_driver import SchwabDriver
 
 """
-Demonstrates how to obtain options info from IBDriver.
+Demonstrates how to obtain options info from a driver (IBDriver or SchwabDriver).
 
 Run like:
 python -m scripts.options_driver_example
@@ -17,14 +18,23 @@ python -m scripts.options_driver_example
 CLIENT_ID = 15
 
 TICKER = "SPY"
-STRIKE = 770.0
-EXPIRATION = "20260618"
+STRIKE = 755.0
+EXPIRATION = "20260821"
+# Can be either "IB" (Interactive Brokers) or "SCHWAB"
+BROKER = "SCHWAB"
+
+
+def create_driver() -> BaseDriver:
+    """Creates the data driver selected by the BROKER constant."""
+    if BROKER == "SCHWAB":
+        return SchwabDriver.create()
+    return IBDriver.create(sim_account=True, client_id=CLIENT_ID)
 
 
 async def main():
     logger = getLogger(__name__)
     basicConfig(filename="options_driver_test.log", level=INFO)
-    data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
+    data_driver: BaseDriver = create_driver()
     try:
         data_driver.connect()
 

@@ -49,7 +49,9 @@ class BaseDriver(ABC):
         primary_exchange: Optional[str] = None,
     ) -> Tuple[HistoricalData, Optional[str]]:
         """
-        Requests historical bar data and waits for it to arrive before returning.
+        Requests historical bar data and waits for it to arrive before returning. "Historical" is not necessarily
+        the best word, as the data returned can be live and continuously updating, though bars other than the
+        current one will still be historical.
 
         :param symbol_full: stock ticker, e.g. AAPL or SPY-C-20250627-600.0
         :param num_bars: how many bars of data to collect; if 0, start_date determines range

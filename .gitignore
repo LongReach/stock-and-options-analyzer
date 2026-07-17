@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# .env file
+
+# Schwab OAuth token (contains refresh token — never commit)
+schwab_token.json
