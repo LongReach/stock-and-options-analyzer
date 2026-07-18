@@ -77,6 +77,36 @@ Notice how each of these files has a constant called `BROKER`. This should be us
 
 Finally, let's do something similar for `scripts/position_analyzer.py`.
 
-### Phase Five
+### Phase Five (Complete)
 
 I've noticed that the class `BarData`, from IB's API, is being used in different parts of the code. It should only be used by code within `core/ib`. For code outside this folder, please use the `DataBar` class. It's now found in `core/common.py`. Please remove any imports of IB-specific libraries that aren't done from withing `core/ib`.
+
+#### Phase Six (Complete)
+
+##### Step 1 (Complete)
+
+I'd like to be able to get a list of trades, made over some date range, from Schwab. Please add a function called `get_trades()` to `SchwabDriver`. Its first parameter will `start_dt`, a datetime that all returned trades will be no older than. Its second optional parameter will `end_dt`, a datetime that all returned trades will be no newer than. If not given, then the current datetime will be used.
+
+`get_trades()` should also go into `BaseDriver` and `IBDriver`. The `IBDriver` version will do nothing for now, just raise a `NotImplementedError` exception.
+
+Please make use of the classes `TradeDescriptor` and `TradesInfo`. These are found in `core/common.py`.
+
+Make a program in `scripts/` called `get_schwab_trades.py`. It will take as arguments an optional start date and an optional end date. If the former is not given, then use today as the starting date. If the latter is not given, then the current datetime will be used as the end date. The list of trades will be pretty-printed.
+
+##### Step 2
+
+Please make `scripts/get_schwab_positions.py` work with a new CSV format. An example of the new format is found in `data/current_positions.csv`. The columns are now: Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price
+
+When building a new row, leave "Date Out" blank, make "Quantity Out" 0, and make "Exit Price" 0. Make "Date In" the current date. Use the IB-style datetimes that I use throughout this codebase, e.g. "20260513 09:30:00 US/Eastern". It's important to include the time as well as the date, for disambiguation purposes.
+
+##### Step 3
+
+Please make `scripts/get_schwab_trades.py` take a path to a positions CSV as an optional argument. The format will be the same as in `data/current_positions.csv`. 
+
+For each trade, follow these rules:
+* If it matches an existing position row in terms of symbol and Date In, do nothing
+* If it matches an existing position row in terms of symbol and Date Out, do nothing
+* If it matches an existing position row in terms of symbol but not Date In or Date Out, then update the "Date Out", "Quantity Out", and "Exit Price" fields. If a partial exit has already been recorded for the row, i.e. "Quantity Out" is something other than 0, increment or decrement that value according to what's in the trade entry. "Exit Price" will be computed using averaging. "Date Out" will become whatever dete is specified for the trade.
+* If it matches no exiting position row, then create a new row. The "Quantity" and "Trade Price" fields will be filled from the trade data. Same with "Date In".
+
+As in Step 2, "Date In" and "Date Out" entries should include the time.

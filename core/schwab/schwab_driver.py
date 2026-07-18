@@ -24,6 +24,8 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradeDescriptor,
+    TradesInfo,
     EarningsInfo,
     BarSize,
     MARKETS_TIMEZONE,
@@ -53,8 +55,9 @@ class SchwabDriver(BaseDriver):
     All data returned is in the generic form used throughout `core` (HistoricalData, DataBar, etc.); Schwab-
     and schwab-py-specific classes are only used inside this module.
 
-    Implemented: historical/live OHLC bar data, account positions, and options data (chain info, per-contract
-    identity, and Greeks/price). Order-placement endpoints remain stubbed and raise NotImplementedError.
+    Implemented: historical/live OHLC bar data, account positions, trade history, and options data (chain
+    info, per-contract identity, and Greeks/price). Order-placement endpoints remain stubbed and raise
+    NotImplementedError.
 
     Note on paper trading: unlike IB, Schwab's developer API has no paper/sandbox environment. Market data is
     available, but any future order support would hit real money.
@@ -515,6 +518,58 @@ class SchwabDriver(BaseDriver):
         self._logger.info(f"get_positions() finished, {len(positions_info.get_positions())} position(s)")
         return positions_info, None
 
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """
+        Gets the trades the account holder made over a date range, across all linked accounts.
+
+        Options are keyed by IB-style symbols (e.g. 'SPY-C-20260821-785.0'); a trade's quantity is signed
+        (positive for a buy, negative for a sell), matching TradeDescriptor's convention.
+
+        Note: Schwab only serves transactions from the last 60 days, and requires start_dt to be within that
+        window, so older ranges will come back as an error from Schwab.
+
+        :param start_dt: returned trades will be no older than this datetime
+        :param end_dt: returned trades will be no newer than this datetime; defaults to the current datetime
+        :return: (TradesInfo, error string or None)
+        """
+        if not self.is_connected():
+            return TradesInfo(), "Not connected to Schwab"
+
+        if end_dt is None:
+            end_dt = current_datetime()
+
+        self._logger.info(f"get_trades() from {start_dt} to {end_dt}")
+        account_hashes, error_str = await self._get_account_hashes()
+        if error_str:
+            return TradesInfo(), error_str
+
+        trades_info = TradesInfo()
+        for account_hash in account_hashes:
+            try:
+                resp = await self._client.get_transactions(
+                    account_hash,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    transaction_types=self._client.Transactions.TransactionType.TRADE,
+                )
+            except Exception as e:
+                return TradesInfo(), f"Schwab transactions request failed: {e}"
+
+            if resp.status_code != 200:
+                return TradesInfo(), f"Schwab transactions request failed ({resp.status_code}): {resp.text}"
+
+            for txn in resp.json():
+                trade_dt = self._parse_txn_time(txn.get("time"))
+                for item in txn.get("transferItems", []):
+                    trade = self._transfer_item_to_trade(item, trade_dt)
+                    if trade is not None:
+                        trades_info.add_trade(trade)
+
+        self._logger.info(f"get_trades() finished, {len(trades_info.get_trades())} trade(s)")
+        return trades_info, None
+
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
         raise NotImplementedError("SchwabDriver.get_earnings_dates() is not implemented yet")
 
@@ -547,6 +602,50 @@ class SchwabDriver(BaseDriver):
             descriptor = SecurityDescriptor(symbol)
 
         return descriptor, quantity, price, is_short
+
+    async def _get_account_hashes(self) -> Tuple[List[str], Optional[str]]:
+        """Fetches the account hashes for every account linked to this token (needed for the transactions API)."""
+        try:
+            resp = await self._client.get_account_numbers()
+        except Exception as e:
+            return [], f"Schwab account lookup failed: {e}"
+        if resp.status_code != 200:
+            return [], f"Schwab account lookup failed ({resp.status_code}): {resp.text}"
+        accounts = resp.json()
+        if not accounts:
+            return [], "No Schwab accounts linked to this token"
+        return [account["hashValue"] for account in accounts], None
+
+    def _transfer_item_to_trade(self, item: dict, trade_dt: datetime) -> Optional[TradeDescriptor]:
+        """
+        Converts one transferItem of a Schwab TRADE transaction into a TradeDescriptor, or None if the item is
+        not a tradeable security (e.g. the cash/fee CURRENCY legs that accompany every trade).
+        """
+        instrument = item.get("instrument", {})
+        asset_type = instrument.get("assetType")
+        symbol = instrument.get("symbol", "")
+        if asset_type not in ("OPTION", "EQUITY", "COLLECTIVE_INVESTMENT") or not symbol:
+            return None
+
+        if asset_type == "OPTION":
+            descriptor = self._option_symbol_to_descriptor(symbol)
+        else:
+            # Equities, ETFs (COLLECTIVE_INVESTMENT), etc. -- just the ticker.
+            descriptor = SecurityDescriptor(symbol)
+
+        trade = TradeDescriptor(descriptor)
+        trade.trade_date = trade_dt
+        # Schwab's 'amount' is already signed: positive for a buy, negative for a sell.
+        trade.quantity = int(item.get("amount", 0))
+        trade.price = float(item.get("price") or 0.0)
+        return trade
+
+    @staticmethod
+    def _parse_txn_time(time_str: Optional[str]) -> datetime:
+        """Parses a Schwab transaction timestamp (ISO 8601, UTC) into a market-timezone datetime."""
+        if not time_str:
+            return current_datetime()
+        return datetime.fromisoformat(time_str).astimezone(ZoneInfo(MARKETS_TIMEZONE))
 
     @staticmethod
     def _option_symbol_to_descriptor(symbol: str) -> SecurityDescriptor:

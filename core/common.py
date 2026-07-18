@@ -3,6 +3,7 @@ from datetime import datetime, date
 from enum import Enum, auto, IntEnum
 from threading import Lock
 from logging import getLogger
+from zoneinfo import ZoneInfo
 
 """
 Classes in this file represent data returned by or give to IBDriver. However, they are generic enough
@@ -505,3 +506,31 @@ class EarningsInfo:
     def __init__(self):
         self.upcoming: List[date] = []  # Future earnings dates, soonest first
         self.past: List[date] = []  # Past earnings dates, most recent first
+
+
+class TradeDescriptor:
+    """Info about a particular trade made by the account holder."""
+
+    def __init__(self, descriptor: SecurityDescriptor):
+        self.security_descriptor: SecurityDescriptor = descriptor
+        # Equivalent to core.utils.current_datetime(); inlined to avoid a core.common <-> core.utils import cycle.
+        self.trade_date: datetime = datetime.now(ZoneInfo(MARKETS_TIMEZONE))
+        self.quantity: int = 0  # Negative if shares sold, positive if bought
+        self.price: float = 0.0
+
+    def to_string(self):
+        """Returns string representation"""
+        return f"Trade for {self.security_descriptor.to_string()}, quantity={self.quantity}, price={self.price}"
+
+
+class TradesInfo:
+    """Info about trades made over some date range"""
+
+    def __init__(self):
+        self.trades_list: List[TradeDescriptor] = []
+
+    def add_trade(self, trade_descriptor: TradeDescriptor):
+        self.trades_list.append(trade_descriptor)
+
+    def get_trades(self) -> List[TradeDescriptor]:
+        return self.trades_list

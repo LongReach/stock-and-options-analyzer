@@ -11,6 +11,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradesInfo,
     EarningsInfo,
 )
 from core.utils import BarSize
@@ -224,6 +225,18 @@ class BaseDriver(ABC):
     @abstractmethod
     async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
         """Gets info about positions currently held in the account."""
+
+    @abstractmethod
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """
+        Gets trades made by the account holder over a date range.
+
+        :param start_dt: returned trades will be no older than this datetime
+        :param end_dt: returned trades will be no newer than this datetime; defaults to the current datetime
+        :return: (TradesInfo, error string or None)
+        """
 
     @abstractmethod
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:

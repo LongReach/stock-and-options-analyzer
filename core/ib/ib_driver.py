@@ -32,6 +32,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradesInfo,
     EarningsInfo,
 )
 from core.utils import (
@@ -785,6 +786,12 @@ class IBDriver(IBWrapper, BaseDriver):
             self._logger.info("get_positions() finished")
 
         return positions_request.positions_info, ret_error_str
+
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """Not implemented for IB yet."""
+        raise NotImplementedError("IBDriver.get_trades() is not implemented yet")
 
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
         """
