@@ -93,13 +93,13 @@ Please make use of the classes `TradeDescriptor` and `TradesInfo`. These are fou
 
 Make a program in `scripts/` called `get_schwab_trades.py`. It will take as arguments an optional start date and an optional end date. If the former is not given, then use today as the starting date. If the latter is not given, then the current datetime will be used as the end date. The list of trades will be pretty-printed.
 
-##### Step 2
+##### Step 2 (Complete)
 
 Please make `scripts/get_schwab_positions.py` work with a new CSV format. An example of the new format is found in `data/current_positions.csv`. The columns are now: Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price
 
 When building a new row, leave "Date Out" blank, make "Quantity Out" 0, and make "Exit Price" 0. Make "Date In" the current date. Use the IB-style datetimes that I use throughout this codebase, e.g. "20260513 09:30:00 US/Eastern". It's important to include the time as well as the date, for disambiguation purposes.
 
-##### Step 3
+##### Step 3 (Complete)
 
 Please make `scripts/get_schwab_trades.py` take a path to a positions CSV as an optional argument. The format will be the same as in `data/current_positions.csv`. 
 
@@ -110,3 +110,23 @@ For each trade, follow these rules:
 * If it matches no exiting position row, then create a new row. The "Quantity" and "Trade Price" fields will be filled from the trade data. Same with "Date In".
 
 As in Step 2, "Date In" and "Date Out" entries should include the time.
+
+##### Step 4 (Complete)
+
+Let's modify the rules followed by `scripts/get_schwab_trades.py`.
+
+For each trade, follow these rules:
+* If it matches an existing position row in terms of symbol and Date In, do nothing
+* Else if it matches an existing position row in terms of symbol and the trade's datetime is not more recent than Date Out, do nothing 
+* Else if it matches an existing position row in terms of symbol, then update the "Date Out", "Quantity Out", and "Exit Price" fields. If a partial exit has already been recorded for the row, i.e. "Quantity Out" is something other than 0, increment or decrement that value according to what's in the trade entry. "Exit Price" will be computed using averaging. "Date Out" will become whatever dete is specified for the trade.
+* Else if it matches no exiting position row, then create a new row. The "Quantity" and "Trade Price" fields will be filled from the trade data. Same with "Date In".
+
+##### Step 5
+
+Let's modify `scripts/get_schwab_positions.py`. It should never make any changes to rows in the CSV file. It should only ever add new rows. The adding of new rows will only happen when there isn't a symbol conflict with an existing row. If there is a symbol conflict, nothing will happen.
+
+The script `scripts/position_analyzer.py` now needs to work differently. The CSV format has changed since this script was created. The CSV columns are now: Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price
+
+For each leg (each row), the number of contracts ACTUALLY held (long or short) will be determined by combining "Quantity" and "Quantity Out". The aggregate calculations for a single position must deal with number of contracts actually held. If some legs have a total of 0 contracts actually held, that's okay.
+
+It would be good to show realized profit, both for individual legs and for the aggregate row. This calculation would take into account "Quantity", "Quantity Out", "Trade Price", and "Exit Price".

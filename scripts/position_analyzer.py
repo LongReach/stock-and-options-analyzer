@@ -16,9 +16,10 @@ from core.utils import current_datetime
 
 r"""
 Utility for analyzing a set of open options positions. For each option leg it reports current
-price and the Greeks (delta, theta, gamma, vega) alongside the trade details recorded in a CSV.
-A final aggregate row summarizes the whole set of filtered legs (net position Greeks, net value,
-and unrealized P/L).
+price and the Greeks (delta, theta, gamma, vega) alongside the trade details recorded in a CSV,
+plus the contracts actually held (Quantity + Quantity Out) and any realized P/L on the closed
+portion. A final aggregate row summarizes the filtered legs (net position Greeks, net value,
+unrealized P/L, and realized P/L), computed over the contracts actually held.
 
 Setup and usage:
 ------------------------
@@ -32,12 +33,15 @@ CLIENT_ID = 17
 # Standard US equity-option contract multiplier: 1 contract controls 100 shares.
 CONTRACT_MULTIPLIER = 100
 
-# CSV column names
+# CSV column names (current_positions.csv format:
+# Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price)
 CSV_POSITION_NUM = "Position #"
 CSV_POSITION_TYPE = "Position Type"
 CSV_SYMBOL = "Symbol"
 CSV_QUANTITY = "Quantity"
 CSV_TRADE_PRICE = "Trade Price"
+CSV_QUANTITY_OUT = "Quantity Out"
+CSV_EXIT_PRICE = "Exit Price"
 
 # Maps the short --position-type argument to the full name stored in the CSV's "Position Type" column.
 POSITION_TYPE_MAP = {
@@ -58,8 +62,10 @@ COL_CONTRACT = "Contract"
 COL_POSITION_NUM = "Pos #"
 COL_POSITION_TYPE = "Pos Type"
 COL_QUANTITY = "Qty"
+COL_HELD = "Held"
 COL_TRADE_PRICE = "Trade Price"
 COL_CURRENT_PRICE = "Cur Price"
+COL_REALIZED = "Realized"
 COL_IV = "IV"
 COL_DELTA = "Delta"
 COL_THETA = "Theta"
@@ -71,8 +77,10 @@ OUTPUT_COLUMNS = [
     COL_POSITION_NUM,
     COL_POSITION_TYPE,
     COL_QUANTITY,
+    COL_HELD,
     COL_TRADE_PRICE,
     COL_CURRENT_PRICE,
+    COL_REALIZED,
     COL_IV,
     COL_DELTA,
     COL_THETA,
@@ -158,10 +166,33 @@ async def collect_leg_data(
     return option_data, infos
 
 
+def _csv_int(pos_row: pd.Series, col: str) -> int:
+    """Reads an integer CSV cell, treating a blank/missing/NaN value as 0."""
+    value = pos_row.get(col, 0)
+    if value == "" or value is None or pd.isna(value):
+        return 0
+    return int(value)
+
+
+def _csv_float(pos_row: pd.Series, col: str) -> float:
+    """Reads a float CSV cell, treating a blank/missing/NaN value as 0.0."""
+    value = pos_row.get(col, 0.0)
+    if value == "" or value is None or pd.isna(value):
+        return 0.0
+    return float(value)
+
+
 def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
     """
     Combines the CSV position details with fetched per-contract market data into one numeric
     DataFrame -- one row per leg -- ready for aggregation and display.
+
+    Two derived per-leg quantities are added:
+      * "Held": the number of contracts ACTUALLY held now, = Quantity + Quantity Out (signed; can be 0 once a
+        leg is fully closed). All market-value/Greek aggregation uses this, not the original entry Quantity.
+      * "Realized": dollars of realized P/L on the closed portion, = -Quantity Out * (Exit Price - Trade Price)
+        * contract multiplier. This is sign-correct for both long and short legs and is 0 until an exit is
+        recorded.
 
     :param positions_df: filtered positions (CSV columns)
     :param infos: OptionInfo per leg (aligned with positions_df), None where unavailable
@@ -169,14 +200,24 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
     """
     rows = []
     for (_, pos_row), info in zip(positions_df.iterrows(), infos):
+        quantity = _csv_int(pos_row, CSV_QUANTITY)
+        quantity_out = _csv_int(pos_row, CSV_QUANTITY_OUT)
+        trade_price = _csv_float(pos_row, CSV_TRADE_PRICE)
+        exit_price = _csv_float(pos_row, CSV_EXIT_PRICE)
+
+        held = quantity + quantity_out
+        realized = -quantity_out * (exit_price - trade_price) * CONTRACT_MULTIPLIER
+
         rows.append(
             {
                 COL_CONTRACT: pos_row[CSV_SYMBOL],
                 COL_POSITION_NUM: pos_row[CSV_POSITION_NUM],
                 COL_POSITION_TYPE: pos_row[CSV_POSITION_TYPE],
-                COL_QUANTITY: pos_row[CSV_QUANTITY],
-                COL_TRADE_PRICE: pos_row[CSV_TRADE_PRICE],
+                COL_QUANTITY: quantity,
+                COL_HELD: held,
+                COL_TRADE_PRICE: trade_price,
                 COL_CURRENT_PRICE: info.price if info else float("nan"),
+                COL_REALIZED: realized,
                 COL_IV: info.implied_volatility if info else float("nan"),
                 COL_DELTA: info.delta if info else float("nan"),
                 COL_THETA: info.theta if info else float("nan"),
@@ -187,42 +228,49 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
     return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
 
 
-def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float]:
+def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
     """
     Computes the aggregate row for a set of option legs.
 
+    All market-value and Greek aggregation is done on the contracts ACTUALLY HELD ("Held" = Quantity +
+    Quantity Out), so fully-closed legs (Held == 0) drop out naturally.
+
     Standard rules for combining option positions:
-      * Position Greek = sum over legs of (per-contract Greek * quantity * contract multiplier).
-        Quantity is negative for short legs, so shorts subtract as expected.
-      * Aggregate trade/current "price" is expressed as net dollars: sum(price * qty * multiplier).
+      * Position Greek = sum over legs of (per-contract Greek * held * contract multiplier).
+        Held is negative for short legs, so shorts subtract as expected.
+      * Aggregate trade/current "price" is expressed as net dollars: sum(price * held * multiplier).
         A positive value is a net debit (cash paid); a negative value is a net credit (cash
         received).
+      * Realized P/L is summed straight from the per-leg "Realized" dollars (closed portion).
       * Implied volatility does not aggregate meaningfully across strikes, so it is left blank.
 
     :param df: per-leg output DataFrame (OUTPUT_COLUMNS)
-    :return: (aggregate row dict keyed by OUTPUT_COLUMNS, unrealized P/L in dollars)
+    :return: (aggregate row dict keyed by OUTPUT_COLUMNS, unrealized P/L in dollars, realized P/L in dollars)
     """
-    qty = df[COL_QUANTITY]
+    held = df[COL_HELD]
     mult = CONTRACT_MULTIPLIER
 
-    net_trade = (df[COL_TRADE_PRICE] * qty * mult).sum()
-    net_current = (df[COL_CURRENT_PRICE] * qty * mult).sum()
+    net_trade = (df[COL_TRADE_PRICE] * held * mult).sum()
+    net_current = (df[COL_CURRENT_PRICE] * held * mult).sum()
     unrealized_pl = net_current - net_trade
+    realized_pl = df[COL_REALIZED].sum()
 
     aggregate = {
         COL_CONTRACT: "AGGREGATE",
         COL_POSITION_NUM: "",
         COL_POSITION_TYPE: "",
-        COL_QUANTITY: qty.sum(),
+        COL_QUANTITY: df[COL_QUANTITY].sum(),
+        COL_HELD: held.sum(),
         COL_TRADE_PRICE: net_trade,
         COL_CURRENT_PRICE: net_current,
+        COL_REALIZED: realized_pl,
         COL_IV: float("nan"),
-        COL_DELTA: (df[COL_DELTA] * qty * mult).sum(),
-        COL_THETA: (df[COL_THETA] * qty * mult).sum(),
-        COL_GAMMA: (df[COL_GAMMA] * qty * mult).sum(),
-        COL_VEGA: (df[COL_VEGA] * qty * mult).sum(),
+        COL_DELTA: (df[COL_DELTA] * held * mult).sum(),
+        COL_THETA: (df[COL_THETA] * held * mult).sum(),
+        COL_GAMMA: (df[COL_GAMMA] * held * mult).sum(),
+        COL_VEGA: (df[COL_VEGA] * held * mult).sum(),
     }
-    return aggregate, unrealized_pl
+    return aggregate, unrealized_pl, realized_pl
 
 
 def _fmt(value, decimals: int) -> str:
@@ -234,6 +282,8 @@ def _fmt(value, decimals: int) -> str:
             return "-"
     except (TypeError, ValueError):
         return str(value)
+    if value == 0:  # normalize -0.0 so it prints as 0.00, not -0.00
+        value = 0.0
     return f"{value:.{decimals}f}"
 
 
@@ -242,6 +292,7 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
     decimals = {
         COL_TRADE_PRICE: 2,
         COL_CURRENT_PRICE: 2,
+        COL_REALIZED: 2,
         COL_IV: 4,
         COL_DELTA: 4,
         COL_THETA: 4,
@@ -252,14 +303,14 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
     for col in OUTPUT_COLUMNS:
         if col in decimals:
             display[col] = df[col].apply(lambda v, d=decimals[col]: _fmt(v, d))
-        elif col == COL_QUANTITY:
+        elif col in (COL_QUANTITY, COL_HELD):
             display[col] = df[col].apply(lambda v: "" if v == "" else str(int(v)))
         else:
             display[col] = df[col].astype(str)
     return display
 
 
-def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float):
+def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, realized_pl: float):
     """Pretty-prints the per-leg table, the aggregate row, and a summary."""
     # Format legs and aggregate together so the columns align in a single table.
     combined = pd.concat([df, pd.DataFrame([aggregate], columns=OUTPUT_COLUMNS)], ignore_index=True)
@@ -281,13 +332,17 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float):
     print(f"  Net premium (debit +/credit -): {aggregate[COL_TRADE_PRICE]:>12.2f}")
     print(f"  Current net value             : {aggregate[COL_CURRENT_PRICE]:>12.2f}")
     print(f"  Unrealized P/L                : {unrealized_pl:>12.2f}")
+    print(f"  Realized P/L                  : {realized_pl:>12.2f}")
+    print(f"  Total P/L (real + unreal)     : {realized_pl + unrealized_pl:>12.2f}")
     print(f"  Position delta                : {aggregate[COL_DELTA]:>12.4f}")
     print(f"  Position theta                : {aggregate[COL_THETA]:>12.4f}")
     print(f"  Position gamma                : {aggregate[COL_GAMMA]:>12.4f}")
     print(f"  Position vega                 : {aggregate[COL_VEGA]:>12.4f}")
     print()
-    print("Note: aggregate Trade/Cur Price are net dollars (price * qty * 100); aggregate Greeks")
-    print("      are position Greeks (per-contract Greek * qty * 100). Quantities: '-' = short.")
+    print("Note: 'Held' = contracts actually held now (Quantity + Quantity Out); market value and Greeks")
+    print("      aggregate over Held. Aggregate Trade/Cur Price are net dollars (price * held * 100);")
+    print("      aggregate Greeks are position Greeks (per-contract Greek * held * 100). Per-leg 'Realized'")
+    print("      is closed-portion P/L in dollars. Quantities: '-' = short.")
     print()
 
 
@@ -344,8 +399,8 @@ async def main(parser: argparse.ArgumentParser):
     try:
         _, infos = await collect_leg_data(option_manager, positions_df)
         output_df = build_output_dataframe(positions_df, infos)
-        aggregate, unrealized_pl = build_aggregate_row(output_df)
-        print_analysis(output_df, aggregate, unrealized_pl)
+        aggregate, unrealized_pl, realized_pl = build_aggregate_row(output_df)
+        print_analysis(output_df, aggregate, unrealized_pl, realized_pl)
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:
@@ -364,9 +419,10 @@ def build_parser() -> argparse.ArgumentParser:
             Analyze a set of open options positions read from a CSV.
 
             For each option leg the tool reports the current per-contract price, implied volatility,
-            and Greeks (delta, theta, gamma, vega) next to the trade details from the CSV. A final
-            aggregate row summarizes the filtered legs as a whole: net position Greeks, net value,
-            and unrealized profit/loss.
+            and Greeks (delta, theta, gamma, vega) next to the trade details from the CSV, along with
+            the contracts actually held (Quantity + Quantity Out) and realized P/L on any closed
+            portion. A final aggregate row summarizes the filtered legs as a whole: net position
+            Greeks, net value, unrealized profit/loss, and realized profit/loss.
 
             A broker must be selected with --ib (Interactive Brokers; requires IB Gateway or TWS
             running locally, paper/sim account) or --schwab (Charles Schwab; requires credentials
@@ -391,9 +447,11 @@ def build_parser() -> argparse.ArgumentParser:
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
 
             Notes:
-              * The CSV must have columns: 'Position #', 'Position Type', 'Symbol', 'Quantity',
-                'Trade Price'. Symbols are IB-style, e.g. SPY-C-20260821-800.0.
-              * A negative Quantity indicates a short (sold) leg.
+              * The CSV must have columns: 'Position #', 'Date In', 'Position Type', 'Symbol',
+                'Quantity', 'Trade Price', 'Date Out', 'Quantity Out', 'Exit Price' (the
+                current_positions.csv format). Symbols are IB-style, e.g. SPY-C-20260821-800.0.
+              * A negative Quantity indicates a short (sold) leg. 'Quantity Out' accumulates the
+                signed closing trades, so contracts still held = Quantity + Quantity Out.
             """),
     )
     parser.add_argument(
