@@ -1,5 +1,20 @@
 # scripts
 
+## Table of Contents
+
+* [Table of Contents](#table-of-contents)
+* [What's Here?](#whats-here)
+* [Usage](#usage-)
+* [Applications](#applications)
+* [Examples](#examples)
+* [Recommended Workflow](#recommended-workflow)
+  + [Build main caches](#build-main-caches)
+  + [Build earnings cache](#build-earnings-cache)
+  + [Create positions CSV](#create-positions-csv)
+  + [Analyze current positions](#analyze-current-positions)
+
+<small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
+
 ## What's Here?
 
 The `examples/` folder contains scripts that demonstrate how to use the core API.
