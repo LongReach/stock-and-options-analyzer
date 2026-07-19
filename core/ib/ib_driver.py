@@ -339,6 +339,27 @@ class IBDriver(IBWrapper, BaseDriver):
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
 
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns the most current implied volatility (as a fraction, e.g. 0.18) for a stock/ETF, or None if it
+        can't be retrieved. IB exposes IV directly as a historical-data series
+        (OPTION_IMPLIED_VOLATILITY), so we just pull the latest daily bar and return its close.
+        """
+        historical_data, error_str = await self.get_historical_data(
+            ticker,
+            num_bars=5,
+            bar_size=BarSize.ONE_DAY,
+            request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
+            primary_exchange=primary_exchange,
+        )
+        if error_str or historical_data.is_empty():
+            return None
+        return historical_data.get_bar_data_as_dicts()[-1]["close"]
+
     async def get_head_timestamp(
         self,
         ticker: str,

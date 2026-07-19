@@ -7,19 +7,21 @@ import argparse
 import textwrap
 import traceback
 
-from core.common import SecurityDescriptor, OptionInfo
+from core.base_driver import BaseDriver
+from core.common import SecurityDescriptor, OptionInfo, BarSize, RequestedInfoType
 from core.options_data import OptionData, OptionDataException
 from core.option_data_manager import OptionDataManager
 from core.ib.ib_driver import IBDriver
 from core.schwab.schwab_driver import SchwabDriver
-from core.utils import current_datetime
+from core.utils import current_datetime, calculate_expected_move
 
 r"""
 Utility for analyzing a set of open options positions. For each option leg it reports current
 price and the Greeks (delta, theta, gamma, vega) alongside the trade details recorded in a CSV,
 plus the contracts actually held (Quantity + Quantity Out) and any realized P/L on the closed
 portion. A final aggregate row summarizes the filtered legs (net position Greeks, net value,
-unrealized P/L, and realized P/L), computed over the contracts actually held.
+unrealized P/L, and realized P/L), computed over the contracts actually held. Finally, it prints
+the expected next-day (1 std dev) move for each underlying, from the broker's implied volatility.
 
 Setup and usage:
 ------------------------
@@ -346,6 +348,33 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print()
 
 
+async def print_expected_moves(data_driver: BaseDriver, tickers: List[str]):
+    """
+    Prints each underlying's expected 1-day move (one standard deviation), using the broker's current implied
+    volatility and most recent price: expected move = price * IV * sqrt(1 / 365) (see calculate_expected_move).
+
+    :param data_driver: connected broker driver
+    :param tickers: distinct underlying symbols to report on
+    """
+    print("\nExpected next-day move (1 std dev)")
+    print("-" * 60)
+    for ticker in tickers:
+        implied_vol = await data_driver.get_implied_volatility(ticker)
+        recent, error_str = await data_driver.get_most_recent_data(
+            ticker, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.TRADES
+        )
+        if implied_vol is None or implied_vol <= 0.0 or recent is None:
+            print(f"  {ticker:<6} expected move unavailable (implied volatility or price missing)")
+            continue
+        price = recent[0]["close"]
+        move = calculate_expected_move(price, implied_vol, 1)
+        print(
+            f"  {ticker:<6} price {price:>10.2f}  IV {implied_vol:>7.4f}  "
+            f"move +/-{move:>7.2f}  ({price - move:.2f} to {price + move:.2f})"
+        )
+    print()
+
+
 async def main(parser: argparse.ArgumentParser):
     """Top-level function: unpacks arguments, fetches data, and prints the analysis."""
     args = parser.parse_args()
@@ -401,6 +430,10 @@ async def main(parser: argparse.ArgumentParser):
         output_df = build_output_dataframe(positions_df, infos)
         aggregate, unrealized_pl, realized_pl = build_aggregate_row(output_df)
         print_analysis(output_df, aggregate, unrealized_pl, realized_pl)
+
+        # Expected next-day move for each distinct underlying among the filtered legs.
+        tickers = sorted({SecurityDescriptor(symbol).ticker for symbol in positions_df[CSV_SYMBOL]})
+        await print_expected_moves(data_driver, tickers)
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:

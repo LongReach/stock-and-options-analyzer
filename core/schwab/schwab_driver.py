@@ -453,6 +453,50 @@ class SchwabDriver(BaseDriver):
         self._logger.info("get_greeks() finished")
         return option_info, None
 
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns a current implied-volatility estimate (as a fraction, e.g. 0.18) for a stock/ETF, or None if it
+        can't be determined.
+
+        Schwab has no underlying-IV series (unlike IB's OPTION_IMPLIED_VOLATILITY), so we approximate it with
+        the IV of the at-the-money option in the nearest expiration: request the call chain, then take the
+        contract in the soonest expiration whose strike sits closest to the underlying price. Schwab quotes
+        volatility as a percentage, so we divide by 100 to match the fraction convention used elsewhere.
+
+        :param ticker: symbol of underlying, e.g. SPY
+        :param primary_exchange: unused (Schwab resolves the venue); accepted for interface compatibility
+        :return: implied volatility as a fraction, or None if unavailable
+        """
+        if not self.is_connected():
+            return None
+
+        payload, error_str = await self._request_option_chain(ticker, self._contract_type(is_call=True))
+        if error_str or not payload:
+            return None
+
+        underlying_price = float(payload.get("underlyingPrice", 0.0))
+        if underlying_price <= 0.0:
+            return None
+
+        # Sorting candidates by (expiration, |strike - underlying price|) puts the nearest expiration's
+        # at-the-money strike first; skip contracts without a usable IV (Schwab's -999 / 0 sentinels).
+        best_key = None
+        best_iv = None
+        for exp_ib, strike, detail in self._iter_option_details(payload):
+            iv = self._clean_number(detail.get("volatility")) / 100.0
+            if iv <= 0.0:
+                continue
+            key = (exp_ib, abs(strike - underlying_price))
+            if best_key is None or key < best_key:
+                best_key = key
+                best_iv = iv
+
+        return best_iv
+
     async def place_order(
         self,
         symbol_full: str,

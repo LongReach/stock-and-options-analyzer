@@ -103,6 +103,17 @@ class BaseDriver(ABC):
         """
 
     @abstractmethod
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns the most current implied volatility value (as a fraction, e.g. 0.18) for the specified
+        stock/ETF, or None if it can't be retrieved.
+        """
+
+    @abstractmethod
     async def get_option_info(
         self,
         ticker: str,

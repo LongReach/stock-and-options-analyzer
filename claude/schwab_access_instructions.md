@@ -121,7 +121,7 @@ For each trade, follow these rules:
 * Else if it matches an existing position row in terms of symbol, then update the "Date Out", "Quantity Out", and "Exit Price" fields. If a partial exit has already been recorded for the row, i.e. "Quantity Out" is something other than 0, increment or decrement that value according to what's in the trade entry. "Exit Price" will be computed using averaging. "Date Out" will become whatever dete is specified for the trade.
 * Else if it matches no exiting position row, then create a new row. The "Quantity" and "Trade Price" fields will be filled from the trade data. Same with "Date In".
 
-##### Step 5
+##### Step 5 (Complete)
 
 Let's modify `scripts/get_schwab_positions.py`. It should never make any changes to rows in the CSV file. It should only ever add new rows. The adding of new rows will only happen when there isn't a symbol conflict with an existing row. If there is a symbol conflict, nothing will happen.
 
@@ -130,3 +130,9 @@ The script `scripts/position_analyzer.py` now needs to work differently. The CSV
 For each leg (each row), the number of contracts ACTUALLY held (long or short) will be determined by combining "Quantity" and "Quantity Out". The aggregate calculations for a single position must deal with number of contracts actually held. If some legs have a total of 0 contracts actually held, that's okay.
 
 It would be good to show realized profit, both for individual legs and for the aggregate row. This calculation would take into account "Quantity", "Quantity Out", "Trade Price", and "Exit Price".
+
+##### Step 6
+
+In `BaseDriver`, I've added the function `get_implied_volatility()`. Please provide implementations for `SchwabDriver` and `IBDriver`. For `IBDriver`, it should be easy to make use of existing code for getting historical market data.
+
+Make `position_analyzer.py` display the expected move over the next day for the underlying stock/ETF. The function for calculating expected move is `calculate_expected_move()` in `utils.py`.
