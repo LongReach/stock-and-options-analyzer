@@ -497,6 +497,45 @@ class SchwabDriver(BaseDriver):
 
         return best_iv
 
+    async def get_fundamentals(self, symbol: str) -> Tuple[Optional[dict], Optional[str]]:
+        """
+        Fetches Schwab's fundamental data for a single equity/ETF via the /instruments FUNDAMENTAL projection.
+
+        Returns the raw instrument dict Schwab sends back -- identity fields (symbol, description, exchange,
+        assetType, cusip) plus a nested "fundamental" object (valuation, profitability, growth, leverage,
+        dividend, and trading-stat fields). The dict is passed through unmodified so callers can inspect exactly
+        what Schwab provides. This is Schwab-specific and not part of BaseDriver.
+
+        Note: Schwab's proprietary equity ratings (A-F letter grades) are a schwab.com research product and are
+        NOT included here -- the Trader API exposes no such field.
+
+        :param symbol: ticker of the underlying, e.g. AAPL
+        :return: (instrument dict or None, error string or None)
+        """
+        if not self.is_connected():
+            return None, "Not connected to Schwab"
+
+        projection = self._client.Instrument.Projection.FUNDAMENTAL
+        try:
+            resp = await self._client.get_instruments(symbol, projection=projection)
+        except Exception as e:
+            return None, f"Schwab instruments request failed: {e}"
+
+        if resp.status_code != 200:
+            return None, f"Schwab instruments request failed ({resp.status_code}): {resp.text}"
+
+        payload = resp.json()
+        instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
+        if not instruments:
+            return None, f"No fundamental data returned for {symbol}"
+
+        # Schwab may return several matches for a search-y symbol; prefer the exact ticker, else the first.
+        match = next(
+            (item for item in instruments if (item.get("symbol") or "").upper() == symbol.upper()),
+            instruments[0],
+        )
+        return match, None
+
     async def place_order(
         self,
         symbol_full: str,

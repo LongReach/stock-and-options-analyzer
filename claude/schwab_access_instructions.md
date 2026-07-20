@@ -131,7 +131,7 @@ For each leg (each row), the number of contracts ACTUALLY held (long or short) w
 
 It would be good to show realized profit, both for individual legs and for the aggregate row. This calculation would take into account "Quantity", "Quantity Out", "Trade Price", and "Exit Price".
 
-##### Step 6
+##### Step 6 (Complete)
 
 In `BaseDriver`, I've added the function `get_implied_volatility()`. Please provide implementations for `SchwabDriver` and `IBDriver`. For `IBDriver`, it should be easy to make use of existing code for getting historical market data.
 
