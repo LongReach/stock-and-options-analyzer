@@ -234,6 +234,10 @@ class IBDriver(IBWrapper, BaseDriver):
         if bar_size == BarSize.ONE_MONTH:
             raise IBDriverException(f"Month candles not supported for historical data request (for now)")
 
+        descriptor = SecurityDescriptor(symbol_full)
+        if descriptor.is_option() and request_info_type != RequestedInfoType.TRADES:
+            return HistoricalData(), "IBDriver does not support historical IV data for options"
+
         async with self._lock:
             req_id = self._next_id()
             ticker_desc = SecurityDescriptor(symbol_full)

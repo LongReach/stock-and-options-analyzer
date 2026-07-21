@@ -231,6 +231,40 @@ def calculate_expected_move(price: float, iv: float, dte: int, standard_devs: in
     return price * iv * math.sqrt(float(dte) / 365.0) * float(standard_devs)
 
 
+def _norm_cdf(x: float) -> float:
+    """Standard normal cumulative distribution function (via math.erf, so no scipy dependency)."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def black_scholes_price(
+    spot: float, strike: float, iv: float, dte: float, is_call: bool = True, rate: float = 0.0
+) -> float:
+    """
+    Black-Scholes theoretical price for a European option (no dividends). A standard formula, kept here for
+    easy finding alongside calculate_expected_move().
+
+    :param spot: current price of the underlying
+    :param strike: strike price
+    :param iv: implied volatility as a fraction (e.g. 0.18)
+    :param dte: days to expiration
+    :param is_call: True for a call, False for a put
+    :param rate: annual risk-free rate as a fraction (default 0)
+    :return: theoretical option price (per share). At/after expiration or with non-positive iv, returns the
+             intrinsic value.
+    """
+    if dte <= 0.0 or iv <= 0.0 or spot <= 0.0 or strike <= 0.0:
+        return max(0.0, (spot - strike) if is_call else (strike - spot))
+
+    t = float(dte) / 365.0
+    vol_sqrt_t = iv * math.sqrt(t)
+    d1 = (math.log(spot / strike) + (rate + 0.5 * iv * iv) * t) / vol_sqrt_t
+    d2 = d1 - vol_sqrt_t
+    discount = math.exp(-rate * t)
+    if is_call:
+        return spot * _norm_cdf(d1) - strike * discount * _norm_cdf(d2)
+    return strike * discount * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
+
+
 def get_best_strike(strike_list: List[float], desired_strike: float):
     """
     Given a list of available strikes, return the one closest to desired strike price.

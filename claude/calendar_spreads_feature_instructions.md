@@ -1,0 +1,38 @@
+# Instructions for Claude
+
+## Brief Description of Goals
+
+I want a software tool that analyzes potential calendar spread positions and reports back with useful information.
+
+## More Detailed Instructions
+
+### Phase One
+
+Create a script in `scripts/` called `calendar_helper.py`. It will take the following command line arguments:
+* --schwab: if connection is being made to Schwab brokerage with `SchwabDriver`
+* --ib: if connection is being made to IB brokerage with `IBDriver`
+* --symbol: stock or ETF ticker
+* --right: either "P" for "put" or "C" for "call"
+* --strike (optional): if given, strike to use for calendar spread. If not given, tool should choose strike closest to being at-the-money
+* --dte-front: days to expiration for front (sold) option. If no options match this expiration, then pick the closest one.
+* --dte-back (optional): days to expiration for back (bought) option. If no options match this expiration, then pick the closest one. If not given, then pick the first available expiration date after the front option's expiration date.
+
+The tool should print an error if:
+* if no connection to broker can be made
+* if the right isn't "P" or "C"
+* the user-specified strike doesn't exist
+* the expiration date for the back-dated option does not come after the expiration date for the front-dated option.
+* the tool is unable to find matching strikes for front and back dated options
+
+Information I'd like pretty-printed:
+* The dates and DTEs of the front and back options
+* The ratio between implied volatility of the front option and the back option
+* If broker is IB, where the ratio sits in the range of the last 20 days. In other words, compute the ratio between the IVs of the two contracts for each of the last 20 days, then give today's ratio as a percentile of that range.
+* Aggregate delta for the calendar spread
+* Aggregate theta for the calendar spread
+* Aggregate gamma for the calendar spread
+* Aggregate vega for the calendar spread
+* Total cost, assuming one front contract and one back contract
+* Maximum possible profit
+
+### Phase Two (to be added later)

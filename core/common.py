@@ -172,6 +172,16 @@ class DataBar:
         self.close = 0.0
         self.volume = 0.0
 
+    def __str__(self):
+        return (
+            f"Date: {self.date}, "
+            f"Open: {self.open}, "
+            f"High: {self.high}, "
+            f"Low: {self.low}, "
+            f"Close: {self.close}, "
+            f"Volume: {self.volume}, "
+        )
+
 
 class HistoricalData:
     """
