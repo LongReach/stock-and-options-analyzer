@@ -86,7 +86,7 @@ async def main():
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
         )
         if error_str:
-            print(f"Error getting option IV: {error_str}")
+            print(f"Error getting historical option IV data for {spy_contract_name}: {error_str}")
         else:
             print(f"Five minute bars for {spy_contract_name} (option implied volatility) are\n------------------------")
             print_historical_data(iv_data_option)
@@ -98,7 +98,10 @@ async def main():
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
         )
-        print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
+        if error_str:
+            print(f"Error getting historical IV data for {TICKER}")
+        else:
+            print(f"One day bars for {TICKER} (implied volatility) are\n------------------------")
         print_historical_data(iv_data)
 
         hv_data, error_str = await data_driver.get_historical_data(
@@ -108,21 +111,24 @@ async def main():
             bar_size=BarSize.ONE_DAY,
             request_info_type=RequestedInfoType.HISTORICAL_VOLATILITY,
         )
-        print(f"One day bars for {TICKER} (historical volatility) are\n------------------------")
+        if error_str:
+            print(f"Error getting historical historical IV data (yes, that's a correct statement) for {TICKER}")
+        else:
+            print(f"One day bars for {TICKER} (historical volatility) are\n------------------------")
         print_historical_data(hv_data)
 
-        price_data_two, error_str = await data_driver.get_historical_data(
+        price_data_one, error_str = await data_driver.get_historical_data(
             TICKER,
             num_bars=10,
             live_data=True,
-            bar_size=BarSize.TWO_MINUTES,
+            bar_size=BarSize.ONE_MINUTE,
             request_info_type=RequestedInfoType.TRADES,
             regular_trading_hours_only=False,
         )
 
-        print("Now printing live data for two minute bars, stand by... (ctrl-c to end)")
+        print("Now printing live data for one minute bars, stand by... (ctrl-c to end)")
         stop_event = asyncio.Event()
-        task1 = asyncio.create_task(print_streaming_data(price_data_two, stop_event))
+        task1 = asyncio.create_task(print_streaming_data(price_data_one, stop_event))
         task2 = asyncio.create_task(wait_for_keypress(stop_event))
 
         await asyncio.gather(task1, task2)

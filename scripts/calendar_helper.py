@@ -17,13 +17,15 @@ from core.utils import (
     get_best_strike,
     get_full_symbol_name,
     black_scholes_price,
+    implied_volatility_from_price,
 )
 
 r"""
 Analyzes a potential calendar spread (sell a near-dated option, buy a longer-dated one at the same strike and
 right) and prints useful metrics: the two expirations/DTEs, the front/back implied-volatility ratio, aggregate
-Greeks, net cost, and an estimated maximum profit. With --ib, it also reports where today's IV ratio sits as a
-percentile of the last 20 days.
+Greeks, net cost, and an estimated maximum profit. It also reports where today's IV ratio sits as a percentile
+of the last 20 days, with the historical IV reconstructed from option/underlying price history (works on both
+brokers, since neither serves per-option IV history directly).
 
 Setup and usage:
 ------------------------
@@ -36,7 +38,7 @@ python -m scripts.calendar_helper --help    # full instruction manual with examp
 CLIENT_ID = 27
 # Standard US equity-option contract multiplier: 1 contract controls 100 shares.
 CONTRACT_MULTIPLIER = 100
-# How far out (days) to look for expirations, and how many days of IV history to sample for the IB percentile.
+# How far out (days) to look for expirations, and how many days of history to sample for the IV percentile.
 MAX_DAYS_OUT = 730
 IV_HISTORY_DAYS = 20
 STRIKE_TOLERANCE = 1e-6
@@ -66,11 +68,24 @@ def common_strikes(front_strikes: List[float], back_strikes: List[float]) -> Lis
     return [s for s in front_strikes if strike_in(back_strikes, s)]
 
 
-def date_iv_map(historical_data) -> dict:
-    """Maps each bar's date -> close (the implied volatility, for an IMPLIED_VOLATILITY request)."""
+def date_close_map(historical_data) -> dict:
+    """Maps each bar's date -> close price."""
     bar_dicts = historical_data.get_bar_data_as_dicts()
     timestamps = historical_data.timestamps
     return {timestamps[i].date(): bar_dicts[i]["close"] for i in range(len(bar_dicts))}
+
+
+async def _daily_closes(driver: BaseDriver, symbol_full: str) -> Tuple[Optional[dict], Optional[str]]:
+    """Fetches IV_HISTORY_DAYS daily TRADES bars for a symbol and returns a {date: close} map."""
+    hist, error_str = await driver.get_historical_data(
+        symbol_full,
+        num_bars=IV_HISTORY_DAYS,
+        bar_size=BarSize.ONE_DAY,
+        request_info_type=RequestedInfoType.TRADES,
+    )
+    if error_str or hist.is_empty():
+        return None, error_str or "no data"
+    return date_close_map(hist), None
 
 
 async def iv_ratio_percentile(
@@ -83,38 +98,41 @@ async def iv_ratio_percentile(
     today_ratio: float,
 ) -> Tuple[Optional[float], Optional[str]]:
     """
-    Computes where today's front/back IV ratio sits as a percentile of the last IV_HISTORY_DAYS days, using
-    each contract's historical implied volatility. IB-only (Schwab has no per-contract IV history).
+    Computes where today's front/back IV ratio sits as a percentile of the last IV_HISTORY_DAYS days.
 
-    :return: (percentile 0-100, or None with an explanation string if it can't be computed)
+    Neither IB nor Schwab serves per-option historical IV, but both serve option and underlying price history.
+    So for each historical day we reconstruct each contract's IV by inverting Black-Scholes from that day's
+    option close, the underlying close, the strike, and the days-to-expiration as of that day, then take the
+    front/back ratio. Works for either broker.
+
+    :return: (percentile 0-100 with a detail string, or (None, reason) if it can't be computed)
     """
     is_call = right == "C"
     front_symbol = get_full_symbol_name(symbol, is_option=True, is_call=is_call, expiration=front_exp, strike=strike)
     back_symbol = get_full_symbol_name(symbol, is_option=True, is_call=is_call, expiration=back_exp, strike=strike)
 
-    front_hist, front_err = await driver.get_historical_data(
-        front_symbol,
-        num_bars=IV_HISTORY_DAYS,
-        bar_size=BarSize.ONE_DAY,
-        request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
-    )
-    back_hist, back_err = await driver.get_historical_data(
-        back_symbol,
-        num_bars=IV_HISTORY_DAYS,
-        bar_size=BarSize.ONE_DAY,
-        request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
-    )
-    if front_err or back_err or front_hist.is_empty() or back_hist.is_empty():
-        return None, "historical implied volatility not available for these contracts"
+    front_closes, front_err = await _daily_closes(driver, front_symbol)
+    back_closes, back_err = await _daily_closes(driver, back_symbol)
+    underlying_closes, underlying_err = await _daily_closes(driver, symbol)
+    if front_err or back_err or underlying_err:
+        return None, "historical price data not available for these contracts"
 
-    front_map = date_iv_map(front_hist)
-    back_map = date_iv_map(back_hist)
-    ratios = [front_map[d] / back_map[d] for d in sorted(set(front_map) & set(back_map)) if back_map[d] > 0.0]
+    front_exp_date = get_datetime(front_exp).date()
+    back_exp_date = get_datetime(back_exp).date()
+
+    ratios = []
+    for day in sorted(set(front_closes) & set(back_closes) & set(underlying_closes)):
+        spot = underlying_closes[day]
+        front_iv = implied_volatility_from_price(front_closes[day], spot, strike, (front_exp_date - day).days, is_call)
+        back_iv = implied_volatility_from_price(back_closes[day], spot, strike, (back_exp_date - day).days, is_call)
+        if front_iv is not None and back_iv is not None and back_iv > 0.0:
+            ratios.append(front_iv / back_iv)
+
     if not ratios:
-        return None, "no overlapping historical IV days for the two contracts"
+        return None, "could not derive historical IV for enough days"
 
     below_or_equal = sum(1 for r in ratios if r <= today_ratio)
-    return 100.0 * below_or_equal / len(ratios), None
+    return 100.0 * below_or_equal / len(ratios), f"derived from {len(ratios)} of the last {IV_HISTORY_DAYS} days"
 
 
 def print_analysis(
@@ -126,7 +144,7 @@ def print_analysis(
     back: OptionInfo,
     back_dte: int,
     percentile: Optional[float],
-    percentile_note: Optional[str],
+    percentile_detail: Optional[str],
 ):
     """Pretty-prints the calendar-spread analysis."""
     iv_ratio = front.implied_volatility / back.implied_volatility if back.implied_volatility > 0.0 else float("nan")
@@ -158,9 +176,9 @@ def print_analysis(
     print(f"  Back IV                 : {back.implied_volatility:>10.4f}")
     print(f"  IV ratio (front / back) : {iv_ratio:>10.4f}")
     if percentile is not None:
-        print(f"  IV ratio percentile     : {percentile:>9.1f}%  (of the last {IV_HISTORY_DAYS} days)")
-    elif percentile_note is not None:
-        print(f"  IV ratio percentile     : unavailable ({percentile_note})")
+        print(f"  IV ratio percentile     : {percentile:>9.1f}%  ({percentile_detail})")
+    elif percentile_detail is not None:
+        print(f"  IV ratio percentile     : unavailable ({percentile_detail})")
     print()
     print(f"  Aggregate delta         : {agg_delta:>10.4f}")
     print(f"  Aggregate theta         : {agg_theta:>10.4f}")
@@ -174,6 +192,8 @@ def print_analysis(
     print("Notes: aggregate Greeks are (back - front), i.e. long 1 back and short 1 front. Total cost and max")
     print("       profit are dollars for one front + one back contract (x100). Max profit is a Black-Scholes")
     print("       estimate at front expiration with the underlying at the strike and the back's current IV.")
+    print("       The IV-ratio percentile reconstructs each day's IV from option/underlying closes via")
+    print("       Black-Scholes inversion (European, no dividends), so it's an approximation.")
     print()
 
 
@@ -234,15 +254,15 @@ async def run(
     if front is None or back is None:
         return "Could not find matching strikes for the front- and back-dated options."
 
-    # The 20-day IV-ratio percentile is IB-only.
-    percentile, percentile_note = None, None
-    if isinstance(driver, IBDriver) and back.implied_volatility > 0.0:
+    # Where today's IV ratio sits over the last 20 days (IV reconstructed from price history; either broker).
+    percentile, percentile_detail = None, None
+    if back.implied_volatility > 0.0:
         today_ratio = front.implied_volatility / back.implied_volatility
-        percentile, percentile_note = await iv_ratio_percentile(
+        percentile, percentile_detail = await iv_ratio_percentile(
             driver, symbol, right, strike, front_exp, back_exp, today_ratio
         )
 
-    print_analysis(symbol, right, strike, front, front_dte, back, back_dte, percentile, percentile_note)
+    print_analysis(symbol, right, strike, front, front_dte, back, back_dte, percentile, percentile_detail)
     return None
 
 
@@ -294,8 +314,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=textwrap.dedent("""\
             Analyze a potential calendar spread: sell a near-dated option and buy a longer-dated one at the
             same strike and right. Reports the two expirations/DTEs, the front/back implied-volatility ratio,
-            aggregate Greeks, net cost, and an estimated maximum profit. With --ib, also reports where today's
-            IV ratio sits as a percentile of the last 20 days.
+            aggregate Greeks, net cost, and an estimated maximum profit. Also reports where today's IV ratio
+            sits as a percentile of the last 20 days (historical IV reconstructed from price history; works on
+            IB or Schwab).
 
             A broker must be selected with --ib (Interactive Brokers; requires IB Gateway or TWS running
             locally, paper/sim account) or --schwab (Charles Schwab; requires credentials in .env).

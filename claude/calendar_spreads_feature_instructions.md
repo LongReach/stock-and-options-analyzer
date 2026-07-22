@@ -6,7 +6,7 @@ I want a software tool that analyzes potential calendar spread positions and rep
 
 ## More Detailed Instructions
 
-### Phase One
+### Phase One (Complete)
 
 Create a script in `scripts/` called `calendar_helper.py`. It will take the following command line arguments:
 * --schwab: if connection is being made to Schwab brokerage with `SchwabDriver`
@@ -35,4 +35,8 @@ Information I'd like pretty-printed:
 * Total cost, assuming one front contract and one back contract
 * Maximum possible profit
 
-### Phase Two (to be added later)
+### Phase Two
+
+Change the `--dte-front` and `--dte-back` arguments, so that they can either take in a DTE value or a IB-style date, e.g. 20260821. If a date is given, it's converted to a DTE value, then used that way through the code flow. As before `--dte-back` is optional.
+
+Add a double-calendar feature. It will be activated by the `--double` argument. If the double-calendar feature is being used, the `--strike` argument will be ignored. Select the two strikes based on sensible best practice. They should be at somewhere around the expected move.

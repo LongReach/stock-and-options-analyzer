@@ -265,6 +265,56 @@ def black_scholes_price(
     return strike * discount * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
 
 
+def implied_volatility_from_price(
+    price: float,
+    spot: float,
+    strike: float,
+    dte: float,
+    is_call: bool = True,
+    rate: float = 0.0,
+    tol: float = 1e-5,
+    max_iter: int = 100,
+) -> Optional[float]:
+    """
+    Solves for the implied volatility (as a fraction) that makes black_scholes_price() match `price`, via
+    bisection. Black-Scholes price is monotonically increasing in volatility, so bisection is reliable.
+
+    Used to reconstruct an IV series from historical option prices when a broker doesn't serve IV directly.
+    Because it assumes European exercise, no dividends, and daily closes, the result is an approximation.
+
+    :param price: observed option price (per share)
+    :param spot: underlying price
+    :param strike: strike price
+    :param dte: days to expiration
+    :param is_call: True for a call, False for a put
+    :param rate: annual risk-free rate as a fraction (default 0)
+    :param tol: price tolerance for convergence
+    :param max_iter: maximum bisection iterations
+    :return: implied volatility as a fraction, or None if it can't be solved (e.g. price at/below intrinsic,
+             non-positive time, or outside the searchable volatility bracket)
+    """
+    if price <= 0.0 or spot <= 0.0 or strike <= 0.0 or dte <= 0.0:
+        return None
+
+    low_vol, high_vol = 1e-4, 5.0  # search IV between 0.01% and 500%
+    low_price = black_scholes_price(spot, strike, low_vol, dte, is_call, rate)
+    high_price = black_scholes_price(spot, strike, high_vol, dte, is_call, rate)
+    # The observed price must be achievable within the bracket (price rises with vol); otherwise no solution.
+    if not (low_price <= price <= high_price):
+        return None
+
+    for _ in range(max_iter):
+        mid_vol = 0.5 * (low_vol + high_vol)
+        mid_price = black_scholes_price(spot, strike, mid_vol, dte, is_call, rate)
+        if abs(mid_price - price) < tol:
+            return mid_vol
+        if mid_price < price:
+            low_vol = mid_vol
+        else:
+            high_vol = mid_vol
+    return 0.5 * (low_vol + high_vol)
+
+
 def get_best_strike(strike_list: List[float], desired_strike: float):
     """
     Given a list of available strikes, return the one closest to desired strike price.

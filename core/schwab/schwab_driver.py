@@ -193,12 +193,13 @@ class SchwabDriver(BaseDriver):
         by a background one-minute-candle stream (CHART_EQUITY). The caller must hang onto the object and can
         stop the stream via cancel_historical_data().
 
-        :param symbol_full: stock/ETF ticker, e.g. AAPL or SPY. Options are not supported in Version One.
+        :param symbol_full: stock/ETF ticker (e.g. AAPL or SPY) or an IB-style option (e.g.
+            SPY-C-20260721-742.0). Options are supported for request/response history, but not live streaming.
         :param num_bars: how many bars to collect; if 0, start_date determines the range
         :param bar_size: one of the Schwab-supported sizes (1m, 5m, 15m, 1d, 1w)
         :param end_date: end of the range; datetime or IB-style str '20250523 16:00:00 US/Eastern'
         :param start_date: start of the range; datetime or IB-style str
-        :param live_data: if True, stream continuing one-minute candle updates into the result
+        :param live_data: if True, stream continuing one-minute candle updates into the result (equities only)
         :param request_info_type: only TRADES is supported
         :param regular_trading_hours_only: if True, exclude pre/post-market data
         :param primary_exchange: unused (Schwab resolves the venue); accepted for interface compatibility
@@ -209,17 +210,19 @@ class SchwabDriver(BaseDriver):
             return HistoricalData(), "Not connected to Schwab"
 
         descriptor = SecurityDescriptor(symbol_full)
-        if descriptor.is_option():
-            return HistoricalData(), "SchwabDriver does not support options data yet"
+        is_option = descriptor.is_option()
         if request_info_type != RequestedInfoType.TRADES:
             return HistoricalData(), f"SchwabDriver only supports TRADES data, not {request_info_type.name}"
+        if is_option and live_data:
+            return HistoricalData(), "SchwabDriver does not support live streaming for options"
         if bar_size not in self._history_method_map:
             raise SchwabDriverException(
                 f"Bar size {bar_size.name} is not supported by SchwabDriver "
                 f"(supported: {', '.join(bs.name for bs in self._history_method_map)})"
             )
 
-        symbol = descriptor.ticker
+        # Schwab's price-history endpoint takes the OSI option symbol for options, or the plain ticker otherwise.
+        symbol = self._descriptor_to_osi(descriptor) if is_option else descriptor.ticker
         end_dt = self._to_market_dt(end_date) if end_date is not None else current_datetime()
         if num_bars > 0:
             start_dt = self._estimate_start_datetime(end_dt, bar_size, num_bars)
@@ -746,6 +749,20 @@ class SchwabDriver(BaseDriver):
         expiration = "20" + yymmdd  # OSI years are two digits; Schwab options are all 21st-century.
         # Build the descriptor from the IB-style string so symbol_full keeps the trimmed strike (e.g. 785.0).
         return SecurityDescriptor(f"{root}-{right}-{expiration}-{SchwabDriver._strike_str(strike)}")
+
+    @staticmethod
+    def _descriptor_to_osi(descriptor: SecurityDescriptor) -> str:
+        """
+        Builds a Schwab OSI option symbol (e.g. 'SPY   260721C00742000') from an IB-style option descriptor
+        (e.g. SPY-C-20260721-742.0). The inverse of _option_symbol_to_descriptor().
+
+        OSI layout: 6-char space-padded root, 6-digit expiration (yymmdd), 1-char right (C/P), then the strike
+        in thousandths of a dollar as 8 digits.
+        """
+        root = descriptor.ticker.ljust(6)
+        yymmdd = descriptor.expiration[2:]  # 'yyyymmdd' -> 'yymmdd'
+        strike_thousandths = int(round(descriptor.strike * 1000))
+        return f"{root}{yymmdd}{descriptor.right}{strike_thousandths:08d}"
 
     def _contract_type(self, is_call: bool):
         """Returns the schwab-py ContractType enum value for the given right."""

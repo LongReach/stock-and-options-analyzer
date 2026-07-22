@@ -12,6 +12,7 @@
   + [Build earnings cache](#build-earnings-cache)
   + [Create positions CSV](#create-positions-csv)
   + [Analyze current positions](#analyze-current-positions)
+  + [Find high or low IV stocks with earnings within a certain date range](#find-high-or-low-iv-stocks-with-earnings-within-a-certain-date-range)
 
 <small><i><a href='http://ecotrust-canada.github.io/markdown-toc/'>Table of contents generated with markdown-toc</a></i></small>
 
@@ -139,4 +140,11 @@ python -m scripts.get_schwab_trades --positions-csv data/current_positions.csv 2
 
 ```powershell
 python -m scripts.position_analyzer --positions-file .\data\current_positions.csv --schwab --position-num 6
+```
+
+### Find high or low IV stocks with earnings within a certain date range
+
+```powershell
+python -m scripts.iv_finder --info-only --above 35 --earnings-after 30
+python -m scripts.iv_finder --info-only --below 30
 ```
