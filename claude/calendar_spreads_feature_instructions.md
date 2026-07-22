@@ -35,8 +35,15 @@ Information I'd like pretty-printed:
 * Total cost, assuming one front contract and one back contract
 * Maximum possible profit
 
-### Phase Two
+### Phase Two (Complete)
 
 Change the `--dte-front` and `--dte-back` arguments, so that they can either take in a DTE value or a IB-style date, e.g. 20260821. If a date is given, it's converted to a DTE value, then used that way through the code flow. As before `--dte-back` is optional.
 
 Add a double-calendar feature. It will be activated by the `--double` argument. If the double-calendar feature is being used, the `--strike` argument will be ignored. Select the two strikes based on sensible best practice. They should be at somewhere around the expected move.
+
+### Phase Three
+
+You, Claude Code, said:
+> But those are rules of thumb, not something the tool derives. If you'd like, I could add a mode that suggests front/back DTEs — e.g. pick the front near a target DTE and the back to maximize the theta ratio or hit a target IV-term-structure spread — rather than requiring you to specify them. Want me to sketch that out?
+
+Let's add an optional argument called `--auto`. If `--auto` is given, the front's expiration will be somewhere near `--dte-front`. The back's expiration will be chosen by the tool. I'm not sure what to optimize for. For now, let's focus on maximizing the theta ration, but feel free to suggest other modes. 

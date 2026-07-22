@@ -281,52 +281,37 @@ class OptionDataManager:
 
         return best_exp, (best_exp - current_datetime()).days, None
 
-    async def get_atm_straddle_move(
-        self, symbol: str, expiration: str, standard_deviations: int = 1
-    ) -> Tuple[float, float, Optional[str]]:
+    async def get_atm_straddle_move(self, symbol: str, expiration: str) -> Tuple[float, float, Optional[str]]:
         """
-        Return ATM straddle move for security. Well-known formula of taking prices for ATM put and ATM call
-        and adding them together.
+        Return the at-the-money straddle move for a security at a given expiration: the price of the ATM call
+        plus the price of the ATM put, both taken at the strike closest to the underlying price. This is a
+        market-based expected-move proxy for that expiration (it reflects the option prices actually traded,
+        so it tracks how platforms like thinkorswim show an expected move).
+
+        Note this returns the raw straddle. A straddle is roughly 0.8 of a standard deviation, so a caller that
+        wants a one-standard-deviation estimate should scale by ~1.25 (and by N for N standard deviations).
 
         :param symbol: ticker
         :param expiration: expiration date, IB-style
-        :param standard_deviations: number of standard deviations
-        :return: (expected move, best strike, error message)
+        :return: (straddle move, ATM strike used, error message or None)
         """
         price = await self._get_underlying_price(symbol, bar_size=BarSize.ONE_DAY)
 
-        put_strikes, _ = await self.get_strikes(symbol, expiration, "P", 4, 4)
-        if len(put_strikes) == 0:
-            return 0, 0, "No put strikes found"
-        best_put_strike = get_best_strike(put_strikes, price)
+        strikes, _ = await self.get_strikes(symbol, expiration, "C")
+        if len(strikes) == 0:
+            return 0.0, 0.0, "No strikes found"
+        atm_strike = get_best_strike(strikes, price)
 
-        call_strikes, _ = await self.get_strikes(symbol, expiration, "C", 4, 4)
-        if len(call_strikes) == 0:
-            return 0, 0, "No call strikes found"
-        best_call_strike = get_best_strike(call_strikes, price)
-
+        # A straddle is one call and one put at the same (ATM) strike.
         try:
-            put_option_data = await self.get_option_chain(symbol, expiration, "P", best_put_strike)
-        except:
-            return 0, 0, "Failed to get put option data"
+            call = await self.get_option_info(symbol, expiration, "C", atm_strike)
+            put = await self.get_option_info(symbol, expiration, "P", atm_strike)
+        except OptionDataException as ex:
+            return 0.0, 0.0, f"Failed to get ATM straddle data: {ex}"
+        if call is None or put is None or call.price <= 0.0 or put.price <= 0.0:
+            return 0.0, 0.0, "ATM straddle prices unavailable"
 
-        df = put_option_data.get_dataframe()
-        if len(df) == 0:
-            return 0, 0, "Put option chain empty for some reason"
-        put_price = df.iloc[0]["price"]
-
-        try:
-            call_option_data = await self.get_option_chain(symbol, expiration, "C", best_call_strike)
-        except:
-            return 0, 0, "Failed to get call option data"
-
-        df = call_option_data.get_dataframe()
-        if len(df) == 0:
-            return 0, 0, "Call option chain empty for some reason"
-        call_price = df.iloc[0]["price"]
-
-        atm_straddle_move = put_price + call_price
-        return atm_straddle_move * 1.25 * float(standard_deviations), best_put_strike, None
+        return call.price + put.price, atm_strike, None
 
     async def _get_underlying_price(self, ticker: str, bar_size: BarSize = BarSize.ONE_MINUTE):
         """Get the latest trading price (within a minute by default) for ticker"""

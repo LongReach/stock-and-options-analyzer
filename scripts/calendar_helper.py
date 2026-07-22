@@ -27,6 +27,9 @@ Greeks, net cost, and an estimated maximum profit. It also reports where today's
 of the last 20 days, with the historical IV reconstructed from option/underlying price history (works on both
 brokers, since neither serves per-option IV history directly).
 
+--dte-front and --dte-back accept either a DTE integer or an IB-style date (YYYYMMDD); with --double it analyzes
+a double calendar, auto-selecting two strikes around the expected move instead of using --strike.
+
 Setup and usage:
 ------------------------
 d:
@@ -42,6 +45,29 @@ CONTRACT_MULTIPLIER = 100
 MAX_DAYS_OUT = 730
 IV_HISTORY_DAYS = 20
 STRIKE_TOLERANCE = 1e-6
+
+
+def parse_dte_or_date(value: str) -> int:
+    """
+    Interprets a --dte-front / --dte-back argument as either a plain days-to-expiration integer (e.g. 14) or an
+    IB-style date (YYYYMMDD, e.g. 20260821). A date is converted to a DTE relative to today (same convention as
+    get_expirations_with_dte), so from here on the rest of the code flow only ever sees a DTE value.
+
+    Raises argparse.ArgumentTypeError on malformed input so argparse prints a friendly message.
+    """
+    text = value.strip()
+    if len(text) == 8 and text.isdigit():
+        try:
+            target = get_datetime(text)
+        except TypeError as ex:
+            raise argparse.ArgumentTypeError(str(ex))
+        return (target - current_datetime()).days
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"'{value}' is not a valid DTE (integer) or IB-style date (YYYYMMDD, e.g. 20260821)."
+        )
 
 
 async def get_expirations_with_dte(manager: OptionDataManager, symbol: str) -> List[Tuple[str, int]]:
@@ -135,6 +161,20 @@ async def iv_ratio_percentile(
     return 100.0 * below_or_equal / len(ratios), f"derived from {len(ratios)} of the last {IV_HISTORY_DAYS} days"
 
 
+def calendar_metrics(front: OptionInfo, back: OptionInfo) -> dict:
+    """
+    Aggregate Greeks and net debit for one calendar (short 1 front, long 1 back). Aggregate = back - front;
+    cost is the net debit in dollars for one front + one back contract (x100).
+    """
+    return {
+        "delta": back.delta - front.delta,
+        "theta": back.theta - front.theta,
+        "gamma": back.gamma - front.gamma,
+        "vega": back.vega - front.vega,
+        "cost": (back.price - front.price) * CONTRACT_MULTIPLIER,
+    }
+
+
 def print_analysis(
     symbol: str,
     right: str,
@@ -146,17 +186,11 @@ def print_analysis(
     percentile: Optional[float],
     percentile_detail: Optional[str],
 ):
-    """Pretty-prints the calendar-spread analysis."""
+    """Pretty-prints the calendar-spread analysis. Returns this calendar's metrics dict for aggregation."""
     iv_ratio = front.implied_volatility / back.implied_volatility if back.implied_volatility > 0.0 else float("nan")
 
-    # Calendar = short 1 front, long 1 back: aggregate = back - front.
-    agg_delta = back.delta - front.delta
-    agg_theta = back.theta - front.theta
-    agg_gamma = back.gamma - front.gamma
-    agg_vega = back.vega - front.vega
-
-    # Net debit for one front + one back contract.
-    total_cost = (back.price - front.price) * CONTRACT_MULTIPLIER
+    metrics = calendar_metrics(front, back)
+    total_cost = metrics["cost"]
 
     # Estimated max profit: at front expiration with the underlying at the strike, the front expires worthless
     # and the back still has (back_dte - front_dte) days of life. Value the back with Black-Scholes at that
@@ -180,10 +214,10 @@ def print_analysis(
     elif percentile_detail is not None:
         print(f"  IV ratio percentile     : unavailable ({percentile_detail})")
     print()
-    print(f"  Aggregate delta         : {agg_delta:>10.4f}")
-    print(f"  Aggregate theta         : {agg_theta:>10.4f}")
-    print(f"  Aggregate gamma         : {agg_gamma:>10.5f}")
-    print(f"  Aggregate vega          : {agg_vega:>10.4f}")
+    print(f"  Aggregate delta         : {metrics['delta']:>10.4f}")
+    print(f"  Aggregate theta         : {metrics['theta']:>10.4f}")
+    print(f"  Aggregate gamma         : {metrics['gamma']:>10.5f}")
+    print(f"  Aggregate vega          : {metrics['vega']:>10.4f}")
     print()
     print(f"  Front price / Back price: {front.price:.2f} / {back.price:.2f}")
     print(f"  Total cost (net debit)  : {total_cost:>10.2f}")
@@ -195,6 +229,114 @@ def print_analysis(
     print("       The IV-ratio percentile reconstructs each day's IV from option/underlying closes via")
     print("       Black-Scholes inversion (European, no dividends), so it's an approximation.")
     print()
+    return metrics
+
+
+def print_double_header(symbol: str, right: str, info: dict, front_dte: int):
+    """Pretty-prints the shared context for a double calendar: spot, expected move, and the two chosen strikes."""
+    right_word = "call" if right == "C" else "put"
+    spot, move = info["spot"], info["move"]
+    strike_low, strike_high = info["strike_low"], info["strike_high"]
+    print(f"\nDouble calendar: {symbol} {right_word}s @ strikes {strike_low:g} and {strike_high:g}")
+    print("#" * 60)
+    print(f"  Underlying price        : {spot:>10.2f}")
+    print(f"  ATM straddle (strike {info['atm_strike']:g}) : {move:>10.2f}")
+    print(f"  Expected move ({front_dte:>3} DTE) : +/-{move:>8.2f}  ({spot - move:.2f} to {spot + move:.2f})")
+    print(f"  Selected strikes        : {strike_low:g} (low)  /  {strike_high:g} (high)")
+    print("  Expected move = front-expiration ATM straddle (call + put mid); strikes sit near +/- 1 EM.")
+
+
+def print_double_summary(metrics_low: dict, metrics_high: dict):
+    """Pretty-prints the combined position across both calendars of a double calendar."""
+    print("\nCombined double calendar (both strikes)")
+    print("=" * 60)
+    print(f"  Aggregate delta         : {metrics_low['delta'] + metrics_high['delta']:>10.4f}")
+    print(f"  Aggregate theta         : {metrics_low['theta'] + metrics_high['theta']:>10.4f}")
+    print(f"  Aggregate gamma         : {metrics_low['gamma'] + metrics_high['gamma']:>10.5f}")
+    print(f"  Aggregate vega          : {metrics_low['vega'] + metrics_high['vega']:>10.4f}")
+    print(f"  Total cost (net debit)  : {metrics_low['cost'] + metrics_high['cost']:>10.2f}")
+    print()
+    print("Notes: combined Greeks and cost are the sum of both calendars (one contract each, x100). The per-")
+    print("       strike max profits shown above occur at different underlying prices and are not achievable")
+    print("       simultaneously, so they are intentionally not summed here.")
+    print()
+
+
+async def analyze_strike(
+    driver: BaseDriver,
+    manager: OptionDataManager,
+    symbol: str,
+    right: str,
+    strike: float,
+    front_exp: str,
+    front_dte: int,
+    back_exp: str,
+    back_dte: int,
+) -> Optional[dict]:
+    """
+    Fetches both legs for one strike, prints the calendar analysis, and returns the calendar's metrics dict
+    (for aggregation in double-calendar mode). Returns None if either leg can't be fetched.
+    """
+    front = await manager.get_option_info(symbol, front_exp, right, strike)
+    back = await manager.get_option_info(symbol, back_exp, right, strike)
+    if front is None or back is None:
+        return None
+
+    # Where today's IV ratio sits over the last 20 days (IV reconstructed from price history; either broker).
+    percentile, percentile_detail = None, None
+    if back.implied_volatility > 0.0:
+        today_ratio = front.implied_volatility / back.implied_volatility
+        percentile, percentile_detail = await iv_ratio_percentile(
+            driver, symbol, right, strike, front_exp, back_exp, today_ratio
+        )
+
+    return print_analysis(symbol, right, strike, front, front_dte, back, back_dte, percentile, percentile_detail)
+
+
+async def choose_double_strikes(
+    driver: BaseDriver,
+    manager: OptionDataManager,
+    symbol: str,
+    front_exp: str,
+    shared_strikes: List[float],
+) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Picks the two strikes for a double calendar: one near spot - expected_move (from the strikes at or below
+    spot) and one near spot + expected_move (from the strikes at or above spot).
+
+    The expected move is the FRONT-expiration ATM straddle price (see OptionDataManager.get_atm_straddle_move).
+    That is the market's own priced move to the front expiration and is what platforms like thinkorswim
+    approximate, so it tracks their expected-move figure more closely than the closed-form
+    spot * IV * sqrt(DTE/365) estimate (which reads ~10-15% higher).
+
+    :return: ({"spot", "atm_strike", "move", "strike_low", "strike_high"}, None) or (None, error_str)
+    """
+    recent, price_err = await driver.get_most_recent_data(
+        symbol, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.TRADES
+    )
+    if recent is None or price_err:
+        return None, f"Could not get the underlying price for {symbol} to place the double-calendar strikes."
+    spot = recent[0]["close"]
+
+    move, atm_strike, straddle_err = await manager.get_atm_straddle_move(symbol, front_exp)
+    if straddle_err or move <= 0.0:
+        return None, f"Could not size the expected move for {symbol}: {straddle_err or 'no straddle price'}"
+
+    at_or_below = [s for s in shared_strikes if s <= spot]
+    at_or_above = [s for s in shared_strikes if s >= spot]
+    strike_low = get_best_strike(at_or_below or shared_strikes, spot - move)
+    strike_high = get_best_strike(at_or_above or shared_strikes, spot + move)
+
+    if abs(strike_low - strike_high) <= STRIKE_TOLERANCE:
+        return None, "Could not find two distinct strikes around the expected move for a double calendar."
+
+    return {
+        "spot": spot,
+        "atm_strike": atm_strike,
+        "move": move,
+        "strike_low": strike_low,
+        "strike_high": strike_high,
+    }, None
 
 
 async def run(
@@ -205,6 +347,7 @@ async def run(
     strike_arg: Optional[float],
     dte_front: int,
     dte_back: Optional[int],
+    double: bool,
 ) -> Optional[str]:
     """Does the analysis. Returns an error string to print, or None on success."""
     expirations = await get_expirations_with_dte(manager, symbol)
@@ -227,10 +370,32 @@ async def run(
     if get_datetime(back_exp) <= front_dt:
         return "The back-dated option's expiration does not come after the front-dated option's expiration."
 
-    # Determine the strike, requiring it to exist for both expirations.
     front_strikes, _ = await manager.get_strikes(symbol, front_exp, right)
     back_strikes, _ = await manager.get_strikes(symbol, back_exp, right)
+    shared = common_strikes(front_strikes, back_strikes)
+    if not shared:
+        return "Could not find matching strikes for the front- and back-dated options."
 
+    if double:
+        # Double calendar: --strike is ignored; strikes are chosen around the expected move.
+        if strike_arg is not None:
+            print("Note: --strike is ignored when --double is used.")
+        info, error_str = await choose_double_strikes(driver, manager, symbol, front_exp, shared)
+        if error_str:
+            return error_str
+        print_double_header(symbol, right, info, front_dte)
+        metrics = []
+        for strike in (info["strike_low"], info["strike_high"]):
+            result = await analyze_strike(
+                driver, manager, symbol, right, strike, front_exp, front_dte, back_exp, back_dte
+            )
+            if result is None:
+                return "Could not find matching strikes for the front- and back-dated options."
+            metrics.append(result)
+        print_double_summary(metrics[0], metrics[1])
+        return None
+
+    # Single calendar: determine the strike, requiring it to exist for both expirations.
     if strike_arg is not None:
         if not strike_in(front_strikes, strike_arg):
             return f"The specified strike {strike_arg:g} does not exist for the front-dated {symbol} option."
@@ -238,9 +403,6 @@ async def run(
             return "Could not find matching strikes for the front- and back-dated options."
         strike = strike_arg
     else:
-        shared = common_strikes(front_strikes, back_strikes)
-        if not shared:
-            return "Could not find matching strikes for the front- and back-dated options."
         recent, price_err = await driver.get_most_recent_data(
             symbol, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.TRADES
         )
@@ -248,21 +410,9 @@ async def run(
             return f"Could not get the underlying price for {symbol} to choose an at-the-money strike."
         strike = get_best_strike(shared, recent[0]["close"])
 
-    # Fetch price + Greeks + IV for both legs.
-    front = await manager.get_option_info(symbol, front_exp, right, strike)
-    back = await manager.get_option_info(symbol, back_exp, right, strike)
-    if front is None or back is None:
+    result = await analyze_strike(driver, manager, symbol, right, strike, front_exp, front_dte, back_exp, back_dte)
+    if result is None:
         return "Could not find matching strikes for the front- and back-dated options."
-
-    # Where today's IV ratio sits over the last 20 days (IV reconstructed from price history; either broker).
-    percentile, percentile_detail = None, None
-    if back.implied_volatility > 0.0:
-        today_ratio = front.implied_volatility / back.implied_volatility
-        percentile, percentile_detail = await iv_ratio_percentile(
-            driver, symbol, right, strike, front_exp, back_exp, today_ratio
-        )
-
-    print_analysis(symbol, right, strike, front, front_dte, back, back_dte, percentile, percentile_detail)
     return None
 
 
@@ -292,7 +442,9 @@ async def main(args: argparse.Namespace):
         return
 
     try:
-        error_str = await run(driver, manager, args.symbol.upper(), right, args.strike, args.dte_front, args.dte_back)
+        error_str = await run(
+            driver, manager, args.symbol.upper(), right, args.strike, args.dte_front, args.dte_back, args.double
+        )
         if error_str:
             print(error_str)
     except OptionDataException as ex:
@@ -318,6 +470,13 @@ def build_parser() -> argparse.ArgumentParser:
             sits as a percentile of the last 20 days (historical IV reconstructed from price history; works on
             IB or Schwab).
 
+            --dte-front and --dte-back each accept either a days-to-expiration integer (e.g. 14) or an
+            IB-style date (YYYYMMDD, e.g. 20260821); a date is converted to a DTE relative to today.
+
+            With --double, a double calendar is analyzed instead: --strike is ignored and two strikes are
+            chosen around the +/- 1 expected-move boundaries (the expected move is the front expiration's
+            ATM straddle price).
+
             A broker must be selected with --ib (Interactive Brokers; requires IB Gateway or TWS running
             locally, paper/sim account) or --schwab (Charles Schwab; requires credentials in .env).
             """),
@@ -328,6 +487,12 @@ def build_parser() -> argparse.ArgumentParser:
 
               # Put calendar with explicit strike and back DTE (Schwab)
               python -m scripts.calendar_helper --schwab --symbol QQQ --right P --strike 440 --dte-front 14 --dte-back 45
+
+              # Front/back given as explicit expiration dates instead of DTEs (IB)
+              python -m scripts.calendar_helper --ib --symbol SPY --right C --dte-front 20260821 --dte-back 20260918
+
+              # Double call calendar: strikes auto-selected around the expected move (Schwab)
+              python -m scripts.calendar_helper --schwab --symbol QQQ --right C --dte-front 14 --dte-back 45 --double
             """),
     )
     broker_group = parser.add_mutually_exclusive_group()
@@ -338,19 +503,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbol", required=True, help="Underlying stock/ETF ticker, e.g. SPY.")
     parser.add_argument("--right", required=True, help="Option right: 'P' for put or 'C' for call.")
     parser.add_argument(
-        "--strike", type=float, default=None, help="Strike to use; if omitted, the closest-to-ATM strike is chosen."
+        "--strike",
+        type=float,
+        default=None,
+        help="Strike to use; if omitted, the closest-to-ATM strike is chosen. Ignored when --double is used.",
     )
     parser.add_argument(
         "--dte-front",
         required=True,
-        type=int,
-        help="Days to expiration for the front (sold) option; the closest available is used.",
+        type=parse_dte_or_date,
+        help="Front (sold) expiration as a DTE integer (e.g. 14) or IB-style date (YYYYMMDD, e.g. 20260821); "
+        "the closest available expiration is used.",
     )
     parser.add_argument(
         "--dte-back",
-        type=int,
+        type=parse_dte_or_date,
         default=None,
-        help="Days to expiration for the back (bought) option; the closest available is used. If omitted, the first expiration after the front is used.",
+        help="Back (bought) expiration as a DTE integer or IB-style date (YYYYMMDD); the closest available is "
+        "used. If omitted, the first expiration after the front is used.",
+    )
+    parser.add_argument(
+        "--double",
+        action="store_true",
+        help="Analyze a double calendar: --strike is ignored and two strikes are chosen around the expected move.",
     )
     return parser
 
