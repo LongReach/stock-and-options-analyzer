@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import textwrap
 import traceback
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from core.base_driver import BaseDriver
@@ -28,7 +29,9 @@ of the last 20 days, with the historical IV reconstructed from option/underlying
 brokers, since neither serves per-option IV history directly).
 
 --dte-front and --dte-back accept either a DTE integer or an IB-style date (YYYYMMDD); with --double it analyzes
-a double calendar, auto-selecting two strikes around the expected move instead of using --strike.
+a double calendar, auto-selecting two strikes around the expected move instead of using --strike; with --auto it
+prints a table of candidate back expirations (theta ratio, cost, theta-per-dollar, vega, theta/vega) to choose
+from and stops.
 
 Setup and usage:
 ------------------------
@@ -45,6 +48,10 @@ CONTRACT_MULTIPLIER = 100
 MAX_DAYS_OUT = 730
 IV_HISTORY_DAYS = 20
 STRIKE_TOLERANCE = 1e-6
+# --auto: how many days past the front expiration to search for the back, and the smallest theta magnitude
+# we'll treat as usable when forming a theta ratio.
+AUTO_BACK_WINDOW_DAYS = 90
+THETA_EPSILON = 1e-9
 
 
 def parse_dte_or_date(value: str) -> int:
@@ -262,6 +269,36 @@ def print_double_summary(metrics_low: dict, metrics_high: dict):
     print()
 
 
+def print_auto_back_table(auto_info: dict):
+    """
+    Pretty-prints the --auto table of candidate back expirations. Each row is a one-front/one-back calendar
+    evaluated at the reference strike; the tool does not choose for the user, it just lays out the trade-offs.
+    """
+    ref = auto_info["ref_strike"]
+    header = (
+        f"  {'Back exp':<10}{'DTE':>5}{'Theta ratio':>13}{'Net cost':>11}{'Agg theta':>11}"
+        f"{'Theta/$':>10}{'Vega':>10}{'Theta/Vega':>12}"
+    )
+    front_str = get_datetime_as_str(auto_info["front_exp"], date_only=True)
+    print(f"\nCandidate back expirations for a calendar at strike {ref:g}")
+    print(f"Front (sold) leg fixed at {front_str} ({auto_info['front_dte']} DTE)")
+    print("-" * len(header))
+    print(header)
+    print("-" * len(header))
+    for c in sorted(auto_info["candidates"], key=lambda item: item["dte"]):
+        exp_str = get_datetime_as_str(c["exp"], date_only=True)
+        print(
+            f"  {exp_str:<10}{c['dte']:>5}{c['theta_ratio']:>13.2f}{c['cost']:>11.2f}{c['agg_theta']:>11.4f}"
+            f"{c['theta_per_dollar']:>10.4f}{c['vega']:>10.4f}{c['theta_vega_ratio']:>12.4f}"
+        )
+    print()
+    print("  All columns are for one front + one back contract at the reference strike. Theta ratio =")
+    print("  |front theta| / |back theta|; Theta/$ = daily dollar theta per dollar of net debit; Vega and")
+    print("  Agg theta are (back - front); Theta/Vega = aggregate theta per unit of aggregate vega. The theta")
+    print(f"  ratio rises with back DTE (search capped at front + {AUTO_BACK_WINDOW_DAYS} days); pick the back")
+    print("  expiration that best fits your own theta / cost / vega trade-off.")
+
+
 async def analyze_strike(
     driver: BaseDriver,
     manager: OptionDataManager,
@@ -339,6 +376,85 @@ async def choose_double_strikes(
     }, None
 
 
+async def gather_auto_back_candidates(
+    driver: BaseDriver,
+    manager: OptionDataManager,
+    symbol: str,
+    right: str,
+    front_exp: str,
+    front_dte: int,
+    front_dt: datetime,
+    front_strikes: List[float],
+    expirations: List[Tuple[str, int]],
+    strike_hint: Optional[float],
+) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Builds the --auto table of candidate back expirations. For each expiration after the front (within
+    AUTO_BACK_WINDOW_DAYS of it) it evaluates a one-front/one-back calendar at a reference strike and records
+    the metrics a trader weighs when choosing a back: theta ratio (|front theta| / |back theta|), net cost,
+    aggregate theta, theta-per-dollar (daily dollar theta per dollar of net debit), aggregate vega, and the
+    theta/vega ratio. It does NOT pick a winner -- the user reads the table and decides.
+
+    The reference strike is the user's --strike if it exists on the front expiration, otherwise the front ATM
+    strike; the relative comparison across backs is nearly strike-independent.
+
+    :return: ({"ref_strike", "candidates"}, None) or (None, error_str)
+    """
+    recent, price_err = await driver.get_most_recent_data(
+        symbol, bar_size=BarSize.ONE_DAY, request_info_type=RequestedInfoType.TRADES
+    )
+    if recent is None or price_err:
+        return None, f"Could not get the underlying price for {symbol} to build the back-expiration table."
+    spot = recent[0]["close"]
+
+    if strike_hint is not None and strike_in(front_strikes, strike_hint):
+        ref_strike = strike_hint
+    else:
+        ref_strike = get_best_strike(front_strikes, spot)
+
+    front = await manager.get_option_info(symbol, front_exp, right, ref_strike)
+    if front is None or abs(front.theta) <= THETA_EPSILON:
+        return None, f"Could not get a usable front-option theta for {symbol} to build the back-expiration table."
+
+    candidates = []
+    for exp, dte in expirations:
+        if get_datetime(exp) <= front_dt or dte > front_dte + AUTO_BACK_WINDOW_DAYS:
+            continue
+        back_strikes, _ = await manager.get_strikes(symbol, exp, right)
+        if not strike_in(back_strikes, ref_strike):
+            continue
+        back = await manager.get_option_info(symbol, exp, right, ref_strike)
+        if back is None or abs(back.theta) <= THETA_EPSILON:
+            continue
+        metrics = calendar_metrics(front, back)
+        cost, agg_theta, vega = metrics["cost"], metrics["theta"], metrics["vega"]
+        candidates.append(
+            {
+                "exp": exp,
+                "dte": dte,
+                "theta_ratio": abs(front.theta) / abs(back.theta),
+                "cost": cost,
+                "agg_theta": agg_theta,
+                # Daily dollar theta (x100) per dollar of net debit.
+                "theta_per_dollar": (
+                    (agg_theta * CONTRACT_MULTIPLIER / cost) if abs(cost) > STRIKE_TOLERANCE else float("nan")
+                ),
+                "vega": vega,
+                "theta_vega_ratio": (agg_theta / vega) if abs(vega) > THETA_EPSILON else float("nan"),
+            }
+        )
+
+    if not candidates:
+        return None, "Could not evaluate any back expirations for --auto (no matching strike with theta)."
+
+    return {
+        "ref_strike": ref_strike,
+        "front_exp": front_exp,
+        "front_dte": front_dte,
+        "candidates": candidates,
+    }, None
+
+
 async def run(
     driver: BaseDriver,
     manager: OptionDataManager,
@@ -348,6 +464,7 @@ async def run(
     dte_front: int,
     dte_back: Optional[int],
     double: bool,
+    auto: bool,
 ) -> Optional[str]:
     """Does the analysis. Returns an error string to print, or None on success."""
     expirations = await get_expirations_with_dte(manager, symbol)
@@ -357,8 +474,20 @@ async def run(
     # Front expiration: closest available to the requested front DTE.
     front_exp, front_dte = closest_by_dte(expirations, dte_front)
     front_dt = get_datetime(front_exp)
+    front_strikes, _ = await manager.get_strikes(symbol, front_exp, right)
 
-    # Back expiration: closest to requested back DTE, or the first expiration after the front if not specified.
+    # --auto: only present a table of candidate back expirations and stop; the user picks one and re-runs.
+    if auto:
+        strike_hint = None if double else strike_arg
+        auto_info, error_str = await gather_auto_back_candidates(
+            driver, manager, symbol, right, front_exp, front_dte, front_dt, front_strikes, expirations, strike_hint
+        )
+        if error_str:
+            return error_str
+        print_auto_back_table(auto_info)
+        return None
+
+    # Back expiration: closest to a requested DTE, or the first available expiration after the front.
     if dte_back is not None:
         back_exp, back_dte = closest_by_dte(expirations, dte_back)
     else:
@@ -370,7 +499,6 @@ async def run(
     if get_datetime(back_exp) <= front_dt:
         return "The back-dated option's expiration does not come after the front-dated option's expiration."
 
-    front_strikes, _ = await manager.get_strikes(symbol, front_exp, right)
     back_strikes, _ = await manager.get_strikes(symbol, back_exp, right)
     shared = common_strikes(front_strikes, back_strikes)
     if not shared:
@@ -443,7 +571,15 @@ async def main(args: argparse.Namespace):
 
     try:
         error_str = await run(
-            driver, manager, args.symbol.upper(), right, args.strike, args.dte_front, args.dte_back, args.double
+            driver,
+            manager,
+            args.symbol.upper(),
+            right,
+            args.strike,
+            args.dte_front,
+            args.dte_back,
+            args.double,
+            args.auto,
         )
         if error_str:
             print(error_str)
@@ -477,6 +613,10 @@ def build_parser() -> argparse.ArgumentParser:
             chosen around the +/- 1 expected-move boundaries (the expected move is the front expiration's
             ATM straddle price).
 
+            With --auto, the tool prints a table of candidate back expirations -- theta ratio, net cost,
+            aggregate theta, theta-per-dollar, vega, and theta/vega -- and stops, letting you pick the back
+            that best fits your trade-off. The front still snaps to --dte-front; --dte-back is unused.
+
             A broker must be selected with --ib (Interactive Brokers; requires IB Gateway or TWS running
             locally, paper/sim account) or --schwab (Charles Schwab; requires credentials in .env).
             """),
@@ -493,6 +633,9 @@ def build_parser() -> argparse.ArgumentParser:
 
               # Double call calendar: strikes auto-selected around the expected move (Schwab)
               python -m scripts.calendar_helper --schwab --symbol QQQ --right C --dte-front 14 --dte-back 45 --double
+
+              # Print a table of candidate back expirations to choose from; ~14-DTE front (IB)
+              python -m scripts.calendar_helper --ib --symbol SPY --right C --dte-front 14 --auto
             """),
     )
     broker_group = parser.add_mutually_exclusive_group()
@@ -526,6 +669,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--double",
         action="store_true",
         help="Analyze a double calendar: --strike is ignored and two strikes are chosen around the expected move.",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Print a table of candidate back expirations (theta ratio, net cost, agg theta, theta-per-dollar, "
+        "vega, theta/vega) for you to choose from, then stop. The front snaps to --dte-front; --dte-back is unused.",
     )
     return parser
 
