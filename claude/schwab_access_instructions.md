@@ -136,3 +136,15 @@ It would be good to show realized profit, both for individual legs and for the a
 In `BaseDriver`, I've added the function `get_implied_volatility()`. Please provide implementations for `SchwabDriver` and `IBDriver`. For `IBDriver`, it should be easy to make use of existing code for getting historical market data.
 
 Make `position_analyzer.py` display the expected move over the next day for the underlying stock/ETF. The function for calculating expected move is `calculate_expected_move()` in `utils.py`.
+
+##### Step 7
+
+Once again, we're going to modify the rules of how `scripts/get_schwab_trades.py` works. This will only apply if a positions file (CSV) is given to the tool.
+
+For each trade, if it matches an existing position row in terms of symbol (we no longer care about matching dates), the user is prompted for their input and given one of four choices:
+1. Add to position. If the user selects this choice, the "Quantity" field gets incremented by the quantity of contracts in the trade. The "Trade price" field gets updated with the average between the current position trade price and the trade's own price, taking into account quantities from both sides in computing the average.
+2. Exit/partially exit position. If the user selects this choice, the "Quantity Out" field gets incremented by the quantity of contracts in the trade. The "Exit price" field gets updated with the average between the current position exit price and the trade's own price, taking into account quantities from both sides in computing the average. "Date out" gets updated with the trade's date.
+3. New leg. If the user selects this choice, a new entry goes into the position's CSV, based on the data from the trade.
+4. Do nothing. If the user selects this choice, the trade's info is simply discarded.
+
+Before the menu is presented to the user, the tool should also display all the fields for the relevant position row, for the user's reference, as well as the contents of the trade entry.
