@@ -32,6 +32,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradesInfo,
     EarningsInfo,
 )
 from core.utils import (
@@ -233,6 +234,10 @@ class IBDriver(IBWrapper, BaseDriver):
         if bar_size == BarSize.ONE_MONTH:
             raise IBDriverException(f"Month candles not supported for historical data request (for now)")
 
+        descriptor = SecurityDescriptor(symbol_full)
+        if descriptor.is_option() and request_info_type != RequestedInfoType.TRADES:
+            return HistoricalData(), "IBDriver does not support historical IV data for options"
+
         async with self._lock:
             req_id = self._next_id()
             ticker_desc = SecurityDescriptor(symbol_full)
@@ -337,6 +342,27 @@ class IBDriver(IBWrapper, BaseDriver):
             bar_data_dicts = historical_data.get_bar_data_as_dicts()
             ret_tuple = (bar_data_dicts[-1], historical_data.timestamps[-1])
         return ret_tuple, error_str
+
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns the most current implied volatility (as a fraction, e.g. 0.18) for a stock/ETF, or None if it
+        can't be retrieved. IB exposes IV directly as a historical-data series
+        (OPTION_IMPLIED_VOLATILITY), so we just pull the latest daily bar and return its close.
+        """
+        historical_data, error_str = await self.get_historical_data(
+            ticker,
+            num_bars=5,
+            bar_size=BarSize.ONE_DAY,
+            request_info_type=RequestedInfoType.IMPLIED_VOLATILITY,
+            primary_exchange=primary_exchange,
+        )
+        if error_str or historical_data.is_empty():
+            return None
+        return historical_data.get_bar_data_as_dicts()[-1]["close"]
 
     async def get_head_timestamp(
         self,
@@ -785,6 +811,12 @@ class IBDriver(IBWrapper, BaseDriver):
             self._logger.info("get_positions() finished")
 
         return positions_request.positions_info, ret_error_str
+
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """Not implemented for IB yet."""
+        raise NotImplementedError("IBDriver.get_trades() is not implemented yet")
 
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
         """

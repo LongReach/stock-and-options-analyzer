@@ -177,3 +177,6 @@ cython_debug/
 
 # Schwab OAuth token (contains refresh token — never commit)
 schwab_token.json
+
+# HDF5 data files (large, regenerated locally)
+*.h5
