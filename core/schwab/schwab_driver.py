@@ -24,6 +24,8 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradeDescriptor,
+    TradesInfo,
     EarningsInfo,
     BarSize,
     MARKETS_TIMEZONE,
@@ -53,8 +55,9 @@ class SchwabDriver(BaseDriver):
     All data returned is in the generic form used throughout `core` (HistoricalData, DataBar, etc.); Schwab-
     and schwab-py-specific classes are only used inside this module.
 
-    Implemented: historical/live OHLC bar data, account positions, and options data (chain info, per-contract
-    identity, and Greeks/price). Order-placement endpoints remain stubbed and raise NotImplementedError.
+    Implemented: historical/live OHLC bar data, account positions, trade history, and options data (chain
+    info, per-contract identity, and Greeks/price). Order-placement endpoints remain stubbed and raise
+    NotImplementedError.
 
     Note on paper trading: unlike IB, Schwab's developer API has no paper/sandbox environment. Market data is
     available, but any future order support would hit real money.
@@ -190,12 +193,13 @@ class SchwabDriver(BaseDriver):
         by a background one-minute-candle stream (CHART_EQUITY). The caller must hang onto the object and can
         stop the stream via cancel_historical_data().
 
-        :param symbol_full: stock/ETF ticker, e.g. AAPL or SPY. Options are not supported in Version One.
+        :param symbol_full: stock/ETF ticker (e.g. AAPL or SPY) or an IB-style option (e.g.
+            SPY-C-20260721-742.0). Options are supported for request/response history, but not live streaming.
         :param num_bars: how many bars to collect; if 0, start_date determines the range
         :param bar_size: one of the Schwab-supported sizes (1m, 5m, 15m, 1d, 1w)
         :param end_date: end of the range; datetime or IB-style str '20250523 16:00:00 US/Eastern'
         :param start_date: start of the range; datetime or IB-style str
-        :param live_data: if True, stream continuing one-minute candle updates into the result
+        :param live_data: if True, stream continuing one-minute candle updates into the result (equities only)
         :param request_info_type: only TRADES is supported
         :param regular_trading_hours_only: if True, exclude pre/post-market data
         :param primary_exchange: unused (Schwab resolves the venue); accepted for interface compatibility
@@ -206,17 +210,19 @@ class SchwabDriver(BaseDriver):
             return HistoricalData(), "Not connected to Schwab"
 
         descriptor = SecurityDescriptor(symbol_full)
-        if descriptor.is_option():
-            return HistoricalData(), "SchwabDriver does not support options data yet"
+        is_option = descriptor.is_option()
         if request_info_type != RequestedInfoType.TRADES:
             return HistoricalData(), f"SchwabDriver only supports TRADES data, not {request_info_type.name}"
+        if is_option and live_data:
+            return HistoricalData(), "SchwabDriver does not support live streaming for options"
         if bar_size not in self._history_method_map:
             raise SchwabDriverException(
                 f"Bar size {bar_size.name} is not supported by SchwabDriver "
                 f"(supported: {', '.join(bs.name for bs in self._history_method_map)})"
             )
 
-        symbol = descriptor.ticker
+        # Schwab's price-history endpoint takes the OSI option symbol for options, or the plain ticker otherwise.
+        symbol = self._descriptor_to_osi(descriptor) if is_option else descriptor.ticker
         end_dt = self._to_market_dt(end_date) if end_date is not None else current_datetime()
         if num_bars > 0:
             start_dt = self._estimate_start_datetime(end_dt, bar_size, num_bars)
@@ -450,6 +456,89 @@ class SchwabDriver(BaseDriver):
         self._logger.info("get_greeks() finished")
         return option_info, None
 
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns a current implied-volatility estimate (as a fraction, e.g. 0.18) for a stock/ETF, or None if it
+        can't be determined.
+
+        Schwab has no underlying-IV series (unlike IB's OPTION_IMPLIED_VOLATILITY), so we approximate it with
+        the IV of the at-the-money option in the nearest expiration: request the call chain, then take the
+        contract in the soonest expiration whose strike sits closest to the underlying price. Schwab quotes
+        volatility as a percentage, so we divide by 100 to match the fraction convention used elsewhere.
+
+        :param ticker: symbol of underlying, e.g. SPY
+        :param primary_exchange: unused (Schwab resolves the venue); accepted for interface compatibility
+        :return: implied volatility as a fraction, or None if unavailable
+        """
+        if not self.is_connected():
+            return None
+
+        payload, error_str = await self._request_option_chain(ticker, self._contract_type(is_call=True))
+        if error_str or not payload:
+            return None
+
+        underlying_price = float(payload.get("underlyingPrice", 0.0))
+        if underlying_price <= 0.0:
+            return None
+
+        # Sorting candidates by (expiration, |strike - underlying price|) puts the nearest expiration's
+        # at-the-money strike first; skip contracts without a usable IV (Schwab's -999 / 0 sentinels).
+        best_key = None
+        best_iv = None
+        for exp_ib, strike, detail in self._iter_option_details(payload):
+            iv = self._clean_number(detail.get("volatility")) / 100.0
+            if iv <= 0.0:
+                continue
+            key = (exp_ib, abs(strike - underlying_price))
+            if best_key is None or key < best_key:
+                best_key = key
+                best_iv = iv
+
+        return best_iv
+
+    async def get_fundamentals(self, symbol: str) -> Tuple[Optional[dict], Optional[str]]:
+        """
+        Fetches Schwab's fundamental data for a single equity/ETF via the /instruments FUNDAMENTAL projection.
+
+        Returns the raw instrument dict Schwab sends back -- identity fields (symbol, description, exchange,
+        assetType, cusip) plus a nested "fundamental" object (valuation, profitability, growth, leverage,
+        dividend, and trading-stat fields). The dict is passed through unmodified so callers can inspect exactly
+        what Schwab provides. This is Schwab-specific and not part of BaseDriver.
+
+        Note: Schwab's proprietary equity ratings (A-F letter grades) are a schwab.com research product and are
+        NOT included here -- the Trader API exposes no such field.
+
+        :param symbol: ticker of the underlying, e.g. AAPL
+        :return: (instrument dict or None, error string or None)
+        """
+        if not self.is_connected():
+            return None, "Not connected to Schwab"
+
+        projection = self._client.Instrument.Projection.FUNDAMENTAL
+        try:
+            resp = await self._client.get_instruments(symbol, projection=projection)
+        except Exception as e:
+            return None, f"Schwab instruments request failed: {e}"
+
+        if resp.status_code != 200:
+            return None, f"Schwab instruments request failed ({resp.status_code}): {resp.text}"
+
+        payload = resp.json()
+        instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
+        if not instruments:
+            return None, f"No fundamental data returned for {symbol}"
+
+        # Schwab may return several matches for a search-y symbol; prefer the exact ticker, else the first.
+        match = next(
+            (item for item in instruments if (item.get("symbol") or "").upper() == symbol.upper()),
+            instruments[0],
+        )
+        return match, None
+
     async def place_order(
         self,
         symbol_full: str,
@@ -515,6 +604,58 @@ class SchwabDriver(BaseDriver):
         self._logger.info(f"get_positions() finished, {len(positions_info.get_positions())} position(s)")
         return positions_info, None
 
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """
+        Gets the trades the account holder made over a date range, across all linked accounts.
+
+        Options are keyed by IB-style symbols (e.g. 'SPY-C-20260821-785.0'); a trade's quantity is signed
+        (positive for a buy, negative for a sell), matching TradeDescriptor's convention.
+
+        Note: Schwab only serves transactions from the last 60 days, and requires start_dt to be within that
+        window, so older ranges will come back as an error from Schwab.
+
+        :param start_dt: returned trades will be no older than this datetime
+        :param end_dt: returned trades will be no newer than this datetime; defaults to the current datetime
+        :return: (TradesInfo, error string or None)
+        """
+        if not self.is_connected():
+            return TradesInfo(), "Not connected to Schwab"
+
+        if end_dt is None:
+            end_dt = current_datetime()
+
+        self._logger.info(f"get_trades() from {start_dt} to {end_dt}")
+        account_hashes, error_str = await self._get_account_hashes()
+        if error_str:
+            return TradesInfo(), error_str
+
+        trades_info = TradesInfo()
+        for account_hash in account_hashes:
+            try:
+                resp = await self._client.get_transactions(
+                    account_hash,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    transaction_types=self._client.Transactions.TransactionType.TRADE,
+                )
+            except Exception as e:
+                return TradesInfo(), f"Schwab transactions request failed: {e}"
+
+            if resp.status_code != 200:
+                return TradesInfo(), f"Schwab transactions request failed ({resp.status_code}): {resp.text}"
+
+            for txn in resp.json():
+                trade_dt = self._parse_txn_time(txn.get("time"))
+                for item in txn.get("transferItems", []):
+                    trade = self._transfer_item_to_trade(item, trade_dt)
+                    if trade is not None:
+                        trades_info.add_trade(trade)
+
+        self._logger.info(f"get_trades() finished, {len(trades_info.get_trades())} trade(s)")
+        return trades_info, None
+
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:
         raise NotImplementedError("SchwabDriver.get_earnings_dates() is not implemented yet")
 
@@ -548,6 +689,50 @@ class SchwabDriver(BaseDriver):
 
         return descriptor, quantity, price, is_short
 
+    async def _get_account_hashes(self) -> Tuple[List[str], Optional[str]]:
+        """Fetches the account hashes for every account linked to this token (needed for the transactions API)."""
+        try:
+            resp = await self._client.get_account_numbers()
+        except Exception as e:
+            return [], f"Schwab account lookup failed: {e}"
+        if resp.status_code != 200:
+            return [], f"Schwab account lookup failed ({resp.status_code}): {resp.text}"
+        accounts = resp.json()
+        if not accounts:
+            return [], "No Schwab accounts linked to this token"
+        return [account["hashValue"] for account in accounts], None
+
+    def _transfer_item_to_trade(self, item: dict, trade_dt: datetime) -> Optional[TradeDescriptor]:
+        """
+        Converts one transferItem of a Schwab TRADE transaction into a TradeDescriptor, or None if the item is
+        not a tradeable security (e.g. the cash/fee CURRENCY legs that accompany every trade).
+        """
+        instrument = item.get("instrument", {})
+        asset_type = instrument.get("assetType")
+        symbol = instrument.get("symbol", "")
+        if asset_type not in ("OPTION", "EQUITY", "COLLECTIVE_INVESTMENT") or not symbol:
+            return None
+
+        if asset_type == "OPTION":
+            descriptor = self._option_symbol_to_descriptor(symbol)
+        else:
+            # Equities, ETFs (COLLECTIVE_INVESTMENT), etc. -- just the ticker.
+            descriptor = SecurityDescriptor(symbol)
+
+        trade = TradeDescriptor(descriptor)
+        trade.trade_date = trade_dt
+        # Schwab's 'amount' is already signed: positive for a buy, negative for a sell.
+        trade.quantity = int(item.get("amount", 0))
+        trade.price = float(item.get("price") or 0.0)
+        return trade
+
+    @staticmethod
+    def _parse_txn_time(time_str: Optional[str]) -> datetime:
+        """Parses a Schwab transaction timestamp (ISO 8601, UTC) into a market-timezone datetime."""
+        if not time_str:
+            return current_datetime()
+        return datetime.fromisoformat(time_str).astimezone(ZoneInfo(MARKETS_TIMEZONE))
+
     @staticmethod
     def _option_symbol_to_descriptor(symbol: str) -> SecurityDescriptor:
         """
@@ -564,6 +749,20 @@ class SchwabDriver(BaseDriver):
         expiration = "20" + yymmdd  # OSI years are two digits; Schwab options are all 21st-century.
         # Build the descriptor from the IB-style string so symbol_full keeps the trimmed strike (e.g. 785.0).
         return SecurityDescriptor(f"{root}-{right}-{expiration}-{SchwabDriver._strike_str(strike)}")
+
+    @staticmethod
+    def _descriptor_to_osi(descriptor: SecurityDescriptor) -> str:
+        """
+        Builds a Schwab OSI option symbol (e.g. 'SPY   260721C00742000') from an IB-style option descriptor
+        (e.g. SPY-C-20260721-742.0). The inverse of _option_symbol_to_descriptor().
+
+        OSI layout: 6-char space-padded root, 6-digit expiration (yymmdd), 1-char right (C/P), then the strike
+        in thousandths of a dollar as 8 digits.
+        """
+        root = descriptor.ticker.ljust(6)
+        yymmdd = descriptor.expiration[2:]  # 'yyyymmdd' -> 'yymmdd'
+        strike_thousandths = int(round(descriptor.strike * 1000))
+        return f"{root}{yymmdd}{descriptor.right}{strike_thousandths:08d}"
 
     def _contract_type(self, is_call: bool):
         """Returns the schwab-py ContractType enum value for the given right."""

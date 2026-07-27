@@ -11,6 +11,7 @@ from core.common import (
     OrderInfo,
     OrderAction,
     PositionsInfo,
+    TradesInfo,
     EarningsInfo,
 )
 from core.utils import BarSize
@@ -99,6 +100,17 @@ class BaseDriver(ABC):
         """
         Returns the head timestamp for a particular ticker — the earliest datetime for which
         the brokerage has data.
+        """
+
+    @abstractmethod
+    async def get_implied_volatility(
+        self,
+        ticker: str,
+        primary_exchange: Optional[str] = None,
+    ) -> Optional[float]:
+        """
+        Returns the most current implied volatility value (as a fraction, e.g. 0.18) for the specified
+        stock/ETF, or None if it can't be retrieved.
         """
 
     @abstractmethod
@@ -224,6 +236,18 @@ class BaseDriver(ABC):
     @abstractmethod
     async def get_positions(self) -> Tuple[PositionsInfo, Optional[str]]:
         """Gets info about positions currently held in the account."""
+
+    @abstractmethod
+    async def get_trades(
+        self, start_dt: datetime, end_dt: Optional[datetime] = None
+    ) -> Tuple[TradesInfo, Optional[str]]:
+        """
+        Gets trades made by the account holder over a date range.
+
+        :param start_dt: returned trades will be no older than this datetime
+        :param end_dt: returned trades will be no newer than this datetime; defaults to the current datetime
+        :return: (TradesInfo, error string or None)
+        """
 
     @abstractmethod
     async def get_earnings_dates(self, ticker: str) -> Tuple[EarningsInfo, Optional[str]]:

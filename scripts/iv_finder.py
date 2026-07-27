@@ -200,8 +200,10 @@ async def get_single_stock_data(
         if error_msg:
             print(f"Error getting ATM straddle: {error_msg}")
             return
-        print(f"ATM straddle move, one standard deviation: {atm_straddle_move}, using strikes at {best_strike}")
-        print(f"ATM straddle move, two standard deviations: {atm_straddle_move * 2.0}")
+        # get_atm_straddle_move returns the raw straddle (~0.8 SD); scale by 1.25 for a one-SD estimate.
+        one_sd_move = atm_straddle_move * 1.25
+        print(f"ATM straddle move, one standard deviation: {one_sd_move}, using strikes at {best_strike}")
+        print(f"ATM straddle move, two standard deviations: {one_sd_move * 2.0}")
 
     # Get both put and call chains, then print them
     sides = [("P", "put"), ("C", "call")]

@@ -15,6 +15,7 @@ As of right now, the code here only works with Interactive Brokers, but other br
 | `ib/`                    | Classes specifically for communicating with Interactive Brokers. Can be used on their own or in conjuction with other code here.                                               |
 | `indicators.py`          | Code for various trading indicators such as stochastics, MACD, and RSI                                                                                                         |
 | `option_data_manager.py` | A helper class for obtaining option contract data                                                                                                                              |
+| `schwab/`                | Classes specifically for communicating with Schwab. Can be used on their own or in conjuction with other code here.                                                            |
 | `stock_data_manager.py`  | A helper class for obtaining and locally caching stock data. The caching feature is essential for writing high-performance applications that require a lot of historical data. |
 | `utils.py`               | Utility functions                                                                                                                                                              |
 
