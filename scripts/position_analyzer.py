@@ -8,12 +8,12 @@ import textwrap
 import traceback
 
 from core.base_driver import BaseDriver
-from core.common import SecurityDescriptor, OptionInfo, BarSize, RequestedInfoType
+from core.common import SecurityDescriptor, OptionInfo, BarSize, RequestedInfoType, CoreException
 from core.options_data import OptionData, OptionDataException
 from core.option_data_manager import OptionDataManager
 from core.ib.ib_driver import IBDriver
 from core.schwab.schwab_driver import SchwabDriver
-from core.utils import current_datetime, calculate_expected_move
+from core.utils import current_datetime, calculate_expected_move, get_datetime
 
 r"""
 Utility for analyzing a set of open options positions. For each option leg it reports current
@@ -43,8 +43,22 @@ CSV_POSITION_TYPE = "Position Type"
 CSV_SYMBOL = "Symbol"
 CSV_QUANTITY = "Quantity"
 CSV_TRADE_PRICE = "Trade Price"
+CSV_DATE_OUT = "Date Out"
 CSV_QUANTITY_OUT = "Quantity Out"
 CSV_EXIT_PRICE = "Exit Price"
+
+# Every column the tool requires to be present in the positions CSV (validated up front).
+REQUIRED_COLUMNS = [
+    CSV_POSITION_NUM,
+    CSV_DATE_IN,
+    CSV_POSITION_TYPE,
+    CSV_SYMBOL,
+    CSV_QUANTITY,
+    CSV_TRADE_PRICE,
+    CSV_DATE_OUT,
+    CSV_QUANTITY_OUT,
+    CSV_EXIT_PRICE,
+]
 
 # Maps the short --position-type argument to the full name stored in the CSV's "Position Type" column.
 POSITION_TYPE_MAP = {
@@ -53,6 +67,8 @@ POSITION_TYPE_MAP = {
     "DS": "Debit Spread",
     "L": "Naked Long",
     "S": "Naked Short",
+    "LC": "Long Call",
+    "CSP": "Cash Secured Put",
     "CAL": "Calendar",
     "DCAL": "Double Calendar",
     "TCAL": "Triple Calendar",
@@ -107,6 +123,127 @@ SHOW_COLUMNS = [
 ]
 
 _logger = getLogger(__name__)
+
+
+def _is_int(text: str) -> bool:
+    """True if text parses cleanly as an integer (e.g. '6', '-4' -- but not '', '1.0', 'x')."""
+    try:
+        int(text)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_float(text: str) -> bool:
+    """True if text parses as a float (e.g. '2.51', '0', '-1.5' -- but not '', 'x')."""
+    try:
+        float(text)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_ib_datetime(text: str) -> bool:
+    """True if text is an IB-style datetime, e.g. '20260717 09:58:57 US/Eastern' (or a bare date)."""
+    try:
+        get_datetime(text)
+        return True
+    except Exception:
+        return False
+
+
+def _is_symbol(text: str) -> bool:
+    """True if text is a valid stock/option symbol, e.g. 'SPY' or 'SPY-C-20260821-800.0'."""
+    try:
+        SecurityDescriptor.from_string(text)
+        return True
+    except CoreException:
+        return False
+
+
+def _cell(row: pd.Series, col: str) -> str:
+    """Returns a row's raw cell value as a stripped string ('' if missing or blank)."""
+    value = row.get(col, "")
+    return "" if value is None else str(value).strip()
+
+
+def _row_problems(row: pd.Series, valid_types: set) -> List[str]:
+    """
+    Returns a list of type/format problems for a single CSV row (empty if the row is well-formed).
+
+    Expected types: Position #, Quantity, Quantity Out are ints; Trade Price and Exit Price are
+    floats; Date In is an IB-style datetime; Date Out is blank or an IB-style datetime; Position
+    Type is one of POSITION_TYPE_MAP's descriptions; Symbol parses via SecurityDescriptor.
+    """
+    issues: List[str] = []
+
+    if not _is_int(_cell(row, CSV_POSITION_NUM)):
+        issues.append(f"Position # {_cell(row, CSV_POSITION_NUM)!r} is not an integer")
+
+    date_in = _cell(row, CSV_DATE_IN)
+    if not date_in:
+        issues.append("Date In is blank")
+    elif not _is_ib_datetime(date_in):
+        issues.append(f"Date In {date_in!r} is not an IB-style datetime")
+
+    ptype = _cell(row, CSV_POSITION_TYPE)
+    if ptype not in valid_types:
+        issues.append(f"Position Type {ptype!r} is not a recognized position type")
+
+    if not _is_symbol(_cell(row, CSV_SYMBOL)):
+        issues.append(f"Symbol {_cell(row, CSV_SYMBOL)!r} is not a valid symbol")
+
+    if not _is_int(_cell(row, CSV_QUANTITY)):
+        issues.append(f"Quantity {_cell(row, CSV_QUANTITY)!r} is not an integer")
+
+    if not _is_float(_cell(row, CSV_TRADE_PRICE)):
+        issues.append(f"Trade Price {_cell(row, CSV_TRADE_PRICE)!r} is not a number")
+
+    date_out = _cell(row, CSV_DATE_OUT)
+    if date_out and not _is_ib_datetime(date_out):
+        issues.append(f"Date Out {date_out!r} is not an IB-style datetime or blank")
+
+    if not _is_int(_cell(row, CSV_QUANTITY_OUT)):
+        issues.append(f"Quantity Out {_cell(row, CSV_QUANTITY_OUT)!r} is not an integer")
+
+    if not _is_float(_cell(row, CSV_EXIT_PRICE)):
+        issues.append(f"Exit Price {_cell(row, CSV_EXIT_PRICE)!r} is not a number")
+
+    return issues
+
+
+def validate_positions_file(positions_file: str) -> List[str]:
+    """
+    Verifies the positions CSV is well-formed before any analysis runs.
+
+    Confirms every column in REQUIRED_COLUMNS is present at the top of the file, then checks that
+    every data row holds the expected type of data in each column (see _row_problems). Cells are read
+    as raw strings so wrong types are caught rather than silently coerced by pandas.
+
+    :param positions_file: path to the CSV
+    :return: list of human-readable problem messages (each malformed row includes its full contents);
+             empty if the file is valid
+    """
+    try:
+        df = pd.read_csv(positions_file, dtype=str, keep_default_na=False)
+    except Exception as ex:
+        return [f"Could not read CSV file {positions_file!r}: {ex}"]
+
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        # Without the required headers there's no point checking row contents.
+        return ["Missing required column(s): " + ", ".join(f"'{c}'" for c in missing)]
+
+    valid_types = set(POSITION_TYPE_MAP.values())
+    problems: List[str] = []
+    for idx, row in df.iterrows():
+        row_problems = _row_problems(row, valid_types)
+        if row_problems:
+            # +2: pandas rows are 0-based and the CSV's first line is the header, so row 0 is line 2.
+            line_no = idx + 2
+            contents = ", ".join(f"{col}={row[col]!r}" for col in REQUIRED_COLUMNS)
+            problems.append(f"Row {line_no}: " + "; ".join(row_problems) + f"\n    {contents}")
+    return problems
 
 
 def load_positions(
@@ -516,6 +653,16 @@ async def main(parser: argparse.ArgumentParser):
 
     basicConfig(filename="position_analyzer.log", level=INFO)
 
+    # Verify the CSV is well-formed as soon as it's loaded. If anything is wrong, report every
+    # problem (with the offending rows) and exit gracefully without doing anything else.
+    problems = validate_positions_file(args.positions_file)
+    if problems:
+        print(f"CSV validation failed for {args.positions_file}. The tool will not run until these are fixed:\n")
+        for problem in problems:
+            print(f"  - {problem}")
+        print("\nRecognized position types: " + ", ".join(sorted(set(POSITION_TYPE_MAP.values()))))
+        return
+
     # A broker must be chosen explicitly; there's no sensible default.
     if not args.ib and not args.schwab:
         print("No broker specified. Pass --ib (Interactive Brokers) or --schwab (Schwab).")
@@ -639,6 +786,9 @@ def build_parser() -> argparse.ArgumentParser:
               * The CSV must have columns: 'Position #', 'Date In', 'Position Type', 'Symbol',
                 'Quantity', 'Trade Price', 'Date Out', 'Quantity Out', 'Exit Price' (the
                 current_positions.csv format). Symbols are IB-style, e.g. SPY-C-20260821-800.0.
+              * The CSV is validated up front: if any required column is missing or any row has a
+                badly-typed field, the offending rows are printed and the tool exits without doing
+                anything else.
               * A negative Quantity indicates a short (sold) leg. 'Quantity Out' accumulates the
                 signed closing trades, so contracts still held = Quantity + Quantity Out.
             """),
