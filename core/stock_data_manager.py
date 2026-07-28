@@ -274,12 +274,11 @@ class StockDataManager:
         else:
             start_dt = get_datetime(start_date)
             head_timestamp_dt = await self._data_driver.get_head_timestamp(symbol, info_type)
-            if head_timestamp_dt is not None and self.is_head_timestamp_preceded_or_matched(
-                start_dt, head_timestamp_dt, bar_size
-            ):
-                # The start datetime precedes the datetime of the earliest available bar offered by the broker, so
-                # adjust it to match reality.
-                start_dt = self.adjust_timestamp(head_timestamp_dt, bar_size)
+            adjusted_head_timestamp_dt = self.get_adjusted_head_timestamp(head_timestamp_dt, bar_size)
+            if adjusted_head_timestamp_dt is not None and start_dt < adjusted_head_timestamp_dt:
+                # The start datetime precedes the adjust head timestamp, so move the start forward in time to
+                # match it.
+                start_dt = adjusted_head_timestamp_dt
                 start_date = get_datetime_as_str(start_dt)
 
         # Scrape data that's older than already-loaded data
@@ -331,8 +330,10 @@ class StockDataManager:
         Gets the metadata. If stock data for requested series is loaded in memory, compute metadata from that.
         If not loaded in memory, attempt to load metadata from DB.
 
-        Note on head timestamp: this is the earliest datetime for which data is available. If not knownn,
-        will be a datetime mapping to 1/1/3000.
+        Note on head timestamp / head date: this is the earliest datetime for which data is available from the broker.
+        If not known, will be a datetime mapping to 1/1/2200. It's best not to try to scrape data beginning at the head
+        date itself. Use get_adjusted_head_timestamp() to find the best date for earliest scraping, once the head date
+        is obtained from the broker.
 
         :param symbol: ticker symbol
         :param bar_size: --
@@ -370,46 +371,19 @@ class StockDataManager:
         return symbol, bar_size, info_type
 
     @staticmethod
-    def is_head_timestamp_preceded_or_matched(
-        test_dt: datetime, head_timestamp_dt: datetime, bar_size: BarSize
-    ) -> bool:
+    def get_adjusted_head_timestamp(head_timestamp_dt: Optional[datetime], bar_size: BarSize) -> Optional[datetime]:
         """
-        Helper function to determine if given date precedes or matches head timestamp (earliest available data
-        from broker). If weekly or monthly candles are being dealt with, then this function takes into account
-        that the head timestamp might not fall on a weekly boundary.
+        The 'adjusted' head timestamp is simply four weeks after the head timestamp. The idea is that we don't need
+        to go all the way back to the very start of a ticker's history. Sometimes the broker gets confused if we
+        request data from the beginning, even if the head timestamp would seem to suggest that it's there.
 
-        :param test_dt: datetime to test
-        :param head_timestamp_dt: datetime of earliest data available from broker
-        :param bar_size: size of candle
-        :return: If 'preceded' condition met
+        :param head_timestamp_dt: the actual head timestamp, as gotten from broker, or None
+        :param bar_size: 1d, 1w, etc.
+        :return: adjusted head timestamp or None
         """
-        if bar_size == BarSize.ONE_MONTH:
-            raise StockDataException("Monthly bars not supported (for now)")
-        if bar_size == BarSize.ONE_WEEK:
-            # If test date comes less than a week after head timestamp, then test date is considered to precede
-            # or match it.
-            return (test_dt - head_timestamp_dt).days < 7
-        return test_dt <= head_timestamp_dt
-
-    @staticmethod
-    def adjust_timestamp(timestamp_dt: datetime, bar_size: BarSize) -> datetime:
-        """
-        Adjusts timestamp to match weekly or monthly boundary
-
-        :param timestamp_dt: datetime to adjust
-        :param bar_size: size of candle
-        :return: adjusted timestamp
-        """
-        if bar_size == BarSize.ONE_MONTH:
-            raise StockDataException("Monthly bars not supported (for now)")
-        if bar_size == BarSize.ONE_WEEK:
-            # If timestamp does not fall on a Friday, move it forward by some number of days so that it
-            # does fall on a Friday. weekday() is Monday=0 ... Friday=4, so (4 - weekday) % 7 is the
-            # number of days to add (0 when already a Friday).
-            days_to_friday = (4 - timestamp_dt.weekday()) % 7
-            return timestamp_dt + timedelta(days=days_to_friday)
-        # No actual adjustment needed
-        return timestamp_dt
+        if head_timestamp_dt is None:
+            return None
+        return head_timestamp_dt + timedelta(days=28)
 
     async def get_iv_rank(
         self, symbol: str, cache_only: bool = False, acceptable_recency: int = 0
