@@ -73,10 +73,13 @@ async def do_cache(
     :return:
     """
     if scrape_level == ScrapeLevel.FULL:
+        # Go all the way back
         start_date = "19700101"
     elif scrape_level == ScrapeLevel.LIMITED:
+        # Go 200 bars back only
         start_date = get_datetime_as_str(current_datetime() - bar_size_to_time(bar_size) * 200, date_only=True)
     else:
+        # Recent only
         start_date = ""
 
     df = None
@@ -132,9 +135,8 @@ async def show_cache_contents(stock_manager: StockDataManager, bar_size_str: str
         out_line = f"Have entry for {key}, num bars: {num_bars}, earliest data: {earliest_date_str}, latest date: {latest_date_str}"
         if bars_then_to_now > 1:
             out_line += f" (newer data exists)"
-        if head_dt is not None and not StockDataManager.is_head_timestamp_preceded_or_matched(
-            earliest_dt, head_dt, bar_size
-        ):
+        head_dt = StockDataManager.get_adjusted_head_timestamp(head_dt, bar_size)
+        if head_dt is not None and earliest_dt < head_dt:
             out_line += f", available data begins at: {get_datetime_as_str(head_dt)} (not matched)"
         elif head_dt is None:
             out_line += ", no head timestamp established"
@@ -252,18 +254,17 @@ async def cache_multiple_stocks(
                         )
                         continue
                 else:
-                    # Does earliest data we actually have precede/match head timestamp?
-                    head_timestamp_preceded_or_matched = StockDataManager.is_head_timestamp_preceded_or_matched(
-                        earliest_dt, head_dt, bar_size
-                    )
-                    if head_timestamp_preceded_or_matched and bars_missing_until_now <= acceptable_recency:
+                    # Does earliest data we actually have precede/match adjusted head timestamp?
+                    adjusted_head_dt = StockDataManager.get_adjusted_head_timestamp(head_dt, bar_size)
+                    head_timestamp_matched = earliest_dt <= adjusted_head_dt
+                    if head_timestamp_matched and bars_missing_until_now <= acceptable_recency:
                         print(
                             f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data beginning on {earliest_dt} and ending on {latest_dt}"
                         )
                         continue
                     else:
                         print(
-                            f"Need data scrape for {symbol}. Head timestamp {head_dt} preceded/matched by {earliest_dt}: {head_timestamp_preceded_or_matched}, data recency {bars_missing_until_now}."
+                            f"Need data scrape for {symbol}. Head timestamp {head_dt} preceded/matched by {earliest_dt}: {head_timestamp_matched}, data recency {bars_missing_until_now}."
                         )
 
         scrape_level = ScrapeLevel.LIMITED if limited_scrape else ScrapeLevel.FULL

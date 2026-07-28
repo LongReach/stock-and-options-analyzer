@@ -6,7 +6,7 @@ I want a software tool that analyzes options positions I currently hold. I'm int
 
 ## More Detailed Instructions
 
-### Phase One
+### Phase One (Complete)
 
 You will find a CSV file, `data/options_trades_2026.csv`, which contains some open positions.
 
@@ -36,7 +36,7 @@ Please use a pandas dataframe for each row of output. `OptionData` provides acce
 
 The script will also output a final row, with the same columns the per-leg rows, except that all the values will apply to all the legs in aggregate. The output should be pretty-formatted. The rules for determining aggregate delta, theta, gamma, etc. for options positions are well-documented online.
 
-## Phase Two
+## Phase Two  (Complete)
 
 Please add two more filtering arguments, `--position-num` and `--position-type`.
 
@@ -55,4 +55,12 @@ Please add two more filtering arguments, `--position-num` and `--position-type`.
 
 ## Phase Three
 
-Will be written later.
+Add support for an optional `--show` argument. If given, the tool will show all positions currently held, as specified by the given CSV file. No other functionality will be exercised.
+
+What will be shown will be a pretty-printed table with the following columns:
+* Position Number: see `D:\CodingProjects\Python\TWS2025\data\current_positions.csv` as a reference
+* Symbol: since there might be multiple contracts per position, strip then down to the underlying ticker that they have in common (e.g. SPY, QQQ, INTC) and display that
+* Entry date: display the earliest entry date for any of the legs in the position
+* Cost basis: for the whole position, with negative values representing overall credit collected
+* Realized P/L
+* Unrealized P/L
