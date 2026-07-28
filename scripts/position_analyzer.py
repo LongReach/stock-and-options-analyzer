@@ -38,6 +38,7 @@ CONTRACT_MULTIPLIER = 100
 # CSV column names (current_positions.csv format:
 # Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price)
 CSV_POSITION_NUM = "Position #"
+CSV_DATE_IN = "Date In"
 CSV_POSITION_TYPE = "Position Type"
 CSV_SYMBOL = "Symbol"
 CSV_QUANTITY = "Quantity"
@@ -88,6 +89,21 @@ OUTPUT_COLUMNS = [
     COL_THETA,
     COL_GAMMA,
     COL_VEGA,
+]
+
+# Column names for the --show summary table (one row per whole position)
+COL_SHOW_SYMBOL = "Symbol"
+COL_ENTRY_DATE = "Entry Date"
+COL_COST_BASIS = "Cost Basis"
+COL_UNREALIZED = "Unrealized"
+
+SHOW_COLUMNS = [
+    COL_POSITION_NUM,
+    COL_SHOW_SYMBOL,
+    COL_ENTRY_DATE,
+    COL_COST_BASIS,
+    COL_REALIZED,
+    COL_UNREALIZED,
 ]
 
 _logger = getLogger(__name__)
@@ -348,6 +364,125 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print()
 
 
+def _entry_date_token(value) -> str:
+    """Extracts the date portion (e.g. '20260713') from a 'Date In' cell, or '' if blank/missing."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    # 'Date In' looks like '20260713 09:30:00 US/Eastern' (or just '20260716'); keep the date token.
+    return text.split()[0]
+
+
+def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
+    """
+    Rolls the per-leg CSV rows up into one summary row per whole position for the --show table.
+
+    Only positions that are still (partially) held are included: a position drops out once every one
+    of its legs has been fully closed (Held == 0 for all legs).
+
+    Per position the following are computed:
+      * Symbol: the underlying ticker the legs share (joined with '/' in the unusual case they differ).
+      * Entry Date: the earliest 'Date In' date across the legs.
+      * Cost Basis: net entry premium = sum(Trade Price * Quantity * 100). Positive is a net debit
+        paid; negative is a net credit collected.
+      * Realized: dollars of realized P/L on any closed portions = sum(-Quantity Out * (Exit Price -
+        Trade Price) * 100).
+      * Unrealized: dollars of unrealized P/L on contracts still held = sum((Current Price -
+        Trade Price) * Held * 100).
+
+    :param positions_df: positions loaded from the CSV (one row per leg)
+    :param infos: OptionInfo per leg (aligned with positions_df), None where market data was unavailable
+    :return: DataFrame with SHOW_COLUMNS, one row per currently-held position
+    """
+    records = []
+    for (_, pos_row), info in zip(positions_df.iterrows(), infos):
+        descriptor = SecurityDescriptor(pos_row[CSV_SYMBOL])
+        quantity = _csv_int(pos_row, CSV_QUANTITY)
+        quantity_out = _csv_int(pos_row, CSV_QUANTITY_OUT)
+        trade_price = _csv_float(pos_row, CSV_TRADE_PRICE)
+        exit_price = _csv_float(pos_row, CSV_EXIT_PRICE)
+
+        held = quantity + quantity_out
+        realized = -quantity_out * (exit_price - trade_price) * CONTRACT_MULTIPLIER
+        cost_basis = trade_price * quantity * CONTRACT_MULTIPLIER
+        # A fully-closed leg (held == 0) contributes no unrealized P/L, and needs no market data.
+        if held != 0 and info is not None:
+            unrealized = (info.price - trade_price) * held * CONTRACT_MULTIPLIER
+        else:
+            unrealized = 0.0
+
+        records.append(
+            {
+                "pos_num": pos_row[CSV_POSITION_NUM],
+                "ticker": descriptor.ticker,
+                "entry": _entry_date_token(pos_row.get(CSV_DATE_IN)),
+                "held_abs": abs(held),
+                "cost_basis": cost_basis,
+                "realized": realized,
+                "unrealized": unrealized,
+            }
+        )
+
+    legs = pd.DataFrame(records)
+    rows = []
+    # sort=False keeps positions in the order they first appear in the CSV.
+    for pos_num, group in legs.groupby("pos_num", sort=False):
+        # Skip positions with nothing left held (fully closed).
+        if group["held_abs"].sum() == 0:
+            continue
+        tickers = sorted(set(group["ticker"]))
+        entries = [e for e in group["entry"] if e]
+        rows.append(
+            {
+                COL_POSITION_NUM: pos_num,
+                COL_SHOW_SYMBOL: "/".join(tickers),
+                COL_ENTRY_DATE: min(entries) if entries else "",
+                COL_COST_BASIS: group["cost_basis"].sum(),
+                COL_REALIZED: group["realized"].sum(),
+                COL_UNREALIZED: group["unrealized"].sum(),
+            }
+        )
+    return pd.DataFrame(rows, columns=SHOW_COLUMNS)
+
+
+def print_show_table(df: pd.DataFrame):
+    """Pretty-prints the --show summary table (one row per position) with a totals row."""
+    total = {
+        COL_POSITION_NUM: "TOTAL",
+        COL_SHOW_SYMBOL: "",
+        COL_ENTRY_DATE: "",
+        COL_COST_BASIS: df[COL_COST_BASIS].sum(),
+        COL_REALIZED: df[COL_REALIZED].sum(),
+        COL_UNREALIZED: df[COL_UNREALIZED].sum(),
+    }
+    combined = pd.concat([df, pd.DataFrame([total], columns=SHOW_COLUMNS)], ignore_index=True)
+
+    display = pd.DataFrame(columns=SHOW_COLUMNS)
+    display[COL_POSITION_NUM] = combined[COL_POSITION_NUM].astype(str)
+    display[COL_SHOW_SYMBOL] = combined[COL_SHOW_SYMBOL].astype(str)
+    display[COL_ENTRY_DATE] = combined[COL_ENTRY_DATE].astype(str)
+    for col in (COL_COST_BASIS, COL_REALIZED, COL_UNREALIZED):
+        display[col] = combined[col].apply(lambda v: _fmt(v, 2))
+
+    lines = display.to_string(index=False).splitlines()
+    table_width = max(len(line) for line in lines)
+
+    print("\nPositions held")
+    print("=" * table_width)
+    # All rows except the last are individual positions; the last row is the totals row.
+    for line in lines[:-1]:
+        print(line)
+    print("-" * table_width)
+    print(lines[-1])
+    print("=" * table_width)
+
+    print("\nNote: Cost Basis is net entry premium (Trade Price * Quantity * 100); negative = credit")
+    print("      collected. Realized is closed-portion P/L; Unrealized is on contracts still held.")
+    print()
+
+
 async def print_expected_moves(data_driver: BaseDriver, tickers: List[str]):
     """
     Prints each underlying's expected 1-day move (one standard deviation), using the broker's current implied
@@ -389,26 +524,33 @@ async def main(parser: argparse.ArgumentParser):
     # Resolve the short --position-type code (e.g. "IC") to the full CSV name (e.g. "Iron Condor").
     position_type = POSITION_TYPE_MAP[args.position_type] if args.position_type else None
 
-    positions_df = load_positions(
-        args.positions_file,
-        args.symbol,
-        args.expiration,
-        position_num=args.position_num,
-        position_type=position_type,
-    )
+    # --show ignores the narrowing filters: it lists every currently-held position in the CSV.
+    if args.show:
+        positions_df = load_positions(args.positions_file, None, None)
+    else:
+        positions_df = load_positions(
+            args.positions_file,
+            args.symbol,
+            args.expiration,
+            position_num=args.position_num,
+            position_type=position_type,
+        )
     if len(positions_df) == 0:
-        print("No positions match the given filters.")
+        print("No positions found." if args.show else "No positions match the given filters.")
         return
 
-    print(f"Analyzing {len(positions_df)} option leg(s) from {args.positions_file}")
-    if args.symbol:
-        print(f"  Filtered to underlying: {args.symbol}")
-    if args.expiration:
-        print(f"  Filtered to expiration: {args.expiration}")
-    if args.position_num is not None:
-        print(f"  Filtered to position #: {args.position_num}")
-    if position_type:
-        print(f"  Filtered to position type: {position_type} ({args.position_type})")
+    if args.show:
+        print(f"Showing positions from {args.positions_file}")
+    else:
+        print(f"Analyzing {len(positions_df)} option leg(s) from {args.positions_file}")
+        if args.symbol:
+            print(f"  Filtered to underlying: {args.symbol}")
+        if args.expiration:
+            print(f"  Filtered to expiration: {args.expiration}")
+        if args.position_num is not None:
+            print(f"  Filtered to position #: {args.position_num}")
+        if position_type:
+            print(f"  Filtered to position type: {position_type} ({args.position_type})")
 
     print("Please wait...")
     option_manager = OptionDataManager()
@@ -427,6 +569,15 @@ async def main(parser: argparse.ArgumentParser):
 
     try:
         _, infos = await collect_leg_data(option_manager, positions_df)
+
+        if args.show:
+            show_df = build_show_dataframe(positions_df, infos)
+            if len(show_df) == 0:
+                print("No positions are currently held.")
+            else:
+                print_show_table(show_df)
+            return
+
         output_df = build_output_dataframe(positions_df, infos)
         aggregate, unrealized_pl, realized_pl = build_aggregate_row(output_df)
         print_analysis(output_df, aggregate, unrealized_pl, realized_pl)
@@ -478,6 +629,11 @@ def build_parser() -> argparse.ArgumentParser:
               # Narrow to one position number, or to all positions of a given type
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-num 2
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
+
+              # Show a one-row-per-position summary of everything currently held
+              # (current_positions.csv carries the Date In / Quantity Out / Exit Price columns that
+              #  entry date and realized P/L are computed from)
+              python -m scripts.position_analyzer --positions-file .\\data\\current_positions.csv --ib --show
 
             Notes:
               * The CSV must have columns: 'Position #', 'Date In', 'Position Type', 'Symbol',
@@ -534,6 +690,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=list(POSITION_TYPE_MAP.keys()),
         type=str,
+    )
+    parser.add_argument(
+        "--show",
+        help="Show a summary table of every currently-held position (one row per position: symbol, "
+        "entry date, cost basis, realized and unrealized P/L). The narrowing filters are ignored.",
+        action="store_true",
     )
     return parser
 
