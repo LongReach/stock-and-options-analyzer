@@ -105,7 +105,7 @@ class SecurityDescriptor:
 
     def __init__(self, symbol_full: str):
         self.symbol_full: str = symbol_full
-        _ticker, _right, _exp, _strike  = self.from_string(symbol_full)
+        _ticker, _right, _exp, _strike = self.from_string(symbol_full)
         self.ticker = _ticker
         self.is_opt: bool = _right is not None
         self.right: Optional[str] = _right
