@@ -105,18 +105,12 @@ class SecurityDescriptor:
 
     def __init__(self, symbol_full: str):
         self.symbol_full: str = symbol_full
-        parts = symbol_full.split("-")
-        self.is_opt: bool = False
-        self.right: Optional[str] = None
-        self.expiration: Optional[str] = None
-        self.strike: Optional[float] = None
-        if len(parts) >= 1:
-            self.ticker = parts[0]
-        if len(parts) > 1:
-            self.is_opt = True
-            self.right = parts[1]
-            self.expiration = parts[2]
-            self.strike = float(parts[3])
+        _ticker, _right, _exp, _strike  = self.from_string(symbol_full)
+        self.ticker = _ticker
+        self.is_opt: bool = _right is not None
+        self.right: Optional[str] = _right
+        self.expiration: Optional[str] = _exp
+        self.strike: Optional[float] = _strike
 
     def is_option(self):
         """Returns True if this is a descriptor for an option contract"""
@@ -132,6 +126,36 @@ class SecurityDescriptor:
             return f"{self.ticker}-{self.right}-{self.expiration}-{self.strike:.2f}"
         else:
             return f"{self.ticker}"
+
+    @staticmethod
+    def from_string(symbol_full: str) -> Tuple[str, Optional[str], Optional[str], Optional[float]]:
+        """
+        Decompose a symbol into its component parts. Example symbols: "SPY", "SPY-C-20250627-600.0"
+        :param symbol_full: symbol as str
+        :return: (underlying, right or None, expiration or None, strike or None)
+        :raises CoreException: if symbol can't be processed
+        """
+        ticker: str = ""
+        right: Optional[str] = None
+        expiration: Optional[str] = None
+        strike: Optional[float] = None
+        if symbol_full is None or len(symbol_full) == 0:
+            raise CoreException("Symbol is empty")
+        parts = symbol_full.split("-")
+        if not (1 <= len(parts) <= 4):
+            raise CoreException(f"Symbol {symbol_full} lacks correct number of parts")
+        if len(parts) >= 1:
+            ticker = parts[0]
+        if len(parts) > 1:
+            right = parts[1]
+            if right not in ["C", "P"]:
+                raise CoreException(f"Symbol {symbol_full} doesn't specify correct right")
+            expiration = parts[2]
+            try:
+                strike = float(parts[3])
+            except:
+                raise CoreException(f"Symbol {symbol_full} lacks correctly-formatted strike")
+        return ticker, right, expiration, strike
 
     @classmethod
     def create(
