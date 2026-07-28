@@ -53,7 +53,7 @@ Please add two more filtering arguments, `--position-num` and `--position-type`.
 * DIAG: maps to "Diagonal"
 * DDIAG: maps to "Double Diagonal"
 
-## Phase Three
+## Phase Three (Complete)
 
 Add support for an optional `--show` argument. If given, the tool will show all positions currently held, as specified by the given CSV file. No other functionality will be exercised.
 
@@ -64,3 +64,23 @@ What will be shown will be a pretty-printed table with the following columns:
 * Cost basis: for the whole position, with negative values representing overall credit collected
 * Realized P/L
 * Unrealized P/L
+
+## Phase Four
+
+As soon as the CSV is loaded, make the tool verify that these columns are all present:
+Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price
+
+The tool should complain if any of these headers aren't present at the stop of the CSV. Also, it'll complain if any row is malformed. What malformed means is that some field is missing or contains the wrong type of data. Expected types by column:
+* Position #: should be an `int`
+* Date In: should be an IB-style datatime, e.g. "20260717 09:58:57 US/Eastern"
+* Position Type: Should conform to a description found in `POSITION_TYPE_MAP`, e.g. "Double Diagonal"
+* Symbol: should be a symbol in my preferred format, e.g. "SPY" or "SPY-C-20250627-600.0". Use `SecurityDescriptor.from_string()` for verification.
+* Quantity: should be an `int`
+* Trade Price: should be a `float`
+* Date Out: should be an IB-style datatime, e.g. "20260717 09:58:57 US/Eastern", or else blank
+* Quantity Out: should be an `int`
+* Exit Price: should be a `float`
+
+If any complaints happen, the tool should exit gracefully without doing anything else. Please print the contents of any problem rows for the user's reference.
+
+Please don't do anything fancy with git. Just work in the current branch, which is `misc`.
