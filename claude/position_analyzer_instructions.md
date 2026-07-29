@@ -65,7 +65,7 @@ What will be shown will be a pretty-printed table with the following columns:
 * Realized P/L
 * Unrealized P/L
 
-## Phase Four
+## Phase Four (Complete)
 
 As soon as the CSV is loaded, make the tool verify that these columns are all present:
 Position #,Date In,Position Type,Symbol,Quantity,Trade Price,Date Out,Quantity Out,Exit Price
