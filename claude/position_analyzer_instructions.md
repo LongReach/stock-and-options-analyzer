@@ -84,3 +84,24 @@ The tool should complain if any of these headers aren't present at the stop of t
 If any complaints happen, the tool should exit gracefully without doing anything else. Please print the contents of any problem rows for the user's reference.
 
 Please don't do anything fancy with git. Just work in the current branch, which is `misc`.
+
+## Phase Five
+
+### Step 1
+
+The tool prints an expected next-day move, like so:
+```
+Expected next-day move (1 std dev)
+------------------------------------------------------------
+  SPY    price     735.51  IV  0.5690  move +/-  21.91  (713.60 to 757.42)
+```
+
+After the expected move is printed, have the tool print an expected move loss. Use the following formula:
+```
+expected_move_loss = abs(delta) * expected_move + 0.5 * abs(gamma) * expected_move * expected_move 
+```
+
+Note that "max loss" / "maximum loss" language is reserved for the maximum possible loss on the position as
+a whole, so it must not be used for this quantity.
+
+The values of `delta` and `gamma` are from the position as a whole.
