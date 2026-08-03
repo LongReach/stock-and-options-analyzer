@@ -154,6 +154,9 @@ async def perform_scan(stock_manager: StockDataManager, test_type: int, bar_size
     for symbol, score in sorted_data.items():
         print(f"Score for symbol {symbol} is {score}")
 
+    keys = sorted_data.keys()
+    print(f"\nTickers: {",".join(keys)}")
+
 
 async def main(parser: argparse.ArgumentParser):
     """Top-level function, unpacks arguments and calls functions that do the work"""

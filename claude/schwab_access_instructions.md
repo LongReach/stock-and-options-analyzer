@@ -137,7 +137,7 @@ In `BaseDriver`, I've added the function `get_implied_volatility()`. Please prov
 
 Make `position_analyzer.py` display the expected move over the next day for the underlying stock/ETF. The function for calculating expected move is `calculate_expected_move()` in `utils.py`.
 
-##### Step 7
+##### Step 7 (Complete)
 
 Once again, we're going to modify the rules of how `scripts/get_schwab_trades.py` works. This will only apply if a positions file (CSV) is given to the tool.
 
@@ -148,3 +148,13 @@ For each trade, if it matches an existing position row in terms of symbol (we no
 4. Do nothing. If the user selects this choice, the trade's info is simply discarded.
 
 Before the menu is presented to the user, the tool should also display all the fields for the relevant position row, for the user's reference, as well as the contents of the trade entry.
+
+##### Step 8
+
+In Step 7, I asked you to make code that presented the user with a menu of four choices. I'd like to maintain that functionality, but present some extra info before the user makes a choice.
+
+If the quantity associated with the trade has the same sign as the "Quantity" field of the position in question, the user will be alerted "*** NOTICE: this trade might have already been accounted for as a position entry. ***". 
+
+If the quantity associated with the trade has the same sign as the "Quantity Out" field of the position in question, the user will be alerted "*** NOTICE: this trade might have already been accounted for as a position exit. ***". However, the notice won't be shown if the "Quantity Out" field's value is 0.
+
+Despite the notices, the user still gets to choose an action, as before. 

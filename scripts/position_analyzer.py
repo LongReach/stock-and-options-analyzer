@@ -620,16 +620,43 @@ def print_show_table(df: pd.DataFrame):
     print()
 
 
-async def print_expected_moves(data_driver: BaseDriver, tickers: List[str]):
+def calculate_expected_move_loss(delta: float, gamma: float, expected_move: float) -> float:
+    """
+    Estimates a position's one-day loss if the underlying makes its expected (one standard deviation) move
+    against it, using the position's delta/gamma exposure:
+
+        expected move loss = abs(delta) * move + 0.5 * abs(gamma) * move^2
+
+    Both Greeks are taken in absolute value, so the result is the loss under whichever direction hurts: the
+    delta term is the directional exposure, and the gamma term is the second-order add-on that a short-gamma
+    position pays on a large move.
+
+    This is a local estimate at one standard deviation, NOT the position's maximum possible loss -- the true
+    worst case is set by the position's structure at expiration and is generally much larger.
+
+    :param delta: position delta (aggregated over all legs, per $1 of underlying)
+    :param gamma: position gamma (aggregated over all legs)
+    :param expected_move: one standard deviation move in the underlying, in dollars
+    :return: estimated expected-move loss in dollars (always non-negative)
+    """
+    return abs(delta) * expected_move + 0.5 * abs(gamma) * expected_move * expected_move
+
+
+async def print_expected_moves(data_driver: BaseDriver, tickers: List[str], delta: float, gamma: float):
     """
     Prints each underlying's expected 1-day move (one standard deviation), using the broker's current implied
     volatility and most recent price: expected move = price * IV * sqrt(1 / 365) (see calculate_expected_move).
+    Each expected move is then turned into an expected move loss for the position as a whole (see
+    calculate_expected_move_loss).
 
     :param data_driver: connected broker driver
     :param tickers: distinct underlying symbols to report on
+    :param delta: position delta, aggregated over all filtered legs
+    :param gamma: position gamma, aggregated over all filtered legs
     """
     print("\nExpected next-day move (1 std dev)")
     print("-" * 60)
+    moves = {}
     for ticker in tickers:
         implied_vol = await data_driver.get_implied_volatility(ticker)
         recent, error_str = await data_driver.get_most_recent_data(
@@ -640,10 +667,31 @@ async def print_expected_moves(data_driver: BaseDriver, tickers: List[str]):
             continue
         price = recent[0]["close"]
         move = calculate_expected_move(price, implied_vol, 1)
+        moves[ticker] = move
         print(
             f"  {ticker:<6} price {price:>10.2f}  IV {implied_vol:>7.4f}  "
             f"move +/-{move:>7.2f}  ({price - move:.2f} to {price + move:.2f})"
         )
+    print()
+
+    if not moves:
+        return
+
+    print("Expected move loss")
+    print("-" * 60)
+    print(f"  Position delta {delta:>10.4f}   gamma {gamma:>10.5f}")
+    for ticker, move in moves.items():
+        move_loss = calculate_expected_move_loss(delta, gamma, move)
+        print(f"  {ticker:<6} move +/-{move:>7.2f}  expected move loss {move_loss:>12.2f}")
+    print()
+    print("Note: expected move loss = |delta| * move + 0.5 * |gamma| * move^2, using the position's")
+    print("      aggregate delta and gamma against a one standard deviation move in the underlying.")
+    print("      This is the loss if the underlying moves one std dev against the position; it is NOT")
+    print("      the position's maximum possible loss, which is set by its structure at expiration.")
+    if len(moves) > 1:
+        print("      The position spans more than one underlying, so the aggregate Greeks cover all of")
+        print("      them; each row moves only its own underlying. Filter with --symbol for a per-")
+        print("      underlying figure.")
     print()
 
 
@@ -731,7 +779,7 @@ async def main(parser: argparse.ArgumentParser):
 
         # Expected next-day move for each distinct underlying among the filtered legs.
         tickers = sorted({SecurityDescriptor(symbol).ticker for symbol in positions_df[CSV_SYMBOL]})
-        await print_expected_moves(data_driver, tickers)
+        await print_expected_moves(data_driver, tickers, aggregate[COL_DELTA], aggregate[COL_GAMMA])
     except asyncio.CancelledError:
         print("Program cancelled by user.")
     except Exception as ex:

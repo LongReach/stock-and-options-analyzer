@@ -185,6 +185,24 @@ class SecurityDescriptor:
         return descriptor
 
 
+class MultiSecurityDescriptor:
+
+    def __init__(self, group_name: str):
+        self.group_name = group_name
+        self.legs: List[SecurityDescriptor] = []
+        self.ratios: List[int] = []
+
+    def add_leg(self, security_descriptor: SecurityDescriptor, ratio: int = 1):
+        self.legs.append(security_descriptor)
+        self.ratios.append(ratio)
+
+    def is_single(self):
+        return len(self.legs) == 1
+
+    def is_multi(self):
+        return len(self.legs) > 1
+
+
 class DataBar:
     """Generic representation of a bar of data."""
 
@@ -427,31 +445,32 @@ class OptionsStructure:
     """
 
     def __init__(self, structure_type: OptionsStructureType):
-        self._structure_type = structure_type
+        self._structure_type: OptionsStructureType = structure_type
         self._legs: List[OptionInfo] = []
-        self._leg_actions: List[int] = []
+        self._leg_ratios: List[int] = []
 
     def get_type(self) -> OptionsStructureType:
         """Returns type of structure, e.g. VERTICAL_SPREAD or IRON_CONDOR"""
         return self._structure_type
 
-    def add_leg(self, leg: OptionInfo, action: int):
+    def add_leg(self, leg: OptionInfo, ratio: int):
         """
         Adds a leg to the structure
 
         :param leg: info about the leg -- strike, expiration, etc.
-        :param action: 1 if leg is to be bought (long), -1 if to be sold (short)
+        :param ratio: number of contracts relative to base number, with positive or negative indicating long or short.
+            E.g. a butterfly spread will have ratios of 1, -2, and 1 -- 2 short puts at the same strike
         """
         self._legs.append(leg)
-        self._leg_actions.append(action)
+        self._leg_ratios.append(ratio)
 
     def get_legs(self) -> List[OptionInfo]:
         """Returns list of OptionInfos, one for each leg"""
         return self._legs
 
-    def get_leg_actions(self) -> List[int]:
-        """Return list of leg actions. For each leg, it's 1 if leg is long, -1 if leg is short"""
-        return self._leg_actions
+    def get_leg_ratios(self) -> List[int]:
+        """Return list of leg ratios."""
+        return self._leg_ratios
 
 
 class OrderInfo:
