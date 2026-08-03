@@ -36,6 +36,9 @@ tool prints the matching row(s) and the trade, then prompts the user to choose w
   3. New leg            -- a new row is created from the trade (as in the no-match case).
   4. Do nothing         -- the trade is discarded.
 (When more than one row matches the symbol, the user is first asked which row the choice applies to.)
+Before the menu, advisory notices appear when the trade's quantity shares a sign with the row's "Quantity" (it
+may already be counted as an entry) or with its "Quantity Out" (it may already be counted as an exit). They do
+not change the available choices.
 Datetimes we write use IB-style datetimes with a time, e.g. "20260513 09:30:00 US/Eastern". Rows are written
 back ordered by "Position #".
 
@@ -197,6 +200,28 @@ def _print_trade(trade: TradeDescriptor, trade_dt: str):
     print(f"    Datetime: {trade_dt}")
 
 
+def _same_sign(first: int, second: int) -> bool:
+    """True when both values are non-zero and point the same way (zero has no sign, so it never matches)."""
+    return first > 0 and second > 0 or first < 0 and second < 0
+
+
+def _print_notices(row: dict, trade: TradeDescriptor):
+    """
+    Warns when the trade looks like it may already be reflected in the row, so the user doesn't double-count it.
+
+    A trade whose quantity has the same sign as the row's "Quantity" moves the entry in the direction the entry
+    was already built, which is what a re-imported entry fill would look like; likewise for "Quantity Out" and
+    exits. Both notices can fire at once. Neither blocks the menu -- they are advisory, and the user still picks
+    the action.
+    """
+    trade_qty = trade.quantity
+    if _same_sign(trade_qty, _to_int(row.get(COL_QUANTITY))):
+        print("    *** NOTICE: this trade might have already been accounted for as a position entry. ***")
+    # A zero "Quantity Out" means nothing has been exited yet, so there is nothing to have double-counted.
+    if _same_sign(trade_qty, _to_int(row.get(COL_QUANTITY_OUT))):
+        print("    *** NOTICE: this trade might have already been accounted for as a position exit. ***")
+
+
 def _prompt(message: str, valid: set) -> str:
     """Prompts until the user enters one of the valid responses (matched case-insensitively, trimmed)."""
     while True:
@@ -255,6 +280,7 @@ def apply_trade_to_rows(trade: TradeDescriptor, rows: List[dict], next_num: List
 
     print("  Matching position row:")
     _print_row(target)
+    _print_notices(target, trade)
     print("  Choose an action:")
     print("    1. Add to position (increase Quantity, average Trade Price)")
     print("    2. Exit / partially exit (increase Quantity Out, average Exit Price, set Date Out)")

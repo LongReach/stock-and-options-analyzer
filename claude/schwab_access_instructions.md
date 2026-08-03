@@ -149,7 +149,7 @@ For each trade, if it matches an existing position row in terms of symbol (we no
 
 Before the menu is presented to the user, the tool should also display all the fields for the relevant position row, for the user's reference, as well as the contents of the trade entry.
 
-##### Step 8
+##### Step 8 (Complete)
 
 In Step 7, I asked you to make code that presented the user with a menu of four choices. I'd like to maintain that functionality, but present some extra info before the user makes a choice.
 
