@@ -122,11 +122,13 @@ The second will be the "Closed positions" table. It will be the same as "Positio
 
 If no held positions or closed positions exist, simply don't display the applicable table.
 
-### Step 3 (Don't Implement Yet)
+### Step 3 (Complete)
 
 The position analyzer will take a new argument, `--xlsx`. If given and `--positions-file` is also given, the tool will generate an Excel spreadsheet. I plan to import these spreadsheets into my Google Drive.
 
 The spreadsheet will have two pages, "Positions" and "Legs".
+
+If new Python packages need to be installed for spreadsheet functionality, I'd that to be done in my conda environment: `options_2025_1`
 
 #### The "Legs" Page
 

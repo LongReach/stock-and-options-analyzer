@@ -7,6 +7,10 @@ import argparse
 import textwrap
 import traceback
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
 from core.base_driver import BaseDriver
 from core.common import SecurityDescriptor, OptionInfo, BarSize, RequestedInfoType, CoreException
 from core.options_data import OptionData, OptionDataException
@@ -121,6 +125,63 @@ SHOW_COLUMNS = [
     COL_REALIZED,
     COL_UNREALIZED,
 ]
+
+# --xlsx workbook layout. The "Positions" sheet is the --show rollup plus a "Closed" marker column;
+# the "Legs" sheet is the per-leg analysis minus the Greeks.
+COL_CLOSED = "Closed"
+
+XLSX_POSITION_COLUMNS = [
+    COL_POSITION_NUM,
+    COL_SHOW_SYMBOL,
+    COL_ENTRY_DATE,
+    COL_COST_BASIS,
+    COL_REALIZED,
+    COL_UNREALIZED,
+    COL_CLOSED,
+]
+
+XLSX_LEG_COLUMNS = [
+    COL_CONTRACT,
+    COL_POSITION_NUM,
+    COL_POSITION_TYPE,
+    COL_QUANTITY,
+    COL_HELD,
+    COL_TRADE_PRICE,
+    COL_CUR_EXIT_PRICE,
+    COL_REALIZED,
+]
+
+# Columns whose TEXT is colored by sign (green positive / red negative / black zero), per sheet.
+XLSX_SIGN_FONT_COLUMNS = {
+    "Positions": [COL_COST_BASIS],
+    "Legs": [COL_QUANTITY, COL_HELD],
+}
+# Columns whose BACKGROUND is colored by sign (green positive / red negative / no fill at zero).
+XLSX_SIGN_FILL_COLUMNS = {
+    "Positions": [COL_REALIZED, COL_UNREALIZED],
+    "Legs": [COL_REALIZED],
+}
+
+# Excel's conventional green/red pairing, so the sheets look native in Excel and Google Sheets alike.
+_XL_GREEN_FONT = Font(color="FF006100")
+_XL_RED_FONT = Font(color="FF9C0006")
+_XL_GREEN_FILL = PatternFill(start_color="FFC6EFCE", end_color="FFC6EFCE", fill_type="solid")
+_XL_RED_FILL = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
+_XL_HEADER_FONT = Font(bold=True)
+
+_XL_MONEY_FORMAT = "0.00"
+_XL_INT_FORMAT = "0"
+# Per-column Excel number formats; anything unlisted is left as text/general.
+XLSX_NUMBER_FORMATS = {
+    COL_POSITION_NUM: _XL_INT_FORMAT,
+    COL_QUANTITY: _XL_INT_FORMAT,
+    COL_HELD: _XL_INT_FORMAT,
+    COL_TRADE_PRICE: _XL_MONEY_FORMAT,
+    COL_CUR_EXIT_PRICE: _XL_MONEY_FORMAT,
+    COL_COST_BASIS: _XL_MONEY_FORMAT,
+    COL_REALIZED: _XL_MONEY_FORMAT,
+    COL_UNREALIZED: _XL_MONEY_FORMAT,
+}
 
 _logger = getLogger(__name__)
 
@@ -647,6 +708,135 @@ def print_show_note():
     print()
 
 
+def build_positions_page_xlsx(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
+    """
+    Builds the "Positions" sheet for --xlsx output. This function serves XLSX generation only; the --show
+    tables call build_show_dataframe() directly, since they print held and closed positions separately.
+
+    Uses the same rollup as those tables, but merges held and closed positions into one frame ordered by
+    Position #, with a "Closed" column marking the closed ones with "X".
+
+    :param positions_df: positions loaded from the CSV (one row per leg)
+    :param infos: OptionInfo per leg (aligned with positions_df), None where market data was unavailable
+    :return: DataFrame with XLSX_POSITION_COLUMNS
+    """
+    held = build_show_dataframe(positions_df, infos)
+    closed = build_show_dataframe(positions_df, infos, closed=True)
+    held[COL_CLOSED] = ""
+    closed[COL_CLOSED] = "X"
+
+    combined = pd.concat([held, closed], ignore_index=True)
+    if len(combined) == 0:
+        return pd.DataFrame(columns=XLSX_POSITION_COLUMNS)
+    # Position # comes from the CSV as text in some rows, so sort on a numeric view of it.
+    order = pd.to_numeric(combined[COL_POSITION_NUM], errors="coerce")
+    combined = combined.assign(_order=order).sort_values("_order", kind="stable").drop(columns="_order")
+    return combined.reset_index(drop=True)[XLSX_POSITION_COLUMNS]
+
+
+def _xl_number(value):
+    """Converts a cell value for Excel: NaN/None become blank cells, everything else passes through."""
+    try:
+        if value is None or pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def _xl_sign(value) -> int:
+    """Returns 1, -1, or 0 for a cell's sign; blanks and non-numerics count as 0 (no coloring)."""
+    try:
+        if value is None or pd.isna(value):
+            return 0
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if number > 0:
+        return 1
+    return -1 if number < 0 else 0
+
+
+def _write_xlsx_sheet(worksheet, df: pd.DataFrame, columns: List[str], font_cols: List[str], fill_cols: List[str]):
+    """
+    Writes one DataFrame to a worksheet: bold frozen header, per-column number formats, sign coloring, and
+    column widths sized to the content.
+
+    :param worksheet: openpyxl worksheet to fill
+    :param df: rows to write
+    :param columns: columns to write, in order
+    :param font_cols: columns whose text is colored by sign
+    :param fill_cols: columns whose background is colored by sign
+    """
+    worksheet.append(list(columns))
+    for cell in worksheet[1]:
+        cell.font = _XL_HEADER_FONT
+        cell.alignment = Alignment(horizontal="center")
+
+    for _, row in df.iterrows():
+        worksheet.append([_xl_number(row[col]) for col in columns])
+
+    for col_index, col in enumerate(columns, start=1):
+        number_format = XLSX_NUMBER_FORMATS.get(col)
+        color_font = col in font_cols
+        color_fill = col in fill_cols
+        widest = len(str(col))
+
+        for row_index, value in enumerate(df[col], start=2):
+            cell = worksheet.cell(row=row_index, column=col_index)
+            if number_format:
+                cell.number_format = number_format
+            sign = _xl_sign(value) if (color_font or color_fill) else 0
+            if color_font and sign:
+                cell.font = _XL_GREEN_FONT if sign > 0 else _XL_RED_FONT
+            if color_fill and sign:
+                cell.fill = _XL_GREEN_FILL if sign > 0 else _XL_RED_FILL
+            # Approximate the rendered width: money columns show two decimals.
+            if number_format == _XL_MONEY_FORMAT and _xl_number(value) is not None:
+                shown = f"{float(value):.2f}"
+            else:
+                shown = "" if _xl_number(value) is None else str(value)
+            widest = max(widest, len(shown))
+
+        worksheet.column_dimensions[get_column_letter(col_index)].width = widest + 3
+
+    worksheet.freeze_panes = "A2"
+
+
+def write_xlsx(path: str, positions_page: pd.DataFrame, legs_page: pd.DataFrame):
+    """
+    Writes the two-sheet workbook: "Positions" (one row per position) and "Legs" (one row per CSV leg).
+
+    Coloring follows the sign of the value -- green for positive, red for negative, untouched at zero.
+    "Qty", "Held", and "Cost Basis" color their text; "Realized" and "Unrealized" color the cell
+    background.
+
+    :param path: output .xlsx path
+    :param positions_page: rows with XLSX_POSITION_COLUMNS
+    :param legs_page: rows with XLSX_LEG_COLUMNS
+    """
+    workbook = Workbook()
+    positions_sheet = workbook.active
+    positions_sheet.title = "Positions"
+    legs_sheet = workbook.create_sheet("Legs")
+
+    _write_xlsx_sheet(
+        positions_sheet,
+        positions_page,
+        XLSX_POSITION_COLUMNS,
+        XLSX_SIGN_FONT_COLUMNS["Positions"],
+        XLSX_SIGN_FILL_COLUMNS["Positions"],
+    )
+    _write_xlsx_sheet(
+        legs_sheet,
+        legs_page,
+        XLSX_LEG_COLUMNS,
+        XLSX_SIGN_FONT_COLUMNS["Legs"],
+        XLSX_SIGN_FILL_COLUMNS["Legs"],
+    )
+    workbook.save(path)
+
+
 def calculate_expected_move_loss(delta: float, gamma: float, expected_move: float) -> float:
     """
     Estimates a position's one-day loss if the underlying makes its expected (one standard deviation) move
@@ -746,8 +936,10 @@ async def main(parser: argparse.ArgumentParser):
     # Resolve the short --position-type code (e.g. "IC") to the full CSV name (e.g. "Iron Condor").
     position_type = POSITION_TYPE_MAP[args.position_type] if args.position_type else None
 
-    # --show ignores the narrowing filters: it lists every position in the CSV, held and closed.
-    if args.show:
+    # --show and --xlsx both cover the whole CSV (held and closed alike), so they ignore the narrowing
+    # filters; only the per-leg analysis honors them.
+    whole_csv = args.show or args.xlsx
+    if whole_csv:
         positions_df = load_positions(args.positions_file, None, None)
     else:
         positions_df = load_positions(
@@ -758,10 +950,10 @@ async def main(parser: argparse.ArgumentParser):
             position_type=position_type,
         )
     if len(positions_df) == 0:
-        print("No positions found." if args.show else "No positions match the given filters.")
+        print("No positions found." if whole_csv else "No positions match the given filters.")
         return
 
-    if args.show:
+    if whole_csv:
         print(f"Showing positions from {args.positions_file}")
     else:
         print(f"Analyzing {len(positions_df)} option leg(s) from {args.positions_file}")
@@ -798,12 +990,20 @@ async def main(parser: argparse.ArgumentParser):
             # Each table is skipped when it has no rows; the shared note follows whichever were shown.
             if len(held_df) == 0 and len(closed_df) == 0:
                 print("No positions found.")
-                return
-            if len(held_df) > 0:
-                print_show_table(held_df, "Positions held")
-            if len(closed_df) > 0:
-                print_show_table(closed_df, "Closed positions")
-            print_show_note()
+            else:
+                if len(held_df) > 0:
+                    print_show_table(held_df, "Positions held")
+                if len(closed_df) > 0:
+                    print_show_table(closed_df, "Closed positions")
+                print_show_note()
+
+        if args.xlsx:
+            positions_page = build_positions_page_xlsx(positions_df, infos)
+            legs_page = build_output_dataframe(positions_df, infos)[XLSX_LEG_COLUMNS]
+            write_xlsx(args.xlsx, positions_page, legs_page)
+            print(f"\nWrote {len(positions_page)} position(s) and {len(legs_page)} leg(s) to {args.xlsx}")
+
+        if whole_csv:
             return
 
         output_df = build_output_dataframe(positions_df, infos)
@@ -857,6 +1057,9 @@ def build_parser() -> argparse.ArgumentParser:
               # Narrow to one position number, or to all positions of a given type
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-num 2
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
+
+              # Write an Excel workbook ('Positions' and 'Legs' sheets) for import into Google Drive
+              python -m scripts.position_analyzer --positions-file .\\data\\current_positions.csv --schwab --xlsx positions.xlsx
 
               # Show one-row-per-position summaries of everything held and everything closed
               # (current_positions.csv carries the Date In / Quantity Out / Exit Price columns that
@@ -928,6 +1131,13 @@ def build_parser() -> argparse.ArgumentParser:
         "positions' -- one row per position (symbol, entry date, cost basis, realized and unrealized "
         "P/L). Either table is omitted when it has no positions. The narrowing filters are ignored.",
         action="store_true",
+    )
+    parser.add_argument(
+        "--xlsx",
+        help="Write an Excel workbook to this path, with a 'Positions' sheet (one row per position, "
+        "closed ones marked 'X') and a 'Legs' sheet (one row per CSV leg). Values are colored by sign. "
+        "Covers the whole CSV, so the narrowing filters are ignored.",
+        type=str,
     )
     return parser
 
