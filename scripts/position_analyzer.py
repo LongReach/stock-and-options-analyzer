@@ -7,6 +7,10 @@ import argparse
 import textwrap
 import traceback
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
 from core.base_driver import BaseDriver
 from core.common import SecurityDescriptor, OptionInfo, BarSize, RequestedInfoType, CoreException
 from core.options_data import OptionData, OptionDataException
@@ -83,7 +87,7 @@ COL_POSITION_TYPE = "Pos Type"
 COL_QUANTITY = "Qty"
 COL_HELD = "Held"
 COL_TRADE_PRICE = "Trade Price"
-COL_CURRENT_PRICE = "Cur Price"
+COL_CUR_EXIT_PRICE = "Cur/Exit Price"
 COL_REALIZED = "Realized"
 COL_IV = "IV"
 COL_DELTA = "Delta"
@@ -98,7 +102,7 @@ OUTPUT_COLUMNS = [
     COL_QUANTITY,
     COL_HELD,
     COL_TRADE_PRICE,
-    COL_CURRENT_PRICE,
+    COL_CUR_EXIT_PRICE,
     COL_REALIZED,
     COL_IV,
     COL_DELTA,
@@ -121,6 +125,63 @@ SHOW_COLUMNS = [
     COL_REALIZED,
     COL_UNREALIZED,
 ]
+
+# --xlsx workbook layout. The "Positions" sheet is the --show rollup plus a "Closed" marker column;
+# the "Legs" sheet is the per-leg analysis minus the Greeks.
+COL_CLOSED = "Closed"
+
+XLSX_POSITION_COLUMNS = [
+    COL_POSITION_NUM,
+    COL_SHOW_SYMBOL,
+    COL_ENTRY_DATE,
+    COL_COST_BASIS,
+    COL_REALIZED,
+    COL_UNREALIZED,
+    COL_CLOSED,
+]
+
+XLSX_LEG_COLUMNS = [
+    COL_CONTRACT,
+    COL_POSITION_NUM,
+    COL_POSITION_TYPE,
+    COL_QUANTITY,
+    COL_HELD,
+    COL_TRADE_PRICE,
+    COL_CUR_EXIT_PRICE,
+    COL_REALIZED,
+]
+
+# Columns whose TEXT is colored by sign (green positive / red negative / black zero), per sheet.
+XLSX_SIGN_FONT_COLUMNS = {
+    "Positions": [COL_COST_BASIS],
+    "Legs": [COL_QUANTITY, COL_HELD],
+}
+# Columns whose BACKGROUND is colored by sign (green positive / red negative / no fill at zero).
+XLSX_SIGN_FILL_COLUMNS = {
+    "Positions": [COL_REALIZED, COL_UNREALIZED],
+    "Legs": [COL_REALIZED],
+}
+
+# Excel's conventional green/red pairing, so the sheets look native in Excel and Google Sheets alike.
+_XL_GREEN_FONT = Font(color="FF006100")
+_XL_RED_FONT = Font(color="FF9C0006")
+_XL_GREEN_FILL = PatternFill(start_color="FFC6EFCE", end_color="FFC6EFCE", fill_type="solid")
+_XL_RED_FILL = PatternFill(start_color="FFFFC7CE", end_color="FFFFC7CE", fill_type="solid")
+_XL_HEADER_FONT = Font(bold=True)
+
+_XL_MONEY_FORMAT = "0.00"
+_XL_INT_FORMAT = "0"
+# Per-column Excel number formats; anything unlisted is left as text/general.
+XLSX_NUMBER_FORMATS = {
+    COL_POSITION_NUM: _XL_INT_FORMAT,
+    COL_QUANTITY: _XL_INT_FORMAT,
+    COL_HELD: _XL_INT_FORMAT,
+    COL_TRADE_PRICE: _XL_MONEY_FORMAT,
+    COL_CUR_EXIT_PRICE: _XL_MONEY_FORMAT,
+    COL_COST_BASIS: _XL_MONEY_FORMAT,
+    COL_REALIZED: _XL_MONEY_FORMAT,
+    COL_UNREALIZED: _XL_MONEY_FORMAT,
+}
 
 _logger = getLogger(__name__)
 
@@ -349,6 +410,9 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
         * contract multiplier. This is sign-correct for both long and short legs and is 0 until an exit is
         recorded.
 
+    "Cur/Exit Price" is the current market price while a leg still holds contracts, and the CSV's average Exit
+    Price once it is flat (Held == 0).
+
     :param positions_df: filtered positions (CSV columns)
     :param infos: OptionInfo per leg (aligned with positions_df), None where unavailable
     :return: DataFrame with OUTPUT_COLUMNS
@@ -363,6 +427,11 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
         held = quantity + quantity_out
         realized = -quantity_out * (exit_price - trade_price) * CONTRACT_MULTIPLIER
 
+        # A flat leg holds nothing, so a live quote says nothing about it; report the average price it was
+        # closed at instead. Either way the leg contributes price * held = 0 to the aggregate, so this is a
+        # display choice only.
+        cur_exit_price = exit_price if held == 0 else (info.price if info else float("nan"))
+
         rows.append(
             {
                 COL_CONTRACT: pos_row[CSV_SYMBOL],
@@ -371,7 +440,7 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
                 COL_QUANTITY: quantity,
                 COL_HELD: held,
                 COL_TRADE_PRICE: trade_price,
-                COL_CURRENT_PRICE: info.price if info else float("nan"),
+                COL_CUR_EXIT_PRICE: cur_exit_price,
                 COL_REALIZED: realized,
                 COL_IV: info.implied_volatility if info else float("nan"),
                 COL_DELTA: info.delta if info else float("nan"),
@@ -395,7 +464,8 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
         Held is negative for short legs, so shorts subtract as expected.
       * Aggregate trade/current "price" is expressed as net dollars: sum(price * held * multiplier).
         A positive value is a net debit (cash paid); a negative value is a net credit (cash
-        received).
+        received). Flat legs carry the exit price rather than a live quote, but held == 0 zeroes the
+        term either way, so the aggregate is still purely the value of what is held.
       * Realized P/L is summed straight from the per-leg "Realized" dollars (closed portion).
       * Implied volatility does not aggregate meaningfully across strikes, so it is left blank.
 
@@ -406,7 +476,7 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
     mult = CONTRACT_MULTIPLIER
 
     net_trade = (df[COL_TRADE_PRICE] * held * mult).sum()
-    net_current = (df[COL_CURRENT_PRICE] * held * mult).sum()
+    net_current = (df[COL_CUR_EXIT_PRICE] * held * mult).sum()
     unrealized_pl = net_current - net_trade
     realized_pl = df[COL_REALIZED].sum()
 
@@ -417,7 +487,7 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
         COL_QUANTITY: df[COL_QUANTITY].sum(),
         COL_HELD: held.sum(),
         COL_TRADE_PRICE: net_trade,
-        COL_CURRENT_PRICE: net_current,
+        COL_CUR_EXIT_PRICE: net_current,
         COL_REALIZED: realized_pl,
         COL_IV: float("nan"),
         COL_DELTA: (df[COL_DELTA] * held * mult).sum(),
@@ -446,7 +516,7 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Returns a copy of df with each column formatted to a readable string."""
     decimals = {
         COL_TRADE_PRICE: 2,
-        COL_CURRENT_PRICE: 2,
+        COL_CUR_EXIT_PRICE: 2,
         COL_REALIZED: 2,
         COL_IV: 4,
         COL_DELTA: 4,
@@ -485,7 +555,7 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print("\nPosition summary")
     print("-" * 40)
     print(f"  Net premium (debit +/credit -): {aggregate[COL_TRADE_PRICE]:>12.2f}")
-    print(f"  Current net value             : {aggregate[COL_CURRENT_PRICE]:>12.2f}")
+    print(f"  Current net value             : {aggregate[COL_CUR_EXIT_PRICE]:>12.2f}")
     print(f"  Unrealized P/L                : {unrealized_pl:>12.2f}")
     print(f"  Realized P/L                  : {realized_pl:>12.2f}")
     print(f"  Total P/L (real + unreal)     : {realized_pl + unrealized_pl:>12.2f}")
@@ -495,9 +565,11 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print(f"  Position vega                 : {aggregate[COL_VEGA]:>12.4f}")
     print()
     print("Note: 'Held' = contracts actually held now (Quantity + Quantity Out); market value and Greeks")
-    print("      aggregate over Held. Aggregate Trade/Cur Price are net dollars (price * held * 100);")
-    print("      aggregate Greeks are position Greeks (per-contract Greek * held * 100). Per-leg 'Realized'")
-    print("      is closed-portion P/L in dollars. Quantities: '-' = short.")
+    print("      aggregate over Held. 'Cur/Exit Price' is the current price while contracts are held, or the")
+    print("      average exit price from the CSV once the leg is flat (Held = 0). Aggregate Trade/Cur-Exit")
+    print("      Price are net dollars (price * held * 100); aggregate Greeks are position Greeks")
+    print("      (per-contract Greek * held * 100). Per-leg 'Realized' is closed-portion P/L in dollars.")
+    print("      Quantities: '-' = short.")
     print()
 
 
@@ -512,12 +584,15 @@ def _entry_date_token(value) -> str:
     return text.split()[0]
 
 
-def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
+def build_show_dataframe(
+    positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]], closed: bool = False
+) -> pd.DataFrame:
     """
-    Rolls the per-leg CSV rows up into one summary row per whole position for the --show table.
+    Rolls the per-leg CSV rows up into one summary row per whole position for the --show tables.
 
-    Only positions that are still (partially) held are included: a position drops out once every one
-    of its legs has been fully closed (Held == 0 for all legs).
+    A position counts as closed once every one of its legs is flat (Held == 0 for all legs), and as held
+    while any leg still has contracts. `closed` selects which of the two sets to return, so the same
+    rollup feeds both the "Positions held" and "Closed positions" tables.
 
     Per position the following are computed:
       * Symbol: the underlying ticker the legs share (joined with '/' in the unusual case they differ).
@@ -529,9 +604,13 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
       * Unrealized: dollars of unrealized P/L on contracts still held = sum((Current Price -
         Trade Price) * Held * 100).
 
+    For a closed position every leg is flat, so its Unrealized is always 0.00 -- the column is kept anyway
+    so both tables share one layout.
+
     :param positions_df: positions loaded from the CSV (one row per leg)
     :param infos: OptionInfo per leg (aligned with positions_df), None where market data was unavailable
-    :return: DataFrame with SHOW_COLUMNS, one row per currently-held position
+    :param closed: True to return fully-closed positions; False (default) for positions still held
+    :return: DataFrame with SHOW_COLUMNS, one row per matching position
     """
     records = []
     for (_, pos_row), info in zip(positions_df.iterrows(), infos):
@@ -566,8 +645,8 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
     rows = []
     # sort=False keeps positions in the order they first appear in the CSV.
     for pos_num, group in legs.groupby("pos_num", sort=False):
-        # Skip positions with nothing left held (fully closed).
-        if group["held_abs"].sum() == 0:
+        # Nothing left held on any leg == fully closed; keep whichever set the caller asked for.
+        if (group["held_abs"].sum() == 0) != closed:
             continue
         tickers = sorted(set(group["ticker"]))
         entries = [e for e in group["entry"] if e]
@@ -584,8 +663,13 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
     return pd.DataFrame(rows, columns=SHOW_COLUMNS)
 
 
-def print_show_table(df: pd.DataFrame):
-    """Pretty-prints the --show summary table (one row per position) with a totals row."""
+def print_show_table(df: pd.DataFrame, title: str):
+    """
+    Pretty-prints one --show summary table (one row per position) under `title`, with a totals row.
+
+    :param df: summary rows with SHOW_COLUMNS (assumed non-empty; empty tables are skipped by the caller)
+    :param title: heading for the table, e.g. "Positions held" or "Closed positions"
+    """
     total = {
         COL_POSITION_NUM: "TOTAL",
         COL_SHOW_SYMBOL: "",
@@ -606,7 +690,7 @@ def print_show_table(df: pd.DataFrame):
     lines = display.to_string(index=False).splitlines()
     table_width = max(len(line) for line in lines)
 
-    print("\nPositions held")
+    print(f"\n{title}")
     print("=" * table_width)
     # All rows except the last are individual positions; the last row is the totals row.
     for line in lines[:-1]:
@@ -615,9 +699,142 @@ def print_show_table(df: pd.DataFrame):
     print(lines[-1])
     print("=" * table_width)
 
+
+def print_show_note():
+    """Prints the footnote shared by the --show tables (once, after whichever tables were displayed)."""
     print("\nNote: Cost Basis is net entry premium (Trade Price * Quantity * 100); negative = credit")
-    print("      collected. Realized is closed-portion P/L; Unrealized is on contracts still held.")
+    print("      collected. Realized is closed-portion P/L; Unrealized is on contracts still held,")
+    print("      and is therefore always 0.00 for closed positions.")
     print()
+
+
+def build_positions_page_xlsx(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
+    """
+    Builds the "Positions" sheet for --xlsx output. This function serves XLSX generation only; the --show
+    tables call build_show_dataframe() directly, since they print held and closed positions separately.
+
+    Uses the same rollup as those tables, but merges held and closed positions into one frame ordered by
+    Position #, with a "Closed" column marking the closed ones with "X".
+
+    :param positions_df: positions loaded from the CSV (one row per leg)
+    :param infos: OptionInfo per leg (aligned with positions_df), None where market data was unavailable
+    :return: DataFrame with XLSX_POSITION_COLUMNS
+    """
+    held = build_show_dataframe(positions_df, infos)
+    closed = build_show_dataframe(positions_df, infos, closed=True)
+    held[COL_CLOSED] = ""
+    closed[COL_CLOSED] = "X"
+
+    combined = pd.concat([held, closed], ignore_index=True)
+    if len(combined) == 0:
+        return pd.DataFrame(columns=XLSX_POSITION_COLUMNS)
+    # Position # comes from the CSV as text in some rows, so sort on a numeric view of it.
+    order = pd.to_numeric(combined[COL_POSITION_NUM], errors="coerce")
+    combined = combined.assign(_order=order).sort_values("_order", kind="stable").drop(columns="_order")
+    return combined.reset_index(drop=True)[XLSX_POSITION_COLUMNS]
+
+
+def _xl_number(value):
+    """Converts a cell value for Excel: NaN/None become blank cells, everything else passes through."""
+    try:
+        if value is None or pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def _xl_sign(value) -> int:
+    """Returns 1, -1, or 0 for a cell's sign; blanks and non-numerics count as 0 (no coloring)."""
+    try:
+        if value is None or pd.isna(value):
+            return 0
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if number > 0:
+        return 1
+    return -1 if number < 0 else 0
+
+
+def _write_xlsx_sheet(worksheet, df: pd.DataFrame, columns: List[str], font_cols: List[str], fill_cols: List[str]):
+    """
+    Writes one DataFrame to a worksheet: bold frozen header, per-column number formats, sign coloring, and
+    column widths sized to the content.
+
+    :param worksheet: openpyxl worksheet to fill
+    :param df: rows to write
+    :param columns: columns to write, in order
+    :param font_cols: columns whose text is colored by sign
+    :param fill_cols: columns whose background is colored by sign
+    """
+    worksheet.append(list(columns))
+    for cell in worksheet[1]:
+        cell.font = _XL_HEADER_FONT
+        cell.alignment = Alignment(horizontal="center")
+
+    for _, row in df.iterrows():
+        worksheet.append([_xl_number(row[col]) for col in columns])
+
+    for col_index, col in enumerate(columns, start=1):
+        number_format = XLSX_NUMBER_FORMATS.get(col)
+        color_font = col in font_cols
+        color_fill = col in fill_cols
+        widest = len(str(col))
+
+        for row_index, value in enumerate(df[col], start=2):
+            cell = worksheet.cell(row=row_index, column=col_index)
+            if number_format:
+                cell.number_format = number_format
+            sign = _xl_sign(value) if (color_font or color_fill) else 0
+            if color_font and sign:
+                cell.font = _XL_GREEN_FONT if sign > 0 else _XL_RED_FONT
+            if color_fill and sign:
+                cell.fill = _XL_GREEN_FILL if sign > 0 else _XL_RED_FILL
+            # Approximate the rendered width: money columns show two decimals.
+            if number_format == _XL_MONEY_FORMAT and _xl_number(value) is not None:
+                shown = f"{float(value):.2f}"
+            else:
+                shown = "" if _xl_number(value) is None else str(value)
+            widest = max(widest, len(shown))
+
+        worksheet.column_dimensions[get_column_letter(col_index)].width = widest + 3
+
+    worksheet.freeze_panes = "A2"
+
+
+def write_xlsx(path: str, positions_page: pd.DataFrame, legs_page: pd.DataFrame):
+    """
+    Writes the two-sheet workbook: "Positions" (one row per position) and "Legs" (one row per CSV leg).
+
+    Coloring follows the sign of the value -- green for positive, red for negative, untouched at zero.
+    "Qty", "Held", and "Cost Basis" color their text; "Realized" and "Unrealized" color the cell
+    background.
+
+    :param path: output .xlsx path
+    :param positions_page: rows with XLSX_POSITION_COLUMNS
+    :param legs_page: rows with XLSX_LEG_COLUMNS
+    """
+    workbook = Workbook()
+    positions_sheet = workbook.active
+    positions_sheet.title = "Positions"
+    legs_sheet = workbook.create_sheet("Legs")
+
+    _write_xlsx_sheet(
+        positions_sheet,
+        positions_page,
+        XLSX_POSITION_COLUMNS,
+        XLSX_SIGN_FONT_COLUMNS["Positions"],
+        XLSX_SIGN_FILL_COLUMNS["Positions"],
+    )
+    _write_xlsx_sheet(
+        legs_sheet,
+        legs_page,
+        XLSX_LEG_COLUMNS,
+        XLSX_SIGN_FONT_COLUMNS["Legs"],
+        XLSX_SIGN_FILL_COLUMNS["Legs"],
+    )
+    workbook.save(path)
 
 
 def calculate_expected_move_loss(delta: float, gamma: float, expected_move: float) -> float:
@@ -719,8 +936,10 @@ async def main(parser: argparse.ArgumentParser):
     # Resolve the short --position-type code (e.g. "IC") to the full CSV name (e.g. "Iron Condor").
     position_type = POSITION_TYPE_MAP[args.position_type] if args.position_type else None
 
-    # --show ignores the narrowing filters: it lists every currently-held position in the CSV.
-    if args.show:
+    # --show and --xlsx both cover the whole CSV (held and closed alike), so they ignore the narrowing
+    # filters; only the per-leg analysis honors them.
+    whole_csv = args.show or args.xlsx
+    if whole_csv:
         positions_df = load_positions(args.positions_file, None, None)
     else:
         positions_df = load_positions(
@@ -731,10 +950,10 @@ async def main(parser: argparse.ArgumentParser):
             position_type=position_type,
         )
     if len(positions_df) == 0:
-        print("No positions found." if args.show else "No positions match the given filters.")
+        print("No positions found." if whole_csv else "No positions match the given filters.")
         return
 
-    if args.show:
+    if whole_csv:
         print(f"Showing positions from {args.positions_file}")
     else:
         print(f"Analyzing {len(positions_df)} option leg(s) from {args.positions_file}")
@@ -766,11 +985,25 @@ async def main(parser: argparse.ArgumentParser):
         _, infos = await collect_leg_data(option_manager, positions_df)
 
         if args.show:
-            show_df = build_show_dataframe(positions_df, infos)
-            if len(show_df) == 0:
-                print("No positions are currently held.")
+            held_df = build_show_dataframe(positions_df, infos)
+            closed_df = build_show_dataframe(positions_df, infos, closed=True)
+            # Each table is skipped when it has no rows; the shared note follows whichever were shown.
+            if len(held_df) == 0 and len(closed_df) == 0:
+                print("No positions found.")
             else:
-                print_show_table(show_df)
+                if len(held_df) > 0:
+                    print_show_table(held_df, "Positions held")
+                if len(closed_df) > 0:
+                    print_show_table(closed_df, "Closed positions")
+                print_show_note()
+
+        if args.xlsx:
+            positions_page = build_positions_page_xlsx(positions_df, infos)
+            legs_page = build_output_dataframe(positions_df, infos)[XLSX_LEG_COLUMNS]
+            write_xlsx(args.xlsx, positions_page, legs_page)
+            print(f"\nWrote {len(positions_page)} position(s) and {len(legs_page)} leg(s) to {args.xlsx}")
+
+        if whole_csv:
             return
 
         output_df = build_output_dataframe(positions_df, infos)
@@ -825,7 +1058,10 @@ def build_parser() -> argparse.ArgumentParser:
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-num 2
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
 
-              # Show a one-row-per-position summary of everything currently held
+              # Write an Excel workbook ('Positions' and 'Legs' sheets) for import into Google Drive
+              python -m scripts.position_analyzer --positions-file .\\data\\current_positions.csv --schwab --xlsx positions.xlsx
+
+              # Show one-row-per-position summaries of everything held and everything closed
               # (current_positions.csv carries the Date In / Quantity Out / Exit Price columns that
               #  entry date and realized P/L are computed from)
               python -m scripts.position_analyzer --positions-file .\\data\\current_positions.csv --ib --show
@@ -891,9 +1127,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--show",
-        help="Show a summary table of every currently-held position (one row per position: symbol, "
-        "entry date, cost basis, realized and unrealized P/L). The narrowing filters are ignored.",
+        help="Show summary tables of every position in the CSV -- 'Positions held' and 'Closed "
+        "positions' -- one row per position (symbol, entry date, cost basis, realized and unrealized "
+        "P/L). Either table is omitted when it has no positions. The narrowing filters are ignored.",
         action="store_true",
+    )
+    parser.add_argument(
+        "--xlsx",
+        help="Write an Excel workbook to this path, with a 'Positions' sheet (one row per position, "
+        "closed ones marked 'X') and a 'Legs' sheet (one row per CSV leg). Values are colored by sign. "
+        "Covers the whole CSV, so the narrowing filters are ignored.",
+        type=str,
     )
     return parser
 
