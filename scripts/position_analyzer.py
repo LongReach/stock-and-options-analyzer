@@ -83,7 +83,7 @@ COL_POSITION_TYPE = "Pos Type"
 COL_QUANTITY = "Qty"
 COL_HELD = "Held"
 COL_TRADE_PRICE = "Trade Price"
-COL_CURRENT_PRICE = "Cur Price"
+COL_CUR_EXIT_PRICE = "Cur/Exit Price"
 COL_REALIZED = "Realized"
 COL_IV = "IV"
 COL_DELTA = "Delta"
@@ -98,7 +98,7 @@ OUTPUT_COLUMNS = [
     COL_QUANTITY,
     COL_HELD,
     COL_TRADE_PRICE,
-    COL_CURRENT_PRICE,
+    COL_CUR_EXIT_PRICE,
     COL_REALIZED,
     COL_IV,
     COL_DELTA,
@@ -349,6 +349,9 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
         * contract multiplier. This is sign-correct for both long and short legs and is 0 until an exit is
         recorded.
 
+    "Cur/Exit Price" is the current market price while a leg still holds contracts, and the CSV's average Exit
+    Price once it is flat (Held == 0).
+
     :param positions_df: filtered positions (CSV columns)
     :param infos: OptionInfo per leg (aligned with positions_df), None where unavailable
     :return: DataFrame with OUTPUT_COLUMNS
@@ -363,6 +366,11 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
         held = quantity + quantity_out
         realized = -quantity_out * (exit_price - trade_price) * CONTRACT_MULTIPLIER
 
+        # A flat leg holds nothing, so a live quote says nothing about it; report the average price it was
+        # closed at instead. Either way the leg contributes price * held = 0 to the aggregate, so this is a
+        # display choice only.
+        cur_exit_price = exit_price if held == 0 else (info.price if info else float("nan"))
+
         rows.append(
             {
                 COL_CONTRACT: pos_row[CSV_SYMBOL],
@@ -371,7 +379,7 @@ def build_output_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Opti
                 COL_QUANTITY: quantity,
                 COL_HELD: held,
                 COL_TRADE_PRICE: trade_price,
-                COL_CURRENT_PRICE: info.price if info else float("nan"),
+                COL_CUR_EXIT_PRICE: cur_exit_price,
                 COL_REALIZED: realized,
                 COL_IV: info.implied_volatility if info else float("nan"),
                 COL_DELTA: info.delta if info else float("nan"),
@@ -395,7 +403,8 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
         Held is negative for short legs, so shorts subtract as expected.
       * Aggregate trade/current "price" is expressed as net dollars: sum(price * held * multiplier).
         A positive value is a net debit (cash paid); a negative value is a net credit (cash
-        received).
+        received). Flat legs carry the exit price rather than a live quote, but held == 0 zeroes the
+        term either way, so the aggregate is still purely the value of what is held.
       * Realized P/L is summed straight from the per-leg "Realized" dollars (closed portion).
       * Implied volatility does not aggregate meaningfully across strikes, so it is left blank.
 
@@ -406,7 +415,7 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
     mult = CONTRACT_MULTIPLIER
 
     net_trade = (df[COL_TRADE_PRICE] * held * mult).sum()
-    net_current = (df[COL_CURRENT_PRICE] * held * mult).sum()
+    net_current = (df[COL_CUR_EXIT_PRICE] * held * mult).sum()
     unrealized_pl = net_current - net_trade
     realized_pl = df[COL_REALIZED].sum()
 
@@ -417,7 +426,7 @@ def build_aggregate_row(df: pd.DataFrame) -> Tuple[dict, float, float]:
         COL_QUANTITY: df[COL_QUANTITY].sum(),
         COL_HELD: held.sum(),
         COL_TRADE_PRICE: net_trade,
-        COL_CURRENT_PRICE: net_current,
+        COL_CUR_EXIT_PRICE: net_current,
         COL_REALIZED: realized_pl,
         COL_IV: float("nan"),
         COL_DELTA: (df[COL_DELTA] * held * mult).sum(),
@@ -446,7 +455,7 @@ def format_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Returns a copy of df with each column formatted to a readable string."""
     decimals = {
         COL_TRADE_PRICE: 2,
-        COL_CURRENT_PRICE: 2,
+        COL_CUR_EXIT_PRICE: 2,
         COL_REALIZED: 2,
         COL_IV: 4,
         COL_DELTA: 4,
@@ -485,7 +494,7 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print("\nPosition summary")
     print("-" * 40)
     print(f"  Net premium (debit +/credit -): {aggregate[COL_TRADE_PRICE]:>12.2f}")
-    print(f"  Current net value             : {aggregate[COL_CURRENT_PRICE]:>12.2f}")
+    print(f"  Current net value             : {aggregate[COL_CUR_EXIT_PRICE]:>12.2f}")
     print(f"  Unrealized P/L                : {unrealized_pl:>12.2f}")
     print(f"  Realized P/L                  : {realized_pl:>12.2f}")
     print(f"  Total P/L (real + unreal)     : {realized_pl + unrealized_pl:>12.2f}")
@@ -495,9 +504,11 @@ def print_analysis(df: pd.DataFrame, aggregate: dict, unrealized_pl: float, real
     print(f"  Position vega                 : {aggregate[COL_VEGA]:>12.4f}")
     print()
     print("Note: 'Held' = contracts actually held now (Quantity + Quantity Out); market value and Greeks")
-    print("      aggregate over Held. Aggregate Trade/Cur Price are net dollars (price * held * 100);")
-    print("      aggregate Greeks are position Greeks (per-contract Greek * held * 100). Per-leg 'Realized'")
-    print("      is closed-portion P/L in dollars. Quantities: '-' = short.")
+    print("      aggregate over Held. 'Cur/Exit Price' is the current price while contracts are held, or the")
+    print("      average exit price from the CSV once the leg is flat (Held = 0). Aggregate Trade/Cur-Exit")
+    print("      Price are net dollars (price * held * 100); aggregate Greeks are position Greeks")
+    print("      (per-contract Greek * held * 100). Per-leg 'Realized' is closed-portion P/L in dollars.")
+    print("      Quantities: '-' = short.")
     print()
 
 

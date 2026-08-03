@@ -108,7 +108,7 @@ The values of `delta` and `gamma` are from the position as a whole.
 
 ## Phase Six
 
-### Step 1
+### Step 1 (Complete)
 
 In per-leg analysis, the table includes the "Cur Price" field. It should only show the current price for legs where contracts are still held (long or short). If it's a flat leg (0 contracts held), show the average exit price, as obtained from the CSV.
 
