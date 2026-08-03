@@ -153,4 +153,8 @@ Before the menu is presented to the user, the tool should also display all the f
 
 In Step 7, I asked you to make code that presented the user with a menu of four choices. I'd like to maintain that functionality, but present some extra info before the user makes a choice.
 
-If the quantity associated with the trade matches EITHER the "Quantity" or "Quantity Out" field of the position in question, the user will be alerted, "*** NOTICE: this trade might have been accounted for already ***". However, the user still gets to choose an action, as before. 
+If the quantity associated with the trade has the same sign as the "Quantity" field of the position in question, the user will be alerted "*** NOTICE: this trade might have already been accounted for as a position entry. ***". 
+
+If the quantity associated with the trade has the same sign as the "Quantity Out" field of the position in question, the user will be alerted "*** NOTICE: this trade might have already been accounted for as a position exit. ***". However, the notice won't be shown if the "Quantity Out" field's value is 0.
+
+Despite the notices, the user still gets to choose an action, as before. 
