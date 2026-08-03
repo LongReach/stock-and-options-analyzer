@@ -523,12 +523,15 @@ def _entry_date_token(value) -> str:
     return text.split()[0]
 
 
-def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]]) -> pd.DataFrame:
+def build_show_dataframe(
+    positions_df: pd.DataFrame, infos: List[Optional[OptionInfo]], closed: bool = False
+) -> pd.DataFrame:
     """
-    Rolls the per-leg CSV rows up into one summary row per whole position for the --show table.
+    Rolls the per-leg CSV rows up into one summary row per whole position for the --show tables.
 
-    Only positions that are still (partially) held are included: a position drops out once every one
-    of its legs has been fully closed (Held == 0 for all legs).
+    A position counts as closed once every one of its legs is flat (Held == 0 for all legs), and as held
+    while any leg still has contracts. `closed` selects which of the two sets to return, so the same
+    rollup feeds both the "Positions held" and "Closed positions" tables.
 
     Per position the following are computed:
       * Symbol: the underlying ticker the legs share (joined with '/' in the unusual case they differ).
@@ -540,9 +543,13 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
       * Unrealized: dollars of unrealized P/L on contracts still held = sum((Current Price -
         Trade Price) * Held * 100).
 
+    For a closed position every leg is flat, so its Unrealized is always 0.00 -- the column is kept anyway
+    so both tables share one layout.
+
     :param positions_df: positions loaded from the CSV (one row per leg)
     :param infos: OptionInfo per leg (aligned with positions_df), None where market data was unavailable
-    :return: DataFrame with SHOW_COLUMNS, one row per currently-held position
+    :param closed: True to return fully-closed positions; False (default) for positions still held
+    :return: DataFrame with SHOW_COLUMNS, one row per matching position
     """
     records = []
     for (_, pos_row), info in zip(positions_df.iterrows(), infos):
@@ -577,8 +584,8 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
     rows = []
     # sort=False keeps positions in the order they first appear in the CSV.
     for pos_num, group in legs.groupby("pos_num", sort=False):
-        # Skip positions with nothing left held (fully closed).
-        if group["held_abs"].sum() == 0:
+        # Nothing left held on any leg == fully closed; keep whichever set the caller asked for.
+        if (group["held_abs"].sum() == 0) != closed:
             continue
         tickers = sorted(set(group["ticker"]))
         entries = [e for e in group["entry"] if e]
@@ -595,8 +602,13 @@ def build_show_dataframe(positions_df: pd.DataFrame, infos: List[Optional[Option
     return pd.DataFrame(rows, columns=SHOW_COLUMNS)
 
 
-def print_show_table(df: pd.DataFrame):
-    """Pretty-prints the --show summary table (one row per position) with a totals row."""
+def print_show_table(df: pd.DataFrame, title: str):
+    """
+    Pretty-prints one --show summary table (one row per position) under `title`, with a totals row.
+
+    :param df: summary rows with SHOW_COLUMNS (assumed non-empty; empty tables are skipped by the caller)
+    :param title: heading for the table, e.g. "Positions held" or "Closed positions"
+    """
     total = {
         COL_POSITION_NUM: "TOTAL",
         COL_SHOW_SYMBOL: "",
@@ -617,7 +629,7 @@ def print_show_table(df: pd.DataFrame):
     lines = display.to_string(index=False).splitlines()
     table_width = max(len(line) for line in lines)
 
-    print("\nPositions held")
+    print(f"\n{title}")
     print("=" * table_width)
     # All rows except the last are individual positions; the last row is the totals row.
     for line in lines[:-1]:
@@ -626,8 +638,12 @@ def print_show_table(df: pd.DataFrame):
     print(lines[-1])
     print("=" * table_width)
 
+
+def print_show_note():
+    """Prints the footnote shared by the --show tables (once, after whichever tables were displayed)."""
     print("\nNote: Cost Basis is net entry premium (Trade Price * Quantity * 100); negative = credit")
-    print("      collected. Realized is closed-portion P/L; Unrealized is on contracts still held.")
+    print("      collected. Realized is closed-portion P/L; Unrealized is on contracts still held,")
+    print("      and is therefore always 0.00 for closed positions.")
     print()
 
 
@@ -730,7 +746,7 @@ async def main(parser: argparse.ArgumentParser):
     # Resolve the short --position-type code (e.g. "IC") to the full CSV name (e.g. "Iron Condor").
     position_type = POSITION_TYPE_MAP[args.position_type] if args.position_type else None
 
-    # --show ignores the narrowing filters: it lists every currently-held position in the CSV.
+    # --show ignores the narrowing filters: it lists every position in the CSV, held and closed.
     if args.show:
         positions_df = load_positions(args.positions_file, None, None)
     else:
@@ -777,11 +793,17 @@ async def main(parser: argparse.ArgumentParser):
         _, infos = await collect_leg_data(option_manager, positions_df)
 
         if args.show:
-            show_df = build_show_dataframe(positions_df, infos)
-            if len(show_df) == 0:
-                print("No positions are currently held.")
-            else:
-                print_show_table(show_df)
+            held_df = build_show_dataframe(positions_df, infos)
+            closed_df = build_show_dataframe(positions_df, infos, closed=True)
+            # Each table is skipped when it has no rows; the shared note follows whichever were shown.
+            if len(held_df) == 0 and len(closed_df) == 0:
+                print("No positions found.")
+                return
+            if len(held_df) > 0:
+                print_show_table(held_df, "Positions held")
+            if len(closed_df) > 0:
+                print_show_table(closed_df, "Closed positions")
+            print_show_note()
             return
 
         output_df = build_output_dataframe(positions_df, infos)
@@ -836,7 +858,7 @@ def build_parser() -> argparse.ArgumentParser:
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-num 2
               python -m scripts.position_analyzer --positions-file .\\data\\options_trades_2026.csv --ib --position-type IC
 
-              # Show a one-row-per-position summary of everything currently held
+              # Show one-row-per-position summaries of everything held and everything closed
               # (current_positions.csv carries the Date In / Quantity Out / Exit Price columns that
               #  entry date and realized P/L are computed from)
               python -m scripts.position_analyzer --positions-file .\\data\\current_positions.csv --ib --show
@@ -902,8 +924,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--show",
-        help="Show a summary table of every currently-held position (one row per position: symbol, "
-        "entry date, cost basis, realized and unrealized P/L). The narrowing filters are ignored.",
+        help="Show summary tables of every position in the CSV -- 'Positions held' and 'Closed "
+        "positions' -- one row per position (symbol, entry date, cost basis, realized and unrealized "
+        "P/L). Either table is omitted when it has no positions. The narrowing filters are ignored.",
         action="store_true",
     )
     return parser
