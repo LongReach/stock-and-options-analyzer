@@ -158,3 +158,22 @@ If the quantity associated with the trade has the same sign as the "Quantity" fi
 If the quantity associated with the trade has the same sign as the "Quantity Out" field of the position in question, the user will be alerted "*** NOTICE: this trade might have already been accounted for as a position exit. ***". However, the notice won't be shown if the "Quantity Out" field's value is 0.
 
 Despite the notices, the user still gets to choose an action, as before. 
+
+##### Step 9 (Complete)
+
+If a trade is marked to be added to the CSV as a new position, without the menu ever appearing, the tool will print information about the new position.
+
+It will look like:
+```
+New position row:
+    Position #: 5
+    Date In: 20260723 10:32:23 US/Eastern
+    Position Type: Iron Condor
+    Symbol: SPY-C-20260821-770.0
+    Quantity: -4
+    Trade Price: 1.61
+    Date Out:
+    Quantity Out: 0
+    Exit Price: 0
+```
+It should be easy to refactor existing code, which already prints this information about existing positions.

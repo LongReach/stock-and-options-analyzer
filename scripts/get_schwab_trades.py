@@ -26,8 +26,9 @@ data/current_positions.csv):
 
 For each trade (processed oldest-first), we match existing rows by Symbol only (dates no longer matter). If no
 row matches the symbol, a new row is created automatically from the trade ("Date In", "Quantity", "Trade Price"
-from the trade; a fresh "Position #"; blank "Position Type"; empty exit fields). If one or more rows match, the
-tool prints the matching row(s) and the trade, then prompts the user to choose what to do:
+from the trade; a fresh "Position #"; blank "Position Type"; empty exit fields) and its fields are printed,
+since no menu appears in that case. If one or more rows match, the tool prints the matching row(s) and the
+trade, then prompts the user to choose what to do:
   1. Add to position    -- "Quantity" += the trade's quantity; "Trade Price" becomes the quantity-weighted
                            average of the old trade price and the trade's price.
   2. Exit/partial exit   -- "Quantity Out" += the trade's quantity; "Exit Price" becomes the quantity-weighted
@@ -141,22 +142,25 @@ def _max_position_num(rows: List[dict]) -> int:
     return highest
 
 
-def _create_new_row(trade: TradeDescriptor, rows: List[dict], next_num: List[int], trade_dt: str):
-    """Appends a fresh position row built from the trade (a brand-new position or an explicit new leg)."""
+def _create_new_row(trade: TradeDescriptor, rows: List[dict], next_num: List[int], trade_dt: str) -> dict:
+    """
+    Appends a fresh position row built from the trade (a brand-new position or an explicit new leg), and returns
+    the row so the caller can display it.
+    """
     next_num[0] += 1
-    rows.append(
-        {
-            COL_POSITION_NUM: str(next_num[0]),
-            COL_DATE_IN: trade_dt,
-            COL_POSITION_TYPE: "",
-            COL_SYMBOL: trade.security_descriptor.symbol_full,
-            COL_QUANTITY: trade.quantity,
-            COL_TRADE_PRICE: round(trade.price, 2),
-            COL_DATE_OUT: "",
-            COL_QUANTITY_OUT: 0,
-            COL_EXIT_PRICE: 0,
-        }
-    )
+    row = {
+        COL_POSITION_NUM: str(next_num[0]),
+        COL_DATE_IN: trade_dt,
+        COL_POSITION_TYPE: "",
+        COL_SYMBOL: trade.security_descriptor.symbol_full,
+        COL_QUANTITY: trade.quantity,
+        COL_TRADE_PRICE: round(trade.price, 2),
+        COL_DATE_OUT: "",
+        COL_QUANTITY_OUT: 0,
+        COL_EXIT_PRICE: 0,
+    }
+    rows.append(row)
+    return row
 
 
 def _weighted_average(old_price: float, old_weight: int, new_price: float, new_weight: int) -> float:
@@ -255,18 +259,21 @@ def _select_target_row(matches: List[dict]) -> Optional[dict]:
 def apply_trade_to_rows(trade: TradeDescriptor, rows: List[dict], next_num: List[int]):
     """
     Reconciles a single trade into the positions rows following the Step 7 rules. If no row matches the trade's
-    symbol, a new row is created automatically. If one or more do, the user is shown the row(s) and the trade
-    and prompted to add to the position, exit/partially exit it, add a new leg, or discard the trade. `next_num`
-    is a one-element list holding the next Position # to hand out (so it survives across calls).
+    symbol, a new row is created automatically and printed (no menu appears, so the printout is the only record
+    the user sees). If one or more do, the user is shown the row(s) and the trade and prompted to add to the
+    position, exit/partially exit it, add a new leg, or discard the trade. `next_num` is a one-element list
+    holding the next Position # to hand out (so it survives across calls).
     """
     symbol = trade.security_descriptor.symbol_full
     trade_dt = get_datetime_as_str(trade.trade_date)
     matches = [row for row in rows if (row.get(COL_SYMBOL) or "").strip() == symbol]
 
-    # No existing row for this symbol -> create one automatically.
+    # No existing row for this symbol -> create one automatically. Since the menu never appears in this case,
+    # show the row that was created so the user can see what went into the CSV unprompted.
     if not matches:
-        _create_new_row(trade, rows, next_num, trade_dt)
-        print(f"  New position added for {symbol} (Position #{next_num[0]}).")
+        new_row = _create_new_row(trade, rows, next_num, trade_dt)
+        print("New position row:")
+        _print_row(new_row)
         return
 
     print(f"\n  Trade matches an existing position by symbol ({symbol}):")
