@@ -65,6 +65,7 @@ async def do_cache(
 ) -> Tuple[Optional[pandas.DataFrame], Optional[str]]:
     """
     Scrapes and caches data for a single stock or ETF.
+
     :param stock_manager:  --
     :param symbol: stock or ETF ticker, e.g. SPY
     :param bar_size: timeframe of data, e.g. 1 day, 1 minute, etc.
@@ -145,12 +146,28 @@ async def show_cache_contents(stock_manager: StockDataManager, bar_size_str: str
         stock_manager.unload_data(symbol, bar_size, info_type)
 
 
+async def show_single_stock_data(stock_manager: StockDataManager, symbol: str, bar_size_str: str, info_type_str: str):
+    bar_size = str_to_bar_size(bar_size_str)
+    info_type = StockData.get_info_type(info_type_str)
+
+    print(f"Loading data for {symbol}...")
+    result = stock_manager.load_data(symbol, bar_size, info_type)
+    if not result:
+        print(f"Could not load data for symbol {symbol}")
+        return
+
+    num_bars, start_dt, end_dt, head_dt = stock_manager.get_metadata(symbol, bar_size, info_type)
+    print(f"Metadata: num_bars {num_bars}, start datetime {start_dt}, end datetime {end_dt}, head timestamp {head_dt}")
+
+    df = stock_manager.get_pandas_df(symbol, bar_size, info_type)
+    print(f"\nDataframe: {df}")
+
+
 async def cache_single_stock(
     stock_manager: StockDataManager,
     symbol: str,
     bar_size_str: str,
     info_type_str: str,
-    info_only: bool,
     force_update: bool,
     limited_scrape: bool,
 ):
@@ -160,40 +177,15 @@ async def cache_single_stock(
     :param symbol: stock or ETF ticker, e.g. SPY
     :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
     :param info_type_str: type of chart data, e.g. trades or implied volatility
-    :param info_only: if True, no scraping will be performed
     :param force_update: force the scraping of most recent data
     :param limited_scrape: if True, only scrape about 200 bars into past
     :return:
     """
-    bar_size = str_to_bar_size(bar_size_str)
-    info_type = StockData.get_info_type(info_type_str)
+    print(f"Scraping {info_type_str} data for {symbol}, {bar_size_str}\n======================================")
 
-    if info_only:
-        print(f"Displaying data for {symbol}, {bar_size_str}\n======================================")
-    else:
-        print(f"Scraping {info_type.value} data for {symbol}, {bar_size_str}\n======================================")
-
-    metadata = stock_manager.get_metadata(symbol, bar_size, info_type)
-    if metadata:
-        num_bars, start_dt, end_dt, head_dt = metadata
-        print(
-            f"Metadata: num bars = {num_bars}, earliest data = {start_dt}, latest data = {end_dt}, head timestamp = {head_dt}"
-        )
-    else:
-        print(f"No metadata for {symbol}, {bar_size_str}")
-
-    scrape_level = ScrapeLevel.FULL
-    if info_only and not force_update:
-        scrape_level = ScrapeLevel.NONE
-    elif limited_scrape:
-        scrape_level = ScrapeLevel.LIMITED
-
-    df, error_str = await do_cache(stock_manager, symbol, bar_size, info_type, scrape_level=scrape_level)
-    if df is not None:
-        print_df(df)
-    if error_str:
-        print(f"Error caching single stock: {error_str}")
-    print()
+    await _cache_multiple_stocks_impl(
+        stock_manager, [symbol], bar_size_str, info_type_str, force_update, limited_scrape
+    )
 
 
 async def cache_multiple_stocks(
@@ -214,11 +206,6 @@ async def cache_multiple_stocks(
     :param limited_scrape: only scrape 200 bars into the past
     :return:
     """
-    bar_size = str_to_bar_size(bar_size_str)
-    info_type = StockData.get_info_type(info_type_str)
-
-    symbols_with_error: Dict[Tuple[str, RequestedInfoType], str] = {}
-
     print(
         f"\nCaching multiple stocks: file path = {file_path}, bar size = {bar_size_str}, info type = {info_type_str}, force update = {force_update}"
     )
@@ -232,6 +219,81 @@ async def cache_multiple_stocks(
                 symbols.append(symbol)
     except FileNotFoundError:
         print(f"Could not find file {file_path}")
+        return
+
+    await _cache_multiple_stocks_impl(stock_manager, symbols, bar_size_str, info_type_str, force_update, limited_scrape)
+
+
+async def remove_single_stock(
+    stock_manager: StockDataManager,
+    symbol: str,
+    bar_size_str: str,
+    info_type_str: str,
+):
+    """
+    Removes a single stock from cache.
+
+    :param stock_manager:  --
+    :param symbol: stock or ETF ticker, e.g. SPY
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    """
+    print(f"Removing stock from cache: symbol is {symbol}, bar size is {bar_size_str}, info type is {info_type_str}")
+    bar_size = str_to_bar_size(bar_size_str)
+    info_type = StockData.get_info_type(info_type_str)
+    stock_manager.clear_data(symbol, bar_size, info_type, remove_from_cache=True)
+
+
+async def remove_multiple_stocks(
+    stock_manager: StockDataManager,
+    file_path: str,
+    bar_size_str: str,
+    info_type_str: str,
+):
+    """
+    Removes a single stock from cache.
+
+    :param stock_manager:  --
+    :param file_path: path to file containing list of stocks to remove
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    """
+    print(f"Removing multiple stocks from cache, given in file {file_path}")
+    symbols: List[str] = []
+    try:
+        with open(file_path, "r") as file:
+            for line in file:
+                symbol = line.strip()
+                symbols.append(symbol)
+    except FileNotFoundError:
+        print(f"Could not find file {file_path}")
+
+    for symbol in symbols:
+        await remove_single_stock(stock_manager, symbol, bar_size_str, info_type_str)
+
+
+async def _cache_multiple_stocks_impl(
+    stock_manager: StockDataManager,
+    symbols: List[str],
+    bar_size_str: str,
+    info_type_str: str,
+    force_update: bool,
+    limited_scrape: bool,
+):
+    """
+    Scrapes and caches data for a set of stocks/ETFs
+    :param stock_manager:  --
+    :param symbols: list of ticker symbols
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    :param force_update: force the scraping of most recent data
+    :param limited_scrape: only scrape 200 bars into the past
+    :return:
+    """
+    bar_size = str_to_bar_size(bar_size_str)
+    info_type = StockData.get_info_type(info_type_str)
+
+    symbols_with_error: Dict[Tuple[str, RequestedInfoType], str] = {}
 
     # Scraping must occur if latest cached data is more than acceptable_recency days in the past
     acceptable_recency = 0 if force_update else GENERAL_ACCEPTABLE_RECENCY[bar_size]
@@ -298,54 +360,6 @@ async def cache_multiple_stocks(
     print()
 
 
-async def remove_single_stock(
-    stock_manager: StockDataManager,
-    symbol: str,
-    bar_size_str: str,
-    info_type_str: str,
-):
-    """
-    Removes a single stock from cache.
-
-    :param stock_manager:  --
-    :param symbol: stock or ETF ticker, e.g. SPY
-    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
-    :param info_type_str: type of chart data, e.g. trades or implied volatility
-    """
-    print(f"Removing stock from cache: symbol is {symbol}, bar size is {bar_size_str}, info type is {info_type_str}")
-    bar_size = str_to_bar_size(bar_size_str)
-    info_type = StockData.get_info_type(info_type_str)
-    stock_manager.clear_data(symbol, bar_size, info_type, remove_from_cache=True)
-
-
-async def remove_multiple_stocks(
-    stock_manager: StockDataManager,
-    file_path: str,
-    bar_size_str: str,
-    info_type_str: str,
-):
-    """
-    Removes a single stock from cache.
-
-    :param stock_manager:  --
-    :param file_path: path to file containing list of stocks to remove
-    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
-    :param info_type_str: type of chart data, e.g. trades or implied volatility
-    """
-    print(f"Removing multiple stocks from cache, given in file {file_path}")
-    symbols: List[str] = []
-    try:
-        with open(file_path, "r") as file:
-            for line in file:
-                symbol = line.strip()
-                symbols.append(symbol)
-    except FileNotFoundError:
-        print(f"Could not find file {file_path}")
-
-    for symbol in symbols:
-        await remove_single_stock(stock_manager, symbol, bar_size_str, info_type_str)
-
-
 async def main(parser: argparse.ArgumentParser):
     """Top-level function, unpacks arguments and calls functions that do the work"""
     args = parser.parse_args()
@@ -354,7 +368,7 @@ async def main(parser: argparse.ArgumentParser):
     basicConfig(filename="cache_data.log", level=INFO)
     stock_manager = StockDataManager()
     data_driver: Optional[BaseDriver] = None
-    if not args.info_only:
+    if not args.show:
         data_driver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
         success = stock_manager.add_driver(data_driver)
         if not success:
@@ -365,7 +379,10 @@ async def main(parser: argparse.ArgumentParser):
 
     try:
         if args.show:
-            await show_cache_contents(stock_manager, args.bar_size, args.info_type)
+            if args.symbol:
+                await show_single_stock_data(stock_manager, args.symbol, args.bar_size, args.info_type)
+            else:
+                await show_cache_contents(stock_manager, args.bar_size, args.info_type)
         elif args.remove:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
@@ -373,12 +390,12 @@ async def main(parser: argparse.ArgumentParser):
                 await remove_single_stock(stock_manager, args.symbol, bar_size, info_type)
             elif args.file:
                 await remove_multiple_stocks(stock_manager, args.file, bar_size, info_type)
+            else:
+                print("No file or symbol given.")
         elif args.symbol:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
-            await cache_single_stock(
-                stock_manager, args.symbol, bar_size, info_type, args.info_only, args.update, args.limited
-            )
+            await cache_single_stock(stock_manager, args.symbol, bar_size, info_type, args.update, args.limited)
         elif args.file:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
@@ -450,9 +467,10 @@ parser.add_argument(
     default=None,
     type=str,
 )
-parser.add_argument("--info-only", help="Don't do any scraping, just show info", action="store_true")
 parser.add_argument(
-    "--show", help="Show what data is in cache. Use --bar-size or --info-type to narrow it down.", action="store_true"
+    "--show",
+    help="Show what data is in cache. Use --bar-size or --info-type to narrow it down. Use --symbol to show info for single stock.",
+    action="store_true",
 )
 parser.add_argument(
     "--remove",
