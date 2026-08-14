@@ -272,6 +272,66 @@ async def remove_multiple_stocks(
         await remove_single_stock(stock_manager, symbol, bar_size_str, info_type_str)
 
 
+async def clean_single_stock(
+    stock_manager: StockDataManager,
+    symbol: str,
+    bar_size_str: str,
+    info_type_str: str,
+    num_bars: int,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Deletes the last N bars of cached stock data.
+
+    :param stock_manager:  --
+    :param symbol: stock or ETF ticker, e.g. SPY
+    :param bar_size_str: timeframe of data, e.g. 1 day, 1 minute, etc.
+    :param info_type_str: type of chart data, e.g. trades or implied volatility
+    :param num_bars: number of bars to redo
+    :return: (True if success, error message or None)
+    """
+    print(
+        f"Deleting last {num_bars} of stock from cache: symbol is {symbol}, bar size is {bar_size_str}, info type is {info_type_str}"
+    )
+    bar_size = str_to_bar_size(bar_size_str)
+    info_type = StockData.get_info_type(info_type_str)
+    success = stock_manager.load_data(symbol, bar_size, info_type)
+    if not success:
+        return False, f"Failed to load data for {symbol}"
+    stock_manager.remove_data(symbol, bar_size, info_type=info_type, num_bars=num_bars)
+    stock_manager.save_data(symbol, bar_size, info_type)
+    stock_manager.unload_data(symbol, bar_size, info_type)
+    return True, None
+
+
+async def clean_multiple_stocks(
+    stock_manager: StockDataManager,
+    file_path: str,
+    bar_size_str: str,
+    info_type_str: str,
+    num_bars: int,
+):
+    """Same idea as redo_single_stock(), but for multiple stocks."""
+    print(f"Cleaning multiple stocks in cache, given in file {file_path}")
+    symbols: List[str] = []
+    try:
+        with open(file_path, "r") as file:
+            for line in file:
+                symbol = line.strip()
+                symbols.append(symbol)
+    except FileNotFoundError:
+        print(f"Could not find file {file_path}")
+
+    error_count = 0
+    for symbol in symbols:
+        success, error_msg = await clean_single_stock(stock_manager, symbol, bar_size_str, info_type_str, num_bars)
+        if not success:
+            print(f"Error with {symbol}: {error_msg}")
+            error_count += 1
+            if error_count >= MAX_ERRORS_ALLOWED:
+                print("Too many errors, ending redo procedure")
+                break
+
+
 async def _cache_multiple_stocks_impl(
     stock_manager: StockDataManager,
     symbols: List[str],
@@ -392,6 +452,11 @@ async def main(parser: argparse.ArgumentParser):
                 await remove_multiple_stocks(stock_manager, args.file, bar_size, info_type)
             else:
                 print("No file or symbol given.")
+        elif args.clean > 0:
+            if args.symbol:
+                await clean_single_stock(stock_manager, args.symbol, args.bar_size, args.info_type, args.clean)
+            else:
+                await clean_multiple_stocks(stock_manager, args.file, args.bar_size, args.info_type, args.clean)
         elif args.symbol:
             bar_size = args.bar_size or "1d"
             info_type = args.info_type or "tr"
@@ -476,6 +541,13 @@ parser.add_argument(
     "--remove",
     help="Remove symbol(s) from cache. Requires --symbol for single symbol, --file for list of symbols to remove.",
     action="store_true",
+)
+parser.add_argument(
+    "--clean",
+    help="Deletes last N bars of symbol(s) in cache. Requires --symbol for single symbol, --file for list of symbols to clean.",
+    required=False,
+    default=0,
+    type=int,
 )
 parser.add_argument(
     "--update",

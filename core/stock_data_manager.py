@@ -144,6 +144,17 @@ class StockDataManager:
             with self._cache_lock:
                 stock_data.delete_from_db(self._db_path)
 
+    def remove_data(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        num_bars: int = 10,
+    ):
+        """Remove some number of bars of most recent data"""
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data.remove_data(num_bars)
+
     async def scrape_data(
         self,
         symbol: str,

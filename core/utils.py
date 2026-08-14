@@ -180,6 +180,8 @@ def align_datetime_to_bar_boundary(dt: Union[datetime, str], bar_size: BarSize) 
     :param bar_size: daily, weekly, etc.
     :return: datetime or IB-style datetime string, depending on what was passed in
     """
+    if dt is None:
+        return None
 
     got_as_str = False
     if isinstance(dt, str):
