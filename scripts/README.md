@@ -124,6 +124,12 @@ python -m scripts.cache_data --file .\data\optionable.txt --db .\data\iv_data.h5
 python -m scripts.cache_earnings --db data/earnings_data.h5 --file data/optionable.txt
 ```
 
+Convert a cache written by an older version (one HDF5 key per ticker) into the current
+compact layout, without re-scraping. Source and destination must be different files.
+```powershell
+python -m scripts.cache_earnings --db data/earnings_slim.h5 --migrate data/earnings_data.h5
+```
+
 ### Create positions CSV
 
 Initial creation. You then have to edit the resulting file and make legs of same position have a common position number, as well as designate the position type.

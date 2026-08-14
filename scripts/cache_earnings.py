@@ -5,6 +5,7 @@ Run `python -m scripts.cache_earnings --help` for the full instruction manual.
 """
 
 import argparse
+import os
 import textwrap
 from datetime import date, timedelta
 
@@ -69,6 +70,24 @@ def show_data(earnings_manager: EarningsManager, symbol: str):
     print(display.to_string())
 
 
+def migrate(earnings_manager: EarningsManager, legacy_path: str, db_path: str):
+    """Imports a cache written in the old one-key-per-ticker layout into the new single-key one."""
+    if os.path.abspath(legacy_path) == os.path.abspath(db_path):
+        print("--migrate source and --db must be different files.")
+        return
+
+    print(f"Importing {legacy_path} -> {db_path} ...")
+    rows = earnings_manager.migrate_legacy(legacy_path)
+    if not rows:
+        print("Nothing imported.")
+        return
+
+    old_mb = os.path.getsize(legacy_path) / 1024**2
+    new_mb = os.path.getsize(db_path) / 1024**2
+    print(f"Imported {rows} rows for {len(earnings_manager.get_cached_tickers())} tickers.")
+    print(f"{old_mb:.1f} MB -> {new_mb:.2f} MB")
+
+
 def main(parser: argparse.ArgumentParser):
     today = date.today()
     args = parser.parse_args()
@@ -84,6 +103,8 @@ def main(parser: argparse.ArgumentParser):
             show_data(manager, args.symbol)
         else:
             show_contents(manager)
+    elif args.migrate:
+        migrate(manager, args.migrate, args.db)
     elif args.file:
         tickers = _load_tickers(args.file)
         if not tickers:
@@ -123,10 +144,14 @@ parser = argparse.ArgumentParser(
           # Show cached earnings entries for a single symbol
           python -m scripts.cache_earnings --db data/earnings_data.h5 --show --symbol SPY
 
+          # Convert a cache written by an older version into the compact layout
+          python -m scripts.cache_earnings --db data/earnings_slim.h5 --migrate data/earnings_data.h5
+
         Notes:
           * --start / --end take dates in YYYYMMDD format.
           * --file is required to scrape; --show reads the existing cache instead.
           * --symbol only applies together with --show.
+          * --migrate writes into --db, which must be a different file from the source.
         """),
 )
 parser.add_argument("--db", required=True, help="Path to .h5 database file")
@@ -136,6 +161,9 @@ parser.add_argument("--end", default=None, help="End date in YYYYMMDD format (de
 parser.add_argument("--show", help="Show contents of cache. Can be paired with --symbol.", action="store_true")
 parser.add_argument(
     "--symbol", default=None, help="If given, show earnings info for particular symbol. Must be paired with --show."
+)
+parser.add_argument(
+    "--migrate", default=None, help="Path to an old-format .h5 file to import into --db (no re-scraping needed)"
 )
 
 main(parser)
