@@ -168,6 +168,53 @@ def non_naive_datetime(dt: datetime) -> datetime:
     return dt.replace(tzinfo=ZoneInfo(MARKETS_TIMEZONE))
 
 
+def align_datetime_to_bar_boundary(dt: Union[datetime, str], bar_size: BarSize) -> Union[datetime, str]:
+    """
+    Given an arbitrary datetime, align it to the nearest bar boundary (daily, weekly, etc.). The new datetime
+    will align with the END of the bar that it falls within.
+
+    For now, this functionality will only make sense with data sourced from Interactive Brokers. We'll worry
+    about Schwab later.
+
+    :param dt: datetime or IB-style datetime string
+    :param bar_size: daily, weekly, etc.
+    :return: datetime or IB-style datetime string, depending on what was passed in
+    """
+    if dt is None:
+        return None
+
+    got_as_str = False
+    if isinstance(dt, str):
+        dt = get_datetime(dt)
+        got_as_str = True
+
+    align_to_4pm = False
+    if bar_size == BarSize.ONE_WEEK:
+        # A weekly bar ends on Friday, so anything mid-week belongs to the bar closing on the Friday that
+        # follows it. A datetime already on a Friday is on the boundary and stays put. Note that weekday()
+        # counts Monday as 0, so Friday is 4.
+        friday = 4
+        days_until_friday = (friday - dt.weekday()) % 7
+        dt = dt + timedelta(days=days_until_friday)
+        align_to_4pm = True
+    elif bar_size == BarSize.ONE_DAY:
+        # A daily bar ends at the 4:00pm market close on the same date.
+        align_to_4pm = True
+    else:
+        # For now, other bar sizes pass through untouched
+        pass
+
+    if align_to_4pm:
+        dt = dt.replace(hour=16, minute=0, second=0, microsecond=0)
+        if dt.tzinfo is None:
+            # A naive datetime isn't Eastern until we say so
+            dt = non_naive_datetime(dt)
+
+    if got_as_str:
+        return get_datetime_as_str(dt)
+    return dt
+
+
 @asynccontextmanager
 async def lock_with_timeout(lock: asyncio.Lock, timeout: float):
     """

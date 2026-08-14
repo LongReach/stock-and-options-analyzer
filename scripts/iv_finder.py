@@ -239,10 +239,11 @@ async def main(parser: ArgumentParser):
     stock_manager = StockDataManager()
     stock_manager.set_db_path(DB_PATH)
     data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
-    success = stock_manager.add_driver(data_driver)
-    if not success:
-        print("Error connecting to broker data")
-        return
+    if not args.cache_only:
+        success = stock_manager.add_driver(data_driver)
+        if not success:
+            print("Error connecting to broker data")
+            return
     stock_manager.set_log_to_stdout(True)
 
     options_manager = OptionDataManager()
