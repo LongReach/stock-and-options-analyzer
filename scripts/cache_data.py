@@ -372,7 +372,7 @@ async def _cache_multiple_stocks_impl(
                     if num_bars >= NUM_ACCEPTABLE_BARS and bars_missing_until_now <= acceptable_recency:
                         # No need to cache. Data is fresh enough
                         print(
-                            f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data ending on {latest_dt}"
+                            f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data ending on {latest_dt}. Head timestamp is {head_dt}."
                         )
                         continue
                 else:

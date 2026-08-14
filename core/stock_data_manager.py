@@ -73,7 +73,7 @@ class StockDataManager:
         info_type: RequestedInfoType = RequestedInfoType.TRADES,
     ) -> bool:
         """
-        Creates a StockData object, attempts to load data from the HDF5 database. Also
+        Creates a StockData object, attempts to load data from the HDF5 database.
 
         :param symbol: e.g. "AAPL"
         :param bar_size: --
@@ -83,6 +83,7 @@ class StockDataManager:
         self._log(f"Loading data for {symbol}, {bar_size.name} from {self._db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         with self._cache_lock:
+            stock_data.load_metadata_from_db(self._db_path)
             return stock_data.load_from_db(self._db_path)
 
     async def load_data_async(
