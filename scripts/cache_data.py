@@ -379,7 +379,7 @@ async def _cache_multiple_stocks_impl(
                     # Does earliest data we actually have precede/match adjusted head timestamp?
                     adjusted_head_dt = StockDataManager.get_adjusted_head_timestamp(head_dt, bar_size)
                     head_timestamp_matched = earliest_dt <= adjusted_head_dt
-                    if head_timestamp_matched and bars_missing_until_now <= acceptable_recency:
+                    if head_timestamp_matched and bars_missing_until_now < acceptable_recency:
                         print(
                             f"Data scrape unnecessary for {symbol}. Have {num_bars} bars of data beginning on {earliest_dt} and ending on {latest_dt}"
                         )
