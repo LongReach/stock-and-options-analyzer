@@ -26,8 +26,9 @@ data/current_positions.csv):
 
 For each trade (processed oldest-first), we match existing rows by Symbol only (dates no longer matter). If no
 row matches the symbol, a new row is created automatically from the trade ("Date In", "Quantity", "Trade Price"
-from the trade; a fresh "Position #"; blank "Position Type"; empty exit fields). If one or more rows match, the
-tool prints the matching row(s) and the trade, then prompts the user to choose what to do:
+from the trade; a fresh "Position #"; blank "Position Type"; empty exit fields) and its fields are printed,
+since no menu appears in that case. If one or more rows match, the tool prints the matching row(s) and the
+trade, then prompts the user to choose what to do:
   1. Add to position    -- "Quantity" += the trade's quantity; "Trade Price" becomes the quantity-weighted
                            average of the old trade price and the trade's price.
   2. Exit/partial exit   -- "Quantity Out" += the trade's quantity; "Exit Price" becomes the quantity-weighted
@@ -36,6 +37,9 @@ tool prints the matching row(s) and the trade, then prompts the user to choose w
   3. New leg            -- a new row is created from the trade (as in the no-match case).
   4. Do nothing         -- the trade is discarded.
 (When more than one row matches the symbol, the user is first asked which row the choice applies to.)
+Before the menu, advisory notices appear when the trade's quantity shares a sign with the row's "Quantity" (it
+may already be counted as an entry) or with its "Quantity Out" (it may already be counted as an exit). They do
+not change the available choices.
 Datetimes we write use IB-style datetimes with a time, e.g. "20260513 09:30:00 US/Eastern". Rows are written
 back ordered by "Position #".
 
@@ -138,22 +142,25 @@ def _max_position_num(rows: List[dict]) -> int:
     return highest
 
 
-def _create_new_row(trade: TradeDescriptor, rows: List[dict], next_num: List[int], trade_dt: str):
-    """Appends a fresh position row built from the trade (a brand-new position or an explicit new leg)."""
+def _create_new_row(trade: TradeDescriptor, rows: List[dict], next_num: List[int], trade_dt: str) -> dict:
+    """
+    Appends a fresh position row built from the trade (a brand-new position or an explicit new leg), and returns
+    the row so the caller can display it.
+    """
     next_num[0] += 1
-    rows.append(
-        {
-            COL_POSITION_NUM: str(next_num[0]),
-            COL_DATE_IN: trade_dt,
-            COL_POSITION_TYPE: "",
-            COL_SYMBOL: trade.security_descriptor.symbol_full,
-            COL_QUANTITY: trade.quantity,
-            COL_TRADE_PRICE: round(trade.price, 2),
-            COL_DATE_OUT: "",
-            COL_QUANTITY_OUT: 0,
-            COL_EXIT_PRICE: 0,
-        }
-    )
+    row = {
+        COL_POSITION_NUM: str(next_num[0]),
+        COL_DATE_IN: trade_dt,
+        COL_POSITION_TYPE: "",
+        COL_SYMBOL: trade.security_descriptor.symbol_full,
+        COL_QUANTITY: trade.quantity,
+        COL_TRADE_PRICE: round(trade.price, 2),
+        COL_DATE_OUT: "",
+        COL_QUANTITY_OUT: 0,
+        COL_EXIT_PRICE: 0,
+    }
+    rows.append(row)
+    return row
 
 
 def _weighted_average(old_price: float, old_weight: int, new_price: float, new_weight: int) -> float:
@@ -197,6 +204,28 @@ def _print_trade(trade: TradeDescriptor, trade_dt: str):
     print(f"    Datetime: {trade_dt}")
 
 
+def _same_sign(first: int, second: int) -> bool:
+    """True when both values are non-zero and point the same way (zero has no sign, so it never matches)."""
+    return first > 0 and second > 0 or first < 0 and second < 0
+
+
+def _print_notices(row: dict, trade: TradeDescriptor):
+    """
+    Warns when the trade looks like it may already be reflected in the row, so the user doesn't double-count it.
+
+    A trade whose quantity has the same sign as the row's "Quantity" moves the entry in the direction the entry
+    was already built, which is what a re-imported entry fill would look like; likewise for "Quantity Out" and
+    exits. Both notices can fire at once. Neither blocks the menu -- they are advisory, and the user still picks
+    the action.
+    """
+    trade_qty = trade.quantity
+    if _same_sign(trade_qty, _to_int(row.get(COL_QUANTITY))):
+        print("    *** NOTICE: this trade might have already been accounted for as a position entry. ***")
+    # A zero "Quantity Out" means nothing has been exited yet, so there is nothing to have double-counted.
+    if _same_sign(trade_qty, _to_int(row.get(COL_QUANTITY_OUT))):
+        print("    *** NOTICE: this trade might have already been accounted for as a position exit. ***")
+
+
 def _prompt(message: str, valid: set) -> str:
     """Prompts until the user enters one of the valid responses (matched case-insensitively, trimmed)."""
     while True:
@@ -230,18 +259,21 @@ def _select_target_row(matches: List[dict]) -> Optional[dict]:
 def apply_trade_to_rows(trade: TradeDescriptor, rows: List[dict], next_num: List[int]):
     """
     Reconciles a single trade into the positions rows following the Step 7 rules. If no row matches the trade's
-    symbol, a new row is created automatically. If one or more do, the user is shown the row(s) and the trade
-    and prompted to add to the position, exit/partially exit it, add a new leg, or discard the trade. `next_num`
-    is a one-element list holding the next Position # to hand out (so it survives across calls).
+    symbol, a new row is created automatically and printed (no menu appears, so the printout is the only record
+    the user sees). If one or more do, the user is shown the row(s) and the trade and prompted to add to the
+    position, exit/partially exit it, add a new leg, or discard the trade. `next_num` is a one-element list
+    holding the next Position # to hand out (so it survives across calls).
     """
     symbol = trade.security_descriptor.symbol_full
     trade_dt = get_datetime_as_str(trade.trade_date)
     matches = [row for row in rows if (row.get(COL_SYMBOL) or "").strip() == symbol]
 
-    # No existing row for this symbol -> create one automatically.
+    # No existing row for this symbol -> create one automatically. Since the menu never appears in this case,
+    # show the row that was created so the user can see what went into the CSV unprompted.
     if not matches:
-        _create_new_row(trade, rows, next_num, trade_dt)
-        print(f"  New position added for {symbol} (Position #{next_num[0]}).")
+        new_row = _create_new_row(trade, rows, next_num, trade_dt)
+        print("New position row:")
+        _print_row(new_row)
         return
 
     print(f"\n  Trade matches an existing position by symbol ({symbol}):")
@@ -255,6 +287,7 @@ def apply_trade_to_rows(trade: TradeDescriptor, rows: List[dict], next_num: List
 
     print("  Matching position row:")
     _print_row(target)
+    _print_notices(target, trade)
     print("  Choose an action:")
     print("    1. Add to position (increase Quantity, average Trade Price)")
     print("    2. Exit / partially exit (increase Quantity Out, average Exit Price, set Date Out)")

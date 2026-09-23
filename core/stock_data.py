@@ -168,7 +168,7 @@ class StockData:
 
     def save_to_db(self, db_path: str = DB_PATH) -> bool:
         """
-        Saves data to the HDF5 database.
+        Saves data to the HDF5 database. Also saves metadata.
         :param db_path: path to the HDF5 file
         :return: True if data was saved successfully
         """
@@ -212,6 +212,15 @@ class StockData:
         except Exception:
             _logger.warning(f"Couldn't delete key {key} from {db_path}")
             return False
+
+    def remove_data(self, num_bars: int):
+        """
+        Removes bars of data from the end of stored data
+        :param num_bars:
+        :return:
+        """
+        self._price_and_vol_df = self._price_and_vol_df.iloc[: len(self._price_and_vol_df) - num_bars]
+        self._build_metadata()
 
     @property
     def symbol(self) -> str:
@@ -273,6 +282,7 @@ class StockData:
             current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[0]["date"])
         )
         latest_dt = current_datetime() if num_bars == 0 else non_naive_datetime(self._price_and_vol_df.iloc[-1]["date"])
+        # Use existing head date, if the head_date property retrieves it, else set to nonsense date
         head_dt = self.head_date or self.far_future_date
         self._metadata_df: pd.DataFrame = pd.DataFrame(
             {"earliest_date": [earliest_dt], "latest_date": [latest_dt], "bars": [num_bars], "head_date": [head_dt]}

@@ -14,6 +14,7 @@ from core.utils import (
     get_datetime_as_str,
     current_datetime,
     non_naive_datetime,
+    align_datetime_to_bar_boundary,
 )
 from core.stock_data import StockData, StockDataException, DB_PATH
 from core.base_driver import BaseDriver
@@ -23,11 +24,22 @@ _logger = logging.getLogger(__name__)
 
 class StockDataManager:
     """
-    Keeps track of stock data for any number of symbols (e.g. AAPL)
+    Keeps track of stock data for any number of symbols (e.g. AAPL). Data is cached in an .h5 file on disk. For each
+    symbol, the database can hold bars of various specific durations (e.g. daily, weekly, five-minute, etc.), for
+    various types of data (trade price, implied volatility, etc.). There are several scrape() functions for pulling
+    data from the broker, if not yet present in cache.
+
+    The database also contains metadata, entries that, for each symbol, bar size, data type combo, provide a quick
+    lookup for number of bars in cache, start date of cached data, end date of cached data, head timestamp)
     """
 
+    # How many bars to fetch per tranch of scraped data
     BARS_PER_SCRAPE = 50
+    # Seconds to pause between tranches
     TIME_BETWEEN_SCRAPES = 0.2
+    # When getting recent data, smart_scrape() will redo the last n bars in the cache. This is because some bars in the
+    # cached data might have been captured midway through the day or week.
+    BARS_TO_REDO = 5
 
     def __init__(self):
         self._data_map: Dict[Tuple[str, BarSize, RequestedInfoType], StockData] = {}
@@ -62,6 +74,7 @@ class StockDataManager:
     ) -> bool:
         """
         Creates a StockData object, attempts to load data from the HDF5 database.
+
         :param symbol: e.g. "AAPL"
         :param bar_size: --
         :param info_type: --
@@ -70,6 +83,7 @@ class StockDataManager:
         self._log(f"Loading data for {symbol}, {bar_size.name} from {self._db_path}")
         stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
         with self._cache_lock:
+            stock_data.load_metadata_from_db(self._db_path)
             return stock_data.load_from_db(self._db_path)
 
     async def load_data_async(
@@ -131,6 +145,17 @@ class StockDataManager:
             with self._cache_lock:
                 stock_data.delete_from_db(self._db_path)
 
+    def remove_data(
+        self,
+        symbol: str,
+        bar_size: BarSize,
+        info_type: RequestedInfoType = RequestedInfoType.TRADES,
+        num_bars: int = 10,
+    ):
+        """Remove some number of bars of most recent data"""
+        stock_data = self._get_stock_data(symbol, bar_size, info_type, add_if_missing=True)
+        stock_data.remove_data(num_bars)
+
     async def scrape_data(
         self,
         symbol: str,
@@ -158,6 +183,7 @@ class StockDataManager:
         _, _, _, head_dt = meta_data
         if head_dt is None:
             head_dt = await self._data_driver.get_head_timestamp(symbol, info_type)
+            head_dt = align_datetime_to_bar_boundary(head_dt, bar_size)
             stock_data.head_date = head_dt
 
         info_str = f"Scraping data for {symbol}, {bar_size.name}, {info_type.name}. start_date='{start_date}', end_date='{end_date}'"
@@ -168,6 +194,7 @@ class StockDataManager:
         if start_date == "":
             raise StockDataException("Need start date for data scraping")
         start_dt = get_datetime(start_date)
+        start_dt = align_datetime_to_bar_boundary(start_dt, bar_size) - bar_size_to_time(bar_size)
 
         if end_date == "":
             end_dt = current_datetime()
@@ -177,6 +204,7 @@ class StockDataManager:
         else:
             end_dt = get_datetime(end_date)
             first_scrape_no_end_date = False
+        end_dt = align_datetime_to_bar_boundary(end_dt, bar_size)
 
         # Work backwards through time, getting BARS_PER_SCRAPE at a time. We're doing this because IB can refuse requests for
         # too much data at once.
@@ -262,13 +290,14 @@ class StockDataManager:
             return await self.scrape_data(symbol, bar_size, info_type, start_date, end_date)
 
         # Oldest date for which there's data
-        oldest_dt: datetime = df.iloc[0]["date"].to_pydatetime()
-        oldest_dt = non_naive_datetime(oldest_dt)
+        oldest_dt_in_cache: datetime = df.iloc[0]["date"].to_pydatetime()
+        oldest_dt_in_cache = non_naive_datetime(oldest_dt_in_cache)
         # Newest date for which there's data
-        newest_dt = df.iloc[-1]["date"].to_pydatetime()
-        newest_dt = non_naive_datetime(newest_dt)
+        newest_dt_in_cache = df.iloc[-1]["date"].to_pydatetime()
+        newest_dt_in_cache = non_naive_datetime(newest_dt_in_cache)
 
         # First, focus on obtaining data that's older than currently cached data
+        # ------------------------------------------
         if start_date == "":
             start_dt = None
         else:
@@ -282,14 +311,15 @@ class StockDataManager:
                 start_date = get_datetime_as_str(start_dt)
 
         # Scrape data that's older than already-loaded data
-        if start_dt is not None and start_dt < oldest_dt:
+        if start_dt is not None and start_dt < oldest_dt_in_cache:
             success, error_str = await self.scrape_data(
-                symbol, bar_size, info_type, start_date, get_datetime_as_str(oldest_dt)
+                symbol, bar_size, info_type, start_date, get_datetime_as_str(oldest_dt_in_cache)
             )
             if not success:
                 return success, error_str
 
         # Second, focus on obtaining data that's newer than currently cached data
+        # ------------------------------------------
 
         if end_date == "":
             end_dt = None
@@ -297,13 +327,13 @@ class StockDataManager:
             end_dt = get_datetime(end_date)
 
         # Scrape data that's newer than already-loaded data
-        if (end_dt is not None and end_dt > newest_dt) or update_recent:
+        if (end_dt is not None and end_dt > newest_dt_in_cache) or update_recent:
             end_date_str = "" if end_dt is None else get_datetime_as_str(end_dt)
             success, error_str = await self.scrape_data(
                 symbol,
                 bar_size,
                 info_type,
-                start_date=get_datetime_as_str(newest_dt + bar_size_to_time(bar_size)),
+                start_date=get_datetime_as_str(newest_dt_in_cache - bar_size_to_time(bar_size) * self.BARS_TO_REDO),
                 end_date=end_date_str,
             )
             if not success:

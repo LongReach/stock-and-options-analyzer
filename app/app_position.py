@@ -5,7 +5,7 @@ from threading import Lock
 from logging import getLogger
 from zoneinfo import ZoneInfo
 
-from core.common import SecurityDescriptor, OrderInfo
+from core.common import SecurityDescriptor, OrderInfo, HistoricalData
 from core.base_driver import BaseDriver
 
 
@@ -41,6 +41,8 @@ class AppPosition:
         self.out_quantity: int = 0
         self.average_entry_price: float = 0.0
         self.average_exit_price: float = 0.0
+
+        self.historical_data: Optional[HistoricalData] = None
 
         self.long_stop_order: Optional[OrderInfo] = None
         self.long_limit_order: Optional[OrderInfo] = None
