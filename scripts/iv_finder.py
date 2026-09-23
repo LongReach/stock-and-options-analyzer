@@ -239,10 +239,11 @@ async def main(parser: ArgumentParser):
     stock_manager = StockDataManager()
     stock_manager.set_db_path(DB_PATH)
     data_driver: BaseDriver = IBDriver.create(sim_account=True, client_id=CLIENT_ID)
-    success = stock_manager.add_driver(data_driver)
-    if not success:
-        print("Error connecting to broker data")
-        return
+    if not args.cache_only:
+        success = stock_manager.add_driver(data_driver)
+        if not success:
+            print("Error connecting to broker data")
+            return
     stock_manager.set_log_to_stdout(True)
 
     options_manager = OptionDataManager()
@@ -278,7 +279,7 @@ async def main(parser: ArgumentParser):
                 above=iv_rank_should_be_above,
                 earnings_window=earnings_window,
                 earnings_after=after,
-                no_scrape=args.info_only,
+                no_scrape=args.cache_only,
             )
         elif args.symbol is not None:
             await get_single_stock_data(
@@ -287,7 +288,7 @@ async def main(parser: ArgumentParser):
                 args.symbol,
                 args.dte,
                 args.date,
-                no_scrape=args.info_only,
+                no_scrape=args.cache_only,
                 delta=args.delta,
                 strike=args.strike,
                 move=args.move,
@@ -345,7 +346,7 @@ parser = ArgumentParser(
           * --earnings-after / --earnings-before filter by days until earnings, and
             may be used on their own (without --above/--below) to filter by earnings only.
           * --date (YYYYMMDD) overrides --dte when both are given.
-          * --info-only uses cached data only and performs no scraping.
+          * --cache-only uses cached data only and performs no scraping.
         """),
 )
 parser.add_argument(
@@ -411,7 +412,7 @@ parser.add_argument(
     default=None,
     type=float,
 )
-parser.add_argument("--info-only", help="don't do any scraping, just show info", action="store_true")
+parser.add_argument("--cache-only", help="don't do any scraping, just show info", action="store_true")
 parser.add_argument("--move", help="show expected move (symbol and dte/date must be given)", action="store_true")
 
 

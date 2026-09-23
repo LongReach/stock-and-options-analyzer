@@ -198,7 +198,8 @@ class BaseDriver(ABC):
         :param quantity: number of shares/contracts
         :param price: desired price (for limit or stop orders)
         :param order_type: market, limit, stop, or stop limit
-        :param transmit: if True, transmit this order (and any pending parent orders) to broker
+        :param transmit: if True, transmit this order (and any pending parent orders) to broker. Same
+            with previously-placed orders for which transmit was False.
         :param parent_order: parent order for bracket/attached orders
         :return: (OrderInfo, error string or None)
         """
