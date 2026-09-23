@@ -78,6 +78,7 @@ POSITION_TYPE_MAP = {
     "TCAL": "Triple Calendar",
     "DIAG": "Diagonal",
     "DDIAG": "Double Diagonal",
+    "BFLY": "Butterfly Spread",
 }
 
 # Output column names, in display order
